@@ -10,6 +10,8 @@ mod tests;
 mod tracking;
 mod tracking_models;
 mod tracking_queries;
+#[cfg(test)]
+mod tracking_tests;
 use models::Snapshot;
 use registry::Registry;
 use std::{

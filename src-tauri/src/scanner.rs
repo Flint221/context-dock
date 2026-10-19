@@ -1,4 +1,4 @@
-use crate::models::{key, now};
+use crate::models::key;
 use std::{fs, path::Path};
 use walkdir::{DirEntry, WalkDir};
 pub struct Observed {
@@ -118,9 +118,6 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
         });
     }
     Ok(scan)
-}
-pub fn observed_at() -> String {
-    now()
 }
 #[cfg(windows)]
 pub fn explorer_path(path: &str) -> String {
