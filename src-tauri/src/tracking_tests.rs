@@ -339,7 +339,7 @@ fn changed_old_source_and_destination_collisions_never_move_or_overwrite() {
 #[test]
 fn capture_recovers_before_and_after_finalization_without_duplicate_versions() {
     for phase in 0..3 {
-        let mut f = Fixture::new(&[("Master.md", "durable bytes")]);
+        let f = Fixture::new(&[("Master.md", "durable bytes")]);
         let sid = f.r.source_ids(&f.project).unwrap().remove(0);
         let source = f.r.source(&sid).unwrap();
         let root = PathBuf::from(f.r.path(&f.project).unwrap());

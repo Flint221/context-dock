@@ -147,7 +147,15 @@ pub struct Staged {
 pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     let source = checked(root, relative, false)?;
     let first = fs::metadata(&source.path).map_err(io)?;
-    std::thread::sleep(Duration::from_millis(if cfg!(test) { 5 } else { 650 }));
+    let quiet = Duration::from_millis(if cfg!(test) { 5 } else { 650 });
+    if first
+        .modified()
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_none_or(|age| age < quiet)
+    {
+        std::thread::sleep(quiet);
+    }
     let mut file = locked_read(&source.path, false)?;
     let before = file.metadata().map_err(io)?;
     if first.len() != before.len() || stamp(&first) != stamp(&before) {
@@ -208,9 +216,18 @@ pub fn snapshot_finalize(
         fs::hard_link(&temp_path.path, &final_path.path).map_err(io)?;
     }
     verify(&final_path.path, expected)?;
-    locked_read(&final_path.path, false)?
-        .sync_all()
-        .map_err(io)?;
+    if !fs::metadata(&final_path.path)
+        .map_err(io)?
+        .permissions()
+        .readonly()
+    {
+        OpenOptions::new()
+            .write(true)
+            .open(&final_path.path)
+            .map_err(io)?
+            .sync_all()
+            .map_err(io)?;
+    }
     Ok(())
 }
 pub fn snapshot_seal(store: &Path, temp: &str, final_relative: &str) -> Result<()> {
@@ -219,7 +236,18 @@ pub fn snapshot_seal(store: &Path, temp: &str, final_relative: &str) -> Result<(
     if same_file::is_same_file(&temp_path.path, &final_path.path).unwrap_or(false) {
         fs::remove_file(&temp_path.path).map_err(io)?;
     }
-    let f = locked_read(&final_path.path, false)?;
+    if fs::metadata(&final_path.path)
+        .map_err(io)?
+        .permissions()
+        .readonly()
+    {
+        return Ok(());
+    }
+    let f = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&final_path.path)
+        .map_err(io)?;
     let mut p = f.metadata().map_err(io)?.permissions();
     p.set_readonly(true);
     f.set_permissions(p).map_err(io)?;
@@ -264,7 +292,6 @@ pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {
     if ok == 0 {
         return Err(format!("Safe archive rename failed (including cross-volume or sharing conflicts): {}. Source was not deleted.",std::io::Error::last_os_error()));
     }
-    file.sync_all().map_err(io)?;
     Ok(())
 }
 #[cfg(not(windows))]
@@ -307,7 +334,12 @@ pub fn archive_copy(
     verify(&temp.path, expected)?;
     fs::hard_link(&temp.path, &dest.path).map_err(io)?;
     verify(&dest.path, expected)?;
-    locked_read(&dest.path, false)?.sync_all().map_err(io)?;
+    OpenOptions::new()
+        .write(true)
+        .open(&dest.path)
+        .map_err(io)?
+        .sync_all()
+        .map_err(io)?;
     Ok(())
 }
 pub fn cleanup_archive_temp(root: &Path, temp_relative: &str, dest_relative: &str) {
