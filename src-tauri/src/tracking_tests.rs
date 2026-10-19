@@ -584,3 +584,74 @@ fn archive_edits_do_not_change_snapshots_and_snapshot_collisions_are_non_destruc
         "original Ω"
     );
 }
+#[test]
+fn pending_archives_resume_only_after_explicit_permission_and_recovery_rejects_unowned_bytes() {
+    let mut f = Fixture::new(&[("Master_v1.md", "one")]);
+    f.enable(true);
+    f.prepare_replacement("Master_v1.md", "Master_v2.md", "two");
+    let (_, plan) = f.pending_archive();
+    f.r.configure_tracking(&f.project, true, false, vec![])
+        .unwrap();
+    assert!(f.r.recover_operations(&f.project, true).unwrap().is_empty());
+    assert!(f.root.join("Master_v1.md").exists());
+    // A matching hash alone at an unexpected destination is not ownership evidence.
+    let dest = f.root.join(&plan.destination);
+    fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    fs::write(&dest, "one").unwrap();
+    fs::rename(
+        f.root.join("Master_v1.md"),
+        f.root.join("externally-moved.md"),
+    )
+    .unwrap();
+    f.r.configure_tracking(&f.project, true, true, vec![])
+        .unwrap();
+    assert!(!f.r.tracking_view(&f.project).unwrap().operations.is_empty());
+    assert_eq!(fs::read_to_string(&dest).unwrap(), "one");
+    assert!(f.root.join("externally-moved.md").exists());
+    fs::remove_file(&dest).unwrap();
+    fs::rename(
+        f.root.join("externally-moved.md"),
+        f.root.join("Master_v1.md"),
+    )
+    .unwrap();
+    f.r.configure_tracking(&f.project, true, true, vec![])
+        .unwrap();
+    assert!(f.r.tracking_view(&f.project).unwrap().operations.is_empty());
+    assert!(!f.root.join("Master_v1.md").exists());
+}
+#[test]
+fn initialization_can_ignore_existing_files_and_word_lock_files_are_not_documents() {
+    let mut f = Fixture::new(&[
+        ("Master_v1.md", "one"),
+        ("Ignored.md", "ignore"),
+        ("~$Locked.docx", "temporary lock"),
+    ]);
+    assert_eq!(f.r.snapshot().unwrap().documents.len(), 2);
+    let selected =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|s| s.name == "Master_v1.md")
+            .unwrap()
+            .id
+            .clone();
+    f.r.configure_tracking(&f.project, true, false, vec![selected])
+        .unwrap();
+    let ignored = f.document("Ignored.md");
+    assert_eq!(f.count(&ignored), 0);
+    fs::write(f.root.join("Ignored.md"), "still ignored").unwrap();
+    f.scan();
+    assert_eq!(f.count(&ignored), 0);
+    let source =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|s| s.name == "Ignored.md")
+            .unwrap()
+            .id
+            .clone();
+    f.r.resolve_match(&f.project, &source, "new", None).unwrap();
+    assert_eq!(f.count(&ignored), 1);
+}

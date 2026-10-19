@@ -98,6 +98,9 @@ impl Registry {
             self.set_tracking_error(project, &problems)?;
         } else if enabled && !was_enabled {
             self.reconcile(project, "startup_reconciliation", &HashSet::new(), true)?;
+        } else if enabled && archive {
+            let errors = self.recover_operations(project, true)?;
+            self.set_tracking_error(project, &errors)?;
         }
         Ok(())
     }

@@ -471,7 +471,7 @@ impl Registry {
             if let Err(e) = result {
                 self.block_operation(&id, project, &e)?;
                 errors.push(e);
-            } else if state != "pending" {
+            } else if retry_blocked || state != "pending" {
                 self.activity(
                     project,
                     "recovered",
