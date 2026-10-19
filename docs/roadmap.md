@@ -12,9 +12,9 @@ Opt-in per-project native watchers; selected independent initial histories; dete
 
 SHA-256-verified Markdown and bounded DOCX body extraction; exact Myers diffs for any historical pair in one family; raw bytes versus normalized text; unified/split display; paged regions, context expansion and change navigation; clipboard summaries/changed text; actionable errors and modal lifecycle coverage. No schema migration, capture changes, comparison cache or AI interpretation. See the Milestone 3 manual guide and verification record for limits and remaining interactive upgrade/Word checks.
 
-## Milestone 4 — Optional OpenAI indexing
+## Implemented: Milestone 4 — Optional OpenAI indexing
 
-Add explicitly opted-in per-project cloud indexing, disclosure of uploaded content, secure credential storage, vector-store associations, upload/delete policy, retries and usage feedback. Offline management and local snapshots remain available.
+Windows Credential Manager; transactional schema 003; explicit per-project selection/preview/retention consent; one owned vector store per project; verified original snapshot uploads; current-only/full-history sync; durable queue, processing polling, bounded retries and uncertain-operation reconciliation; direct retrieval tests with provenance; separate association/store/File cleanup and measured usage. Local tracking, archival and diffs remain independent and available offline. Version 0.4.0 retains application identity and per-user installer/data paths. Live authorized OpenAI testing and installed upgrade acceptance are user-run tasks in the 14-test guide; no AI interpretation is implemented.
 
 ## Milestone 5 — On-demand AI analysis
 

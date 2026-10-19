@@ -179,7 +179,7 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         tx.execute("INSERT INTO cloud_documents VALUES(?1,?2)", params![id, d])
             .map_err(error)?;
     }
-    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string()]).map_err(error)?;
+    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string()]).map_err(error)?;
     activity(
         &tx,
         id,
@@ -217,6 +217,9 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
         .filter(|j| !s(j, "file_id").is_empty() && s(j, "state") != "purged")
         .count());
     p["jobs"] = json!(js);
+    p.as_object_mut()
+        .expect("project row object")
+        .remove("scope");
     Ok(p)
 }
 pub fn queue(db: &mut Connection, id: &str) -> Result<()> {

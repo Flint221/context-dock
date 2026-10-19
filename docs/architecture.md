@@ -1,6 +1,59 @@
-# Architecture — Milestone 3
+# Architecture — Milestone 4
 
-ContextDock 0.3.0 extends the existing Tauri/React application without changing `com.contextdock.desktop`, existing entity UUIDs, or the supported per-user application data location.
+ContextDock 0.4.0 extends the existing Tauri/React application without changing `com.contextdock.desktop`, existing entity UUIDs, or the supported per-user application data location.
+
+## Optional cloud indexing (Milestone 4)
+
+`cloud_credentials.rs` persists secrets only through Windows generic credential `ContextDock.OpenAI`, using per-user Credential Manager and `CRED_PERSIST_LOCAL_MACHINE` (persistence on this computer, not machine-wide plaintext). Native buffers use `Zeroizing`; the CredRead blob is zeroed before CredFree. The uncontrolled password input clears immediately on Save and never receives a saved secret. No environment fallback, developer key, browser storage, secret-bearing logs or telemetry exists. SQLite stores a one-way credential fingerprint for binding, not the key. Same-user malware/debuggers are outside this OS vault boundary.
+
+`cloud_api.rs` provides mockable `CloudApi`. Production reqwest uses fixed HTTPS `api.openai.com/v1`, normal Windows SChannel certificate validation, TLS 1.2 minimum, no redirects, 10-second connect/30-second request limits, bounded responses and a 90-second between-request reconciliation budget. The API's current vector-store compatibility header and upload `purpose=assistants` are retained. No Assistants, Threads, Runs, Responses, chat/completions or explicit embeddings endpoint is called. Native browser opening has a fixed allowlist of official account/docs URLs.
+
+`cloud.rs` owns selection/preview/verification/SQL views. `cloud_sync.rs` owns provider-independent durable transitions. `cloud_commands.rs` exposes IPC and an app-lifetime single-request worker with its own gate and SQLite connections. HTTP/polling never holds the local Registry mutex or an SQL transaction. Local capture, archival and comparison remain independent. Worker shutdown does not wait for an in-flight HTTP request; precommitted intents allow recovery. Idle checks are local every two seconds. Automatic projects verify remote state roughly every 15 minutes; active enabled projects reconcile on startup. Completed manual-only projects do not continuously contact OpenAI. Pause/disconnect stops new requests after the current operation yields; already sent bytes cannot be retracted.
+
+### Schema 003 and selection
+
+The migration is transactional after 001/002 and preserves all existing UUIDs, current pointers, snapshots, sources, archives, history, themes and local tracking/archival preferences. Cloud defaults off, automatic cloud sync off and paused. A random installation UUID is generated once; newer schemas are rejected rather than downgraded.
+
+| Table | Responsibility |
+| --- | --- |
+| `cloud_installation` | Installation ownership UUID |
+| `cloud_connection` | Key fingerprint, test status/time and sanitized error; no credential |
+| `cloud_projects` | Consent/configuration, key binding, store ID/name/create-operation UUID, start/pause/auto/mode/size, sync/reconcile/delete intents, usage/backoff |
+| `cloud_documents` | Explicit selected logical-family UUIDs |
+| `cloud_exclusions` | Explicit per-version removals that automatic sync must not undo |
+| `cloud_jobs` | Unique project/version and File mappings, opaque upload filename, durable phase/state, desired/current flags, provider status/usage, retry/error |
+| `cloud_activity` | Sanitized events; latest 30 displayed |
+| `cloud_retrievals` | Returned File/family/version IDs, score/time; never query/full excerpt/chat history |
+
+Insert/default triggers protect new/existing projects. Unregistration disables cloud and queued deletion without deleting mappings/resources. Re-register the same root to recover identity; cloud still requires re-enable. Selection refers to logical family IDs, not every file in a folder. Only tracked selected families with committed current snapshots, supported types and no pending ambiguity qualify. An ambiguity freezes selection sync rather than silently deleting known-good associations. Current-only uses `documents.current_version_id`, including reuse of older captured bytes, rather than assuming maximum version number is current.
+
+Preview hashes bind draft family selection/mode/limit/auto policy to project revision, eligible snapshot IDs and known jobs. Apply uses a short immediate transaction, rejects stale previews and requires a tested key plus explicit retention/cost consent. Initial Start is separate. Resume before Start creates/reconciles only the store. Confirmed changes on started indexes queue the selection/policy delta; paused projects wait for Resume.
+
+### Upload, processing and recovery
+
+Before store creation, record `store_op` and `creating`; provider metadata carries installation/project/operation identity. Before upload, record a unique job, recovery phase and opaque `cd_<installation>_<project>_<version>_<job>.md/.docx` name. Persist the File ID before attachment. Snapshot reads pin directories, reject traversal/links, use Windows sharing protection, bound bytes and verify committed size/SHA-256. Missing/corrupt snapshots fail closed; there is no live-source fallback. Extraction is conservative screening only: original full Markdown/DOCX bytes, including any DOCX embeds/metadata, are uploaded unchanged. Limits: 16 MiB raw, 4 MiB text/total expanded DOCX, stricter configured soft size; provider type/5-million-token limits still apply. The soft limit is not a spending cap.
+
+Queue: pending → uploading → uploaded → indexing → indexed. Indexed requires a **completed vector-store association**, not successful File upload or deprecated File status. Processing polls about every 15 seconds. Attach checks the known association/File first. Failed processing stops until explicit Retry/Reconcile, which may replace an owned failed/cancelled association while reusing its File. Six bounded transient retries use exponential delays and seconds/date Retry-After (capped at one hour). Auth/permission/permanent failures need user action. Mutating timeout/5xx/partial responses become uncertain rather than blindly reposting.
+
+Interrupted creates/uploads list candidates by recorded operation metadata or unique filename/purpose/size. A uniquely recovered File must also pass downloaded SHA-256. Missing permissions, multiple candidates or no provable candidate leave actionable uncertainty. Only after the user verifies the old request ended and the correct dashboard has no copy does typed **RETRY ABSENT OPERATION** permit another checked attempt. This is an explicit operator decision, not a universal exactly-once guarantee; delayed/inaccessible resources require account reconciliation. Definitively rejected/unsent requests can retry normally.
+
+Every active operation verifies store ownership. Key replacement needs Test plus Verify key for each existing index before rebinding; inability to access a store does not authorize creating another. Reconciliation compares actual associations/statuses/usage, restores missing attachments with known Files and stops on foreign/unrecognized associations. Missing/expired stores never silently recreate: explicitly acknowledge/delete the mapping, prepare a new index, then review consent. Missing uploaded Files have a checked explicit recovery path.
+
+Current-only retains old associations until **all desired replacements complete**, then detaches obsolete associations and updates `is_current`. Full history keeps selected captures with current metadata. Mode/selection changes need another preview/confirmation. Automatic sync off prevents newly captured versions from queuing until Sync Now; already authorized queued work can finish unless paused. Explicit per-version removal creates an exclusion and never changes local tracking/history. Removed/excluded captures are not automatically restored.
+
+### Retrieval, deletion and cost boundaries
+
+Direct search requires desired snapshots already indexed and sends only the explicit query to that store, with installation/project/current filters, `rewrite_query=false`, at most five results. IDs/attributes must map to that project's known jobs; unrecognized provenance is rejected. Excerpts render as text, not HTML. Full-history mode includes historical selected captures. No generated interpretation or cross-project synthesis exists.
+
+Association DELETE, vector-store DELETE and File DELETE are separate. Automatic replacement/deselection detaches and retains underlying Files. Strong-confirmation store deletion verifies every association, refuses foreign/unknown ownership, detaches owned versions and deletes the store, retaining File IDs for explicit cleanup. Partial deletion preserves retryable identifiers. Local sources, snapshots, archives/history are untouched. Disable/key disconnect/unregistration/uninstall do not authorize remote deletion.
+
+Separate File purge needs a removed owned job, exact typed File ID, filename/size/downloaded-hash checks and no references in **accessible** vector stores. Pagination is bounded at 100 pages of 100, with malformed/incomplete listings or deadline exhaustion failing closed. The API cannot enumerate every unrelated tools/threads/batches/other-credential reference; the user must attest to checking those separately. Lack of access is not proof of absence. Purge is never automatic. Clean remote data before unregistering, or re-register the same root first.
+
+Settings/project views distinguish raw snapshot bytes from last measured OpenAI `usage_bytes`, which includes parsed/indexed storage. They link to authoritative usage/billing/pricing instead of estimating dollars or promising a permanent free allowance. Account allowances may be shared. Files/stores follow provider retention until deletion; processing, visibility, dashboards and billing can lag. API data is not used for training by default. Consult the current provider policy rather than assuming immediate erasure.
+
+Endpoints: `GET/POST /vector_stores`, `GET/DELETE /vector_stores/{id}`, `GET/POST /vector_stores/{id}/files`, `GET/POST/DELETE /vector_stores/{id}/files/{file_id}`, `POST /vector_stores/{id}/search`, `GET/POST /files`, `GET/DELETE /files/{file_id}`, `GET /files/{file_id}/content`. Test uses only a minimal vector-store listing.
+
+Official sources checked October 19, 2026: [Retrieval](https://developers.openai.com/api/docs/guides/retrieval), [Files](https://developers.openai.com/api/reference/resources/files/methods/create), [store create](https://developers.openai.com/api/reference/resources/vector_stores/methods/create), [search](https://developers.openai.com/api/reference/resources/vector_stores/methods/search), [detach](https://developers.openai.com/api/reference/resources/vector_stores/subresources/files/methods/delete), [File delete](https://developers.openai.com/api/reference/resources/files/methods/delete), [data controls](https://developers.openai.com/api/docs/guides/your-data), [pricing](https://developers.openai.com/api/docs/pricing). No live indexing/key access was used during development; the [14-test installed-app guide](manual-testing-milestone-4.md) supplies user-run acceptance.
 
 ## Module boundaries
 

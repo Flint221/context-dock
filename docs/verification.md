@@ -1,4 +1,38 @@
-# Verification — ContextDock 0.3.0
+# Verification — ContextDock 0.4.0
+
+Milestone 4 checks ran on Windows 11 on October 19, 2026, using the existing Node 24/MSVC Rust toolchain. Cloud tests use a fully in-memory scripted provider, temporary SQLite databases/source roots/snapshot stores and synthetic nonfunctional key strings. They never read/save a real Windows credential or contact the authenticated OpenAI API. Public official API documentation was consulted. User project folders, real application data, credentials and installed executables were not modified by testing or installer execution.
+
+| Check | Milestone 4 result |
+| --- | --- |
+| TypeScript / ESLint | Passed |
+| Frontend tests | Passed: 22 in 5 files (16 existing + 6 cloud UI) |
+| Rust tests / binary targets / doctests | Passed: 77 Rust tests (37 existing + 40 cloud cases); no failures |
+| rustfmt / all-target Clippy with warnings denied | Passed |
+| Production Vite bundle | Passed through the NSIS build |
+| npm audit | Zero reported vulnerabilities |
+| Windows x64 NSIS | Built unsigned `ContextDock_0.4.0_x64-setup.exe`, approximately 3.94 MiB |
+| Versions / identity | npm + npm lock, Cargo + Cargo lock, Tauri 0.4.0; `com.contextdock.desktop` and existing per-user paths retained |
+| Migration | Transactional schema 2→3 fixture preserves tracking/archival preferences and defaults cloud off; existing schema-1/capture/archival regressions pass |
+| Whitespace | `git diff --check` passed |
+| Live OpenAI / actual Credential Manager persistence / installed upgrade | **Not performed by the agent**; user acceptance required |
+
+## Milestone 4 coverage and boundaries
+
+The 40 cloud tests cover local-only/paused no-request behavior, fingerprint isolation, plaintext input validation without echo, fresh and schema-2 migrations, project-scoped eligible selection, ignored/foreign family rejection, stale consent, no uploads before Start, idle index creation before Start, missing/tampered snapshots, soft size limits, original snapshot bytes rather than live-source fallback, asynchronous processing completion, repeated-sync deduplication, current-only safe replacement, historical reattachment/current attributes, disabled/enabled automatic sync, historical current-pointer reuse, interrupted store adoption, no blind recreation on absent candidates, interrupted upload filename/size/hash recovery, mismatched remote bytes, foreign store/association refusal, Retry-After/backoff, terminal auth errors, deleted store/File recovery, missing associations, failed processing retry without reupload, explicit absent-operation reset that refuses existing copies, per-version removal/exclusion, store deletion retaining Files/local data, separately verified File purge, unregistration/disconnect retaining resources, ambiguity freezing existing selections, direct search/provenance and not persisting query/excerpts. Scripted calls validate the provider-independent state machine, not a live OpenAI account's permissions, retention or ranking.
+
+The six cloud frontend tests cover reviewed consent before apply with Start separate; unlocking controls after a failed action; late responses after unmount; immediate clearing of the uncontrolled password field without browser-storage writes; cancellation/typed confirmation for remote deletion; actionable configuration failures inside the consent dialog. All previous rendering/navigation/tracking/history/diff regressions pass. These are focused mocked component tests, not a broad native GUI harness or a claim of visual acceptance on every display scale.
+
+Production credentials use Win32 Credential Manager, and the Windows build validates the native bindings. Reading/writing a real user credential, actual account Test/upload/index/search/delete behavior, billing measurements and an upgrade over the user's real v0.3.0 installation remain **manual**. No developer key, environment key fallback, real user document upload, release tag, public GitHub Release, auto-update or PR merge is authorized/performed. The built installer was not run against the existing installation.
+
+The [14-test installed Windows guide](manual-testing-milestone-4.md) provides exact two-file Markdown contents, preparation, clicks, endpoints, expected UI/remote states, failure/retry instructions, offline/pause/resume, two-project isolation, safe revoked-key testing, separate association/store/File cleanup and an acceptance checklist. The implementation report also includes essential numbered testing steps directly.
+
+Limits: raw upload 16 MiB, text/expanded DOCX 4 MiB, conservative package/type screening, fixed provider origin, one cloud request at a time, 30-second individual HTTP timeout, bounded 100×100 listings and a 90-second between-request reconciliation budget. Large/inaccessible accounts fail closed rather than assuming complete remote absence. No provider-wide exactly-once or global external File-reference enumeration exists: ambiguous/no-match recovery and File purge require separate explicit user assertions after dashboard checks. Automatic detach/store deletion retains uploaded Files until explicit purge. Cleanup/dashboard/search/billing can be eventually consistent. No dollar spending cap or guaranteed free indexing is claimed.
+
+The existing Windows Actions workflow remains enabled for PR/main/codex branch pushes and uploads **ContextDock-Windows-x64-setup** with 30-day retention. Consult the intended commit's PR run for its live status; local pass results do not imply remote CI completion. Local installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.4.0_x64-setup.exe`. Download/upgrade instructions preserve the existing application identity and app-data directory. Prior milestone evidence follows as a historical record.
+
+---
+
+# Historical verification — ContextDock 0.3.0
 
 Milestone 3 local checks completed on Windows 11 on October 19, 2026, with Node.js 24.12.0, Rust 1.99.1 and the x86_64 MSVC toolchain on an ARM64 host. Tests use disposable temporary databases, source roots and snapshot stores. No registered user project, real database, archive or snapshot was modified by testing. The prior Milestone 2 record is retained below.
 

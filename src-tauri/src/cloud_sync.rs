@@ -293,13 +293,11 @@ pub fn step(
             "UPDATE cloud_projects SET usage_bytes=?2 WHERE project_id=?1",
             &[&id, &store["usage_bytes"].as_i64()],
         )?;
-        if n(&p, "delete_requested") == 1 {
-            return delete_index(db, &p, api);
-        }
         if n(&p, "reconcile_requested") == 1 {
             reconcile(db, &p, api)?;
         }
         if n(&p, "started") != 1 {
+            execute(db,"UPDATE cloud_projects SET sync_requested=0,status='ready',error=NULL WHERE project_id=?1",&[&id])?;
             return Ok(());
         }
         if let Some(job) = cloud::jobs(db, id).map_err(local)?.iter().find(|j| {

@@ -846,3 +846,17 @@ fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
         "needs_attention"
     );
 }
+#[test]
+fn resumed_store_before_initial_start_becomes_idle_without_uploading() {
+    let mut f = Fixture::new();
+    f.apply(f.draft());
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=0,sync_requested=1", [])
+        .unwrap();
+    let api = Mock::default();
+    f.step(&api);
+    f.step(&api);
+    assert!(api.0.borrow().files.is_empty());
+    assert!(api.0.borrow().store.is_some());
+    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+}

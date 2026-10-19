@@ -1,8 +1,8 @@
 # ContextDock
 
-ContextDock 0.3.0 is a lightweight, local-first Windows 11 application for project documentation. Register existing folders, discover Markdown and Word files, and opt in to independent version histories and safe archival. Compare preserved versions entirely offline without an account, telemetry, OpenAI, or cloud storage.
+ContextDock 0.4.0 is a lightweight, local-first Windows 11 application for project documentation. Register existing folders, discover Markdown and Word files, and opt in to independent version histories and safe archival. Compare preserved versions entirely offline. Optional OpenAI indexing requires your own API key, explicit project selection and upload consent.
 
-## Implemented through Milestone 3
+## Implemented through Milestone 4
 
 - Dashboard, project registration, metadata discovery/search, rename, clipboard paths, Explorer locations, non-destructive unregistration, and light/dark/system themes.
 - Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; each starts its own independent v1 history. Initialization never moves existing files or groups similarly named historical exports.
@@ -20,13 +20,27 @@ ContextDock 0.3.0 is a lightweight, local-first Windows 11 application for proje
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.3.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. An existing 0.1.0 database migrates in place; 0.2.0 databases need no additional migration. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run `ContextDock_0.4.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally to schema 3 with cloud off; tracking/archival preferences and snapshots survive. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
-5. Follow the complete [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) using a disposable folder. The [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remains available for archival testing.
+5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
 Installers are unsigned. Windows SmartScreen may show an unknown-publisher or reputation warning; follow your organization's installation policy and verify that the file came from this repository. Windows 11 normally includes WebView2. If it is absent, the initial Microsoft WebView2 bootstrapper requires internet; the application then works offline.
 
 The x64 build runs on Windows 11 x64 and supported Windows 11 ARM devices through emulation. No automatic updater is implemented. A future successful matching version tag exposes an installer under [GitHub Releases](https://github.com/Flint221/context-dock/releases); a PR alone does not publish a release.
+
+## Optional OpenAI cloud indexing
+
+Cloud is **off by default**, including on upgrade. Local tracking, archival and comparisons work without a key or internet. In Settings, save your personal key in **Windows Credential Manager** and Test connection (read-only listing; no upload). Never put the key in chat, an environment file or the repository. The password field clears on Save; SQLite/browser storage never receives the key.
+
+In each project, select eligible tracked logical document families, choose **Current version only** (default) or **Full captured history**, review file counts/raw bytes/additions/removals, and explicitly consent to upload/retention/API charges. Click **Start Initial Sync** separately. New projects do not upload just because a global key exists. The separate **Automatically sync newly captured versions** checkbox is off by default. Resume cloud sync can create the owned store before Start without uploading documents.
+
+Each project owns a persisted OpenAI vector store. Only committed SHA-256-verified immutable snapshots are uploaded as original Markdown/DOCX bytes; never a live-source fallback or diff extraction. Uploaded, processing, indexed, failed and uncertain states are distinct. The native cloud worker uses its own connection/lock, short SQL transactions, bounded backoff and restart reconciliation without holding the local registry mutex across HTTP. Direct **Test Search** returns excerpts and actual family/version/File provenance; no generated answer or model analysis is implemented.
+
+Use Sync Now, Pause/Resume and Retry/Reconcile for control. Current-only replacement keeps old indexed content until replacements finish, then detaches superseded associations. Full history retains earlier selected captures. Policy/selection changes require a fresh confirmation preview. Ambiguous or ignored local families do not become upload candidates.
+
+**Remote retention matters:** uploaded Files are separate from vector-store associations. Automatic replacement, disconnect, unregistration and uninstall do not delete underlying Files. View Cloud Index offers confirmed per-version association removal and separate owned-File deletion; the panel offers strong-confirmation project-index deletion. File purge verifies ownership, exact bytes and references in accessible vector stores, and requires you to verify references in other tools/resources. Inaccessible/foreign resources are not automatically deleted. Keep registrations until cleanup, or re-register the same root to recover mappings.
+
+Settings shows raw indexed snapshot bytes separately from last measured OpenAI index usage and links to [usage](https://platform.openai.com/usage), [billing](https://platform.openai.com/settings/organization/billing/overview) and [current pricing](https://developers.openai.com/api/docs/pricing). Parsed/indexed bytes differ from file size; account allowances may be shared. The soft upload-size limit is not a dollar spending cap and indexing is not guaranteed free. Application upload bounds are 16 MiB raw and 4 MiB extracted text/expanded DOCX; provider type/token limits also apply. Follow [the installed-app walkthrough](docs/manual-testing-milestone-4.md) for exact samples, 14 tests, recovery and cleanup. Live API/upgrade behavior requires user acceptance testing.
 
 ## First tracking workflow
 
@@ -98,8 +112,8 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.3.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use temporary roots/databases; no destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.4.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestones 4–6 remain future work: optional cloud indexing, AI comparisons/baselines, signing and automatic update delivery.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestones 5–6 remain future work: on-demand AI interpretation/baselines, signing and automatic update delivery.
