@@ -108,3 +108,41 @@ it("persists theme changes and displays the real app version", async () => {
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
   expect(screen.getByText("Version 0.1.0 · Milestone 1")).toBeInTheDocument();
 });
+it("renames, refreshes and removes only after the final confirmation", async () => {
+  const user = userEvent.setup();
+  state.projects = [
+    {
+      id: "p1",
+      name: "Original",
+      path: "C:\\Test",
+      createdAt: "",
+      status: "available",
+      lastScan: null,
+      scanError: null,
+      documentCount: 0,
+      latestModified: null,
+    },
+  ];
+  vi.mocked(registry.rename).mockImplementation(async (_id, name) => {
+    state.projects[0].name = name;
+  });
+  vi.mocked(registry.remove).mockImplementation(async () => {
+    state.projects = [];
+  });
+  render(<App />);
+  await user.click(await screen.findByRole("button", { name: /Original/ }));
+  expect(registry.refresh).toHaveBeenCalledWith("p1");
+  await user.click(screen.getByRole("button", { name: "Rename" }));
+  await user.clear(screen.getByLabelText("Project name"));
+  await user.type(screen.getByLabelText("Project name"), "Renamed");
+  await user.click(screen.getByText("Save name"));
+  await screen.findByRole("heading", { name: "Renamed" });
+  expect(registry.rename).toHaveBeenCalledWith("p1", "Renamed");
+  await user.click(screen.getByRole("button", { name: "Refresh documents" }));
+  await screen.findByText("Document metadata refreshed.");
+  await user.click(screen.getByRole("button", { name: "Remove" }));
+  expect(registry.remove).not.toHaveBeenCalled();
+  await user.click(screen.getByText("Remove registration"));
+  await screen.findByText("Add your first project");
+  expect(registry.remove).toHaveBeenCalledWith("p1");
+});
