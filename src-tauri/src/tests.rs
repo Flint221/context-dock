@@ -151,3 +151,83 @@ fn windows_case_and_junction_safety() {
     assert!(r.snapshot().unwrap().documents.is_empty());
     fs::remove_dir(root.join("junction")).unwrap();
 }
+#[cfg(windows)]
+#[test]
+fn inaccessible_subfolder_preserves_observations() {
+    use std::process::Command;
+    struct Restore(std::path::PathBuf, String);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = Command::new("icacls")
+                .arg(&self.0)
+                .args(["/remove:d", &self.1])
+                .output();
+        }
+    }
+    let t = tempdir().unwrap();
+    let root = t.path().join("root");
+    let blocked = root.join("restricted");
+    fs::create_dir_all(&blocked).unwrap();
+    fs::write(blocked.join("private.md"), "unchanged").unwrap();
+    fs::write(root.join("public.md"), "unchanged").unwrap();
+    let mut r = Registry::open(&t.path().join("r.db")).unwrap();
+    let id = r.add("Test", root.to_str().unwrap()).unwrap();
+    let output = Command::new("whoami").output().unwrap();
+    assert!(output.status.success());
+    let account = String::from_utf8(output.stdout).unwrap().trim().to_string();
+    let _restore = Restore(blocked.clone(), account.clone());
+    let status = Command::new("icacls")
+        .arg(&blocked)
+        .arg("/deny")
+        .arg(format!("{account}:(RD)"))
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    r.refresh(&id).unwrap();
+    let s = r.snapshot().unwrap();
+    assert_eq!(s.projects[0].status, "partial");
+    assert_eq!(s.documents.len(), 2);
+    assert_eq!(
+        s.documents
+            .iter()
+            .find(|d| d.name == "private.md")
+            .unwrap()
+            .status,
+        "unavailable"
+    );
+    assert_eq!(
+        s.documents
+            .iter()
+            .find(|d| d.name == "public.md")
+            .unwrap()
+            .status,
+        "available"
+    );
+    // Losing access to the root records an unavailable project rather than removing it.
+    let _root_restore = Restore(root.clone(), account.clone());
+    let status = Command::new("icacls")
+        .arg(&root)
+        .arg("/deny")
+        .arg(format!("{account}:(RD)"))
+        .output()
+        .unwrap();
+    assert!(status.status.success());
+    r.refresh(&id).unwrap();
+    assert_eq!(r.snapshot().unwrap().projects[0].status, "unavailable");
+}
+#[test]
+fn future_database_version_is_rejected_without_downgrading() {
+    let t = tempdir().unwrap();
+    let path = t.path().join("r.db");
+    {
+        let r = Registry::open(&path).unwrap();
+        r.db.pragma_update(None, "user_version", 2).unwrap();
+    }
+    assert!(Registry::open(&path).is_err());
+    let c = rusqlite::Connection::open(path).unwrap();
+    assert_eq!(
+        c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+}

@@ -3,5 +3,5 @@
   "identifier": "main",
   "description": "Only the main local window can select a folder.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open"]
+  "permissions": ["dialog:allow-open"]
 }

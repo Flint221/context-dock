@@ -1,11 +1,13 @@
 import { FileText, Search } from "lucide-react";
-import { useState } from "react";
+import { useDeferredValue, useState } from "react";
 import type { Document } from "../types";
 import { date, size } from "../format";
 export function Documents({ documents }: { documents: Document[] }) {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
+  const deferredQuery = useDeferredValue(query);
   const filtered = documents.filter((d) =>
-    d.relativePath.toLowerCase().includes(query.toLowerCase()),
+    d.relativePath.toLowerCase().includes(deferredQuery.toLowerCase()),
   );
   return (
     <section className="panel">
@@ -22,7 +24,7 @@ export function Documents({ documents }: { documents: Document[] }) {
             aria-label="Search documents"
             placeholder="Find a document…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => (setQuery(e.target.value), setPage(0))}
           />
         </label>
       </div>
@@ -47,7 +49,7 @@ export function Documents({ documents }: { documents: Document[] }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((d) => (
+              {filtered.slice(page * 100, (page + 1) * 100).map((d) => (
                 <tr key={d.id}>
                   <td>
                     <div className="file-name">
@@ -66,6 +68,25 @@ export function Documents({ documents }: { documents: Document[] }) {
               ))}
             </tbody>
           </table>
+          {filtered.length > 100 && (
+            <div className="pagination">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </button>
+              <span>
+                Page {page + 1} of {Math.ceil(filtered.length / 100)}
+              </span>
+              <button
+                disabled={(page + 1) * 100 >= filtered.length}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </button>
+            </div>
+          )}
           {filtered.length === 0 && (
             <p className="padded">No matching documents.</p>
           )}

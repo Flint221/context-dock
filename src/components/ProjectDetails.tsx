@@ -74,7 +74,7 @@ export function ProjectDetails({
           Refresh documents
         </button>
       </div>
-      <Documents documents={documents} />
+      <Documents key={project.id + project.lastScan} documents={documents} />
     </>
   );
 }

@@ -354,6 +354,11 @@ export default function App() {
                 your computer.
               </p>
             )}
+            {error && (
+              <p role="alert" className="error">
+                {error}
+              </p>
+            )}
             <div className="actions">
               <button
                 type="button"
