@@ -659,3 +659,41 @@ fn initialization_can_ignore_existing_files_and_word_lock_files_are_not_document
     f.r.resolve_match(&f.project, &source, "new", None).unwrap();
     assert_eq!(f.count(&ignored), 1);
 }
+#[test]
+fn nested_binary_word_sources_with_identical_names_have_independent_byte_exact_histories() {
+    let mut f = Fixture::new(&[
+        ("a/Spec.docx", "placeholder"),
+        ("b/Spec.docx", "placeholder"),
+    ]);
+    let bytes = [0x50u8, 0x4b, 3, 4, 0, 0xff, 0x80, 0x0a];
+    fs::write(f.root.join("a/Spec.docx"), bytes).unwrap();
+    fs::write(f.root.join("b/Spec.docx"), bytes).unwrap();
+    f.enable(true);
+    let sources = f.r.snapshot().unwrap().documents;
+    let first = sources
+        .iter()
+        .find(|s| s.relative_path.replace('\\', "/") == "a/Spec.docx")
+        .unwrap();
+    let second = sources
+        .iter()
+        .find(|s| s.relative_path.replace('\\', "/") == "b/Spec.docx")
+        .unwrap();
+    assert_ne!(first.document_id, second.document_id);
+    assert_eq!(f.count(&first.document_id), 1);
+    assert_eq!(f.count(&second.document_id), 1);
+    let snapshot = f.r.versions(&first.document_id).unwrap()[0]
+        .snapshot_path
+        .clone();
+    assert_eq!(fs::read(snapshot).unwrap(), bytes);
+    let updated = [0x50u8, 0x4b, 3, 4, 0, 0xfe, 0x81, 0x0a];
+    fs::write(f.root.join("a/Spec.docx"), updated).unwrap();
+    f.scan();
+    assert_eq!(f.count(&first.document_id), 2);
+    assert_eq!(f.count(&second.document_id), 1);
+    let versions = f.r.versions(&first.document_id).unwrap();
+    assert_eq!(fs::read(&versions[0].snapshot_path).unwrap(), updated);
+    assert_eq!(
+        fs::read(versions[1].archive_path.as_ref().unwrap()).unwrap(),
+        bytes
+    );
+}
