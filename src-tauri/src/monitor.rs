@@ -140,6 +140,7 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                     for (id, path) in configs {
                         let root = PathBuf::from(path);
                         roots.insert(id.clone(), root.clone());
+                        if watches.contains_key(&id) && r.db.execute("UPDATE projects SET watch_status='watching' WHERE id=?1 AND watch_status='starting'",[&id]).is_ok_and(|n|n>0) {changed(&id);}
                         if watches.contains_key(&id) && !root.is_dir() {
                             watches.remove(&id);
                             retry_watch.remove(&id);
