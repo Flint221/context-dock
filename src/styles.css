@@ -931,12 +931,16 @@ dialog {
   gap: 12px;
   margin: 18px 0 22px;
 }
+.version-list {
+  display: grid;
+  gap: 14px;
+}
 .version-card {
   border: 1px solid var(--border);
   background: var(--bg);
   padding: 17px;
   border-radius: 9px;
-  margin-top: 16px;
+  margin-top: 0;
 }
 .version-card > .section-heading {
   margin-bottom: 14px;
@@ -1010,9 +1014,6 @@ dialog:has(.comparison) {
   align-self: end;
   min-height: 39px;
 }
-.diff-controls {
-  align-items: flex-end;
-}
 .diff-controls select {
   min-width: 160px;
 }
@@ -1035,11 +1036,12 @@ dialog:has(.comparison) {
 .diff-controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-end;
   gap: 12px;
   margin: 18px 0;
 }
 .diff-summary {
+  align-items: center;
   padding: 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
