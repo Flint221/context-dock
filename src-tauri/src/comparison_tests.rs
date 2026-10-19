@@ -248,7 +248,7 @@ fn versions_snapshot_identity_and_integrity_fail_closed() {
 }
 #[test]
 fn manual_markdown_samples_have_documented_counts() {
-    let guide = include_str!("../../docs/manual-testing-milestone-3.md");
+    let guide = include_str!("../../docs/manual-testing-milestone-3.md").replace("\r\n", "\n");
     let samples: Vec<_> = guide
         .split("```markdown\n")
         .skip(1)
