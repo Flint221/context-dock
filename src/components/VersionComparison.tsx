@@ -221,6 +221,8 @@ export function VersionComparison({
           </select>
         </label>
         <button
+          className="primary"
+          aria-busy={loading}
           disabled={loading || !selected || !other}
           onClick={() => {
             setError("");
@@ -312,24 +314,45 @@ export function VersionComparison({
                 <option value="split">Side-by-side diff</option>
               </select>
             </label>
-            <button
-              disabled={!indexes.length || change === 0}
-              onClick={() => navigate(change - 1)}
+            <div
+              className="diff-navigation"
+              role="group"
+              aria-label="Change navigation"
             >
-              Previous change
-            </button>
-            <span aria-live="polite">
-              {indexes.length
-                ? `Change ${change + 1} of ${indexes.length}`
-                : "No changes"}
-            </span>
+              <button
+                disabled={!indexes.length || change === 0}
+                title={
+                  !indexes.length
+                    ? "No textual changes to navigate"
+                    : change === 0
+                      ? "Already at the first change"
+                      : "Go to the previous change"
+                }
+                onClick={() => navigate(change - 1)}
+              >
+                Previous change
+              </button>
+              <span aria-live="polite">
+                {indexes.length
+                  ? `Change ${change + 1} of ${indexes.length}`
+                  : "No changes"}
+              </span>
+              <button
+                disabled={!indexes.length || change === indexes.length - 1}
+                title={
+                  !indexes.length
+                    ? "No textual changes to navigate"
+                    : change === indexes.length - 1
+                      ? "Already at the last change"
+                      : "Go to the next change"
+                }
+                onClick={() => navigate(change + 1)}
+              >
+                Next change
+              </button>
+            </div>
             <button
-              disabled={!indexes.length || change === indexes.length - 1}
-              onClick={() => navigate(change + 1)}
-            >
-              Next change
-            </button>
-            <button
+              className="diff-context-toggle"
               disabled={!indexes.length}
               onClick={() => {
                 setContext(!context);
@@ -377,27 +400,42 @@ export function VersionComparison({
             )}
           </section>
           <div className="diff-controls">
-            <button
-              disabled={visiblePage === 0}
-              onClick={() => showPage(visiblePage - 1)}
+            <div
+              className="diff-navigation"
+              role="group"
+              aria-label="Line pagination"
             >
-              Previous lines
-            </button>
-            <span>
-              Page {visiblePage + 1} of {pages}
-            </span>
-            <button
-              disabled={visiblePage === pages - 1}
-              onClick={() => showPage(visiblePage + 1)}
+              <button
+                disabled={visiblePage === 0}
+                onClick={() => showPage(visiblePage - 1)}
+              >
+                Previous lines
+              </button>
+              <span>
+                Page {visiblePage + 1} of {pages}
+              </span>
+              <button
+                disabled={visiblePage === pages - 1}
+                onClick={() => showPage(visiblePage + 1)}
+              >
+                Next lines
+              </button>
+            </div>
+            <div
+              className="diff-copy-actions"
+              role="group"
+              aria-label="Copy comparison"
             >
-              Next lines
-            </button>
-            <button onClick={() => void copy(true)}>
-              Copy comparison summary
-            </button>
-            <button disabled={!indexes.length} onClick={() => void copy(false)}>
-              Copy changed text
-            </button>
+              <button onClick={() => void copy(true)}>
+                Copy comparison summary
+              </button>
+              <button
+                disabled={!indexes.length}
+                onClick={() => void copy(false)}
+              >
+                Copy changed text
+              </button>
+            </div>
           </div>
         </>
       )}

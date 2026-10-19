@@ -64,29 +64,31 @@ export function DocumentHistory({
             Each captured version preserves exact file bytes. Opening a saved
             location verifies its SHA-256 hash first.
           </p>
-          <button
-            className="history-current"
-            disabled={!family.activeSourceId}
-            onClick={() => void action(() => registry.openCurrent(family.id))}
-          >
-            <FolderOpen size={15} />
-            Current document location
-          </button>
+          <div className="history-actions">
+            <button
+              disabled={!family.activeSourceId}
+              onClick={() => void action(() => registry.openCurrent(family.id))}
+            >
+              <FolderOpen size={15} />
+              Current document location
+            </button>
+            {versions && versions.length >= 2 ? (
+              <button
+                ref={compareButton}
+                className="primary"
+                onClick={() => setComparing(true)}
+              >
+                Compare Versions
+              </button>
+            ) : null}
+          </div>
           {error && (
             <p role="alert" className="error">
               {error}
             </p>
           )}
           {notice && <p role="status">{notice}</p>}
-          {versions && versions.length >= 2 ? (
-            <button
-              ref={compareButton}
-              className="primary"
-              onClick={() => setComparing(true)}
-            >
-              Compare Versions
-            </button>
-          ) : versions?.length === 1 ? (
+          {versions?.length === 1 ? (
             <p>
               Capture a second version to compare changes. Identical file bytes
               reuse their existing captured version.
