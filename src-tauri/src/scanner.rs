@@ -30,7 +30,8 @@ pub fn ignored_directory(name: &str) -> bool {
 }
 fn excluded(e: &DirEntry) -> bool {
     e.depth() > 0
-        && (is_link(e.path())
+        && (e.file_name().to_string_lossy().starts_with("~$")
+            || is_link(e.path())
             || (e.file_type().is_dir() && ignored_directory(&e.file_name().to_string_lossy())))
 }
 pub fn is_link(path: &Path) -> bool {

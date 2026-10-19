@@ -313,9 +313,7 @@ export default function App() {
         </div>
         <footer>
           <span>ContextDock {version}</span>
-          <span>
-            Metadata discovery only · Your original files stay untouched
-          </span>
+          <span>Local snapshots · Source archival only when enabled</span>
         </footer>
       </main>
       {adding && (
