@@ -55,6 +55,7 @@ it("registers a real picker selection and opens its discovered documents", async
       latestModified: null,
       trackingEnabled: false,
       archiveEnabled: false,
+      trackingRevision: 0,
     });
     state.documents.push({
       id: "d1",
@@ -141,6 +142,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
       latestModified: null,
       trackingEnabled: false,
       archiveEnabled: false,
+      trackingRevision: 0,
     },
   ];
   vi.mocked(registry.rename).mockImplementation(async (_id, name) => {

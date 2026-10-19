@@ -10,6 +10,7 @@ export interface Project {
   latestModified: string | null;
   trackingEnabled: boolean;
   archiveEnabled: boolean;
+  trackingRevision: number;
 }
 export interface Document {
   id: string;

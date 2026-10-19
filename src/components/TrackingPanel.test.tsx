@@ -28,6 +28,7 @@ const project: Project = {
   latestModified: null,
   trackingEnabled: false,
   archiveEnabled: false,
+  trackingRevision: 0,
 };
 let view: TrackingView;
 const changed = vi.fn(async () => {});

@@ -166,7 +166,7 @@ impl Registry {
         Ok(())
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
-        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id) FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
         let projects = q
             .query_map([], |r| {
                 Ok(Project {
@@ -181,6 +181,7 @@ impl Registry {
                     latest_modified: r.get(8)?,
                     tracking_enabled: r.get(9)?,
                     archive_enabled: r.get(10)?,
+                    tracking_revision: r.get(11)?,
                 })
             })
             .map_err(error)?

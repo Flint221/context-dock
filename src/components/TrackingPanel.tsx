@@ -91,6 +91,7 @@ export function TrackingPanel({
     project.lastScan,
     project.trackingEnabled,
     project.archiveEnabled,
+    project.trackingRevision,
   ]);
   async function mutate(work: () => Promise<unknown>) {
     setBusy(true);

@@ -554,6 +554,10 @@ fn archive_edits_do_not_change_snapshots_and_snapshot_collisions_are_non_destruc
     fs::write(f.root.join("説明_設計_v1.md"), "new content").unwrap();
     f.scan();
     let versions = f.r.versions(&document).unwrap();
+    assert!(fs::metadata(&versions[1].snapshot_path)
+        .unwrap()
+        .permissions()
+        .readonly());
     let archive = versions[1].archive_path.as_ref().unwrap();
     fs::write(archive, "manually edited archive").unwrap();
     assert_eq!(

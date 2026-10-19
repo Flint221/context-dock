@@ -13,6 +13,7 @@ pub struct Project {
     pub latest_modified: Option<String>,
     pub tracking_enabled: bool,
     pub archive_enabled: bool,
+    pub tracking_revision: i64,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
