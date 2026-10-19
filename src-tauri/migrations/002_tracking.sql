@@ -76,6 +76,8 @@ CREATE TABLE pending_matches (
 CREATE TABLE operations (
  id TEXT PRIMARY KEY,
  project_id TEXT NOT NULL REFERENCES projects(id),
+ document_id TEXT NOT NULL REFERENCES documents(id),
+ dedupe_key TEXT NOT NULL UNIQUE,
  kind TEXT NOT NULL,
  state TEXT NOT NULL DEFAULT 'pending',
  payload TEXT NOT NULL,

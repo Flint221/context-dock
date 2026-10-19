@@ -1,11 +1,14 @@
 mod matching;
 mod models;
+mod operations;
 mod registry;
 mod scanner;
 mod storage;
 #[cfg(test)]
 mod tests;
+mod tracking;
 mod tracking_models;
+mod tracking_queries;
 use models::Snapshot;
 use registry::Registry;
 use std::{
