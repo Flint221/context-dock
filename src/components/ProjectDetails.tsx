@@ -8,7 +8,7 @@ import {
   Trash2,
 } from "lucide-react";
 import type { Project, Document } from "../types";
-import { date } from "../format";
+import { date, displayPath } from "../format";
 import { Documents } from "./Documents";
 export function ProjectDetails({
   project,
@@ -39,7 +39,7 @@ export function ProjectDetails({
       <section className="panel project-toolbar">
         <div>
           <h2>Registered folder</h2>
-          <p className="full-path">{project.path.replace(/^\\\\\?\\/, "")}</p>
+          <p className="full-path">{displayPath(project.path)}</p>
           <small>Last scan: {date(project.lastScan)}</small>
         </div>
         <div className="toolbar-actions">

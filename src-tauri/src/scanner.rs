@@ -120,3 +120,11 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
 pub fn observed_at() -> String {
     now()
 }
+#[cfg(windows)]
+pub fn explorer_path(path: &str) -> String {
+    if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(path).to_string()
+    }
+}

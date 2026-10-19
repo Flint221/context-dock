@@ -1,6 +1,6 @@
 import { ArrowUpRight, Folder } from "lucide-react";
 import type { Project } from "../types";
-import { date } from "../format";
+import { date, displayPath } from "../format";
 export function Projects({
   projects,
   busy,
@@ -27,7 +27,7 @@ export function Projects({
           </div>
           <h3>{p.name}</h3>
           <p className="path" title={p.path}>
-            {p.path.replace(/^\\\\\?\\/, "")}
+            {displayPath(p.path)}
           </p>
           <div className="card-bottom">
             <span>{p.documentCount} documents</span>

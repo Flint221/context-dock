@@ -1,3 +1,4 @@
+import { displayPath } from "./format";
 import { useCallback, useEffect, useState } from "react";
 import {
   AlertTriangle,
@@ -234,9 +235,7 @@ export default function App() {
               copy={() =>
                 void run(
                   () =>
-                    navigator.clipboard.writeText(
-                      project.path.replace(/^\\\\\?\\/, ""),
-                    ),
+                    navigator.clipboard.writeText(displayPath(project.path)),
                   "Folder path copied.",
                 )
               }

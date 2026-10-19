@@ -66,7 +66,7 @@ async fn open_project(state: tauri::State<'_, Store>, id: String) -> Result<(), 
         #[cfg(windows)]
         {
             std::process::Command::new("explorer.exe")
-                .arg(PathBuf::from(path))
+                .arg(scanner::explorer_path(&path))
                 .spawn()
                 .map_err(|e| format!("Cannot open File Explorer: {e}"))?;
             Ok(())
