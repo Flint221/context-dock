@@ -467,6 +467,7 @@ fn locked_writes_are_retried_and_archive_junctions_are_refused() {
         )
         .unwrap());
     assert_eq!(f.count(&document), 1);
+    assert!(f.r.current_location(&document).is_ok());
     drop(writer);
     let outside = f._temp.path().join("outside");
     fs::create_dir(&outside).unwrap();

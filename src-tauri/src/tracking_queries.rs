@@ -234,7 +234,12 @@ impl Registry {
         let(project,relative):(String,String)=self.db.query_row("SELECT d.project_id,s.relative_path FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1",[document],|r|Ok((r.get(0)?,r.get(1)?))).map_err(error)?;
         let root = self.path(&project)?;
         let checked = storage::checked(Path::new(&root), &relative, false)?;
-        let _ = storage::locked_read(&checked.path, false)?;
+        if !std::fs::metadata(&checked.path)
+            .map_err(|e| e.to_string())?
+            .is_file()
+        {
+            return Err("The active source file is unavailable.".into());
+        }
         Ok(checked.path.to_string_lossy().into())
     }
 }
