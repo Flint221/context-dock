@@ -10,7 +10,7 @@ Milestone 4 checks ran on Windows 11 on October 19, 2026, using the existing Nod
 | rustfmt / all-target Clippy with warnings denied | Passed |
 | Production Vite bundle | Passed through the NSIS build |
 | npm audit | Zero reported vulnerabilities |
-| Windows x64 NSIS | Built unsigned `ContextDock_0.4.0_x64-setup.exe`, approximately 3.94 MiB |
+| Windows x64 NSIS | Built unsigned `ContextDock_0.4.0_x64-setup.exe`, approximately 4 MiB |
 | Versions / identity | npm + npm lock, Cargo + Cargo lock, Tauri 0.4.0; `com.contextdock.desktop` and existing per-user paths retained |
 | Migration | Transactional schema 2→3 fixture preserves tracking/archival preferences and defaults cloud off; existing schema-1/capture/archival regressions pass |
 | Whitespace | `git diff --check` passed |
