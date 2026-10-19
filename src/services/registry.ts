@@ -2,7 +2,10 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Snapshot, Theme, TrackingView, Version } from "../types";
+import type { Comparison } from "../comparison";
 export const registry = {
+  compare: (earlier: string, later: string) =>
+    invoke<Comparison>("compare_versions", { earlier, later }),
   subscribe: (changed: () => void) =>
     listen<string>("registry-changed", changed),
   tracking: (project: string) =>

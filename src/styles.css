@@ -59,6 +59,9 @@ button:hover:not(:disabled) {
 }
 button:disabled {
   opacity: 0.5;
+  cursor: not-allowed;
+}
+button[aria-busy="true"] {
   cursor: wait;
 }
 button:focus-visible,
@@ -496,7 +499,8 @@ header {
 .toolbar-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
 }
 .toolbar-actions button {
   font-size: 12px;
@@ -920,15 +924,23 @@ dialog {
   max-height: 90vh;
   overflow: auto;
 }
-.history-current {
-  margin: 16px 0;
+.history-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 18px 0 22px;
+}
+.version-list {
+  display: grid;
+  gap: 14px;
 }
 .version-card {
   border: 1px solid var(--border);
   background: var(--bg);
   padding: 17px;
   border-radius: 9px;
-  margin-top: 16px;
+  margin-top: 0;
 }
 .version-card > .section-heading {
   margin-bottom: 14px;
@@ -974,4 +986,167 @@ dialog {
 }
 .tracking-panel table {
   margin-top: 4px;
+}
+dialog:has(.comparison) {
+  width: min(1200px, calc(100vw - 40px));
+}
+.comparison-selectors {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 14px;
+  margin: 20px 0;
+}
+.comparison-selectors label,
+.diff-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.comparison-selectors select {
+  width: 100%;
+}
+.comparison > button:first-child {
+  margin-bottom: 12px;
+}
+.comparison-selectors > button {
+  align-self: end;
+  min-height: 39px;
+}
+.diff-controls select {
+  min-width: 160px;
+}
+.diff-navigation,
+.diff-copy-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.diff-navigation > span {
+  min-width: 90px;
+  text-align: center;
+}
+.diff-copy-actions,
+.diff-context-toggle {
+  margin-left: auto;
+}
+.diff-summary,
+.diff-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 18px 0;
+}
+.diff-summary {
+  align-items: center;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.comparison details,
+.comparison > p,
+.diff-controls,
+.diff-summary {
+  font-size: 12px;
+}
+.comparison details {
+  overflow-wrap: anywhere;
+}
+.comparison details li {
+  margin-bottom: 8px;
+}
+.comparison-empty {
+  padding: 15px;
+  border: 1px solid var(--border);
+}
+.diff-content {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: auto;
+  max-height: 52vh;
+}
+.diff-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.diff-row > :first-child {
+  border-right: 1px solid var(--border);
+}
+.diff-cell {
+  display: flex;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 3px 6px;
+}
+.diff-cell code {
+  font:
+    12px/1.6 Consolas,
+    "Cascadia Code",
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+  tab-size: 4;
+}
+.line-number {
+  flex: 0 0 42px;
+  text-align: right;
+  font:
+    11px/1.75 Consolas,
+    monospace;
+  color: var(--muted);
+  padding-right: 8px;
+  user-select: none;
+}
+.diff-sign {
+  flex: 0 0 18px;
+  font-family: monospace;
+  user-select: none;
+}
+.diff-cell.add {
+  background: rgba(43, 163, 93, 0.16);
+}
+.diff-cell.remove {
+  background: rgba(214, 73, 73, 0.16);
+}
+.diff-column-head strong {
+  padding: 9px;
+  font-size: 12px;
+}
+.unified-line {
+  display: flex;
+}
+.unified-line > .diff-cell {
+  flex: 1;
+}
+.unified-line > .line-number {
+  padding-top: 3px;
+}
+.no-newline {
+  color: var(--muted);
+  font-style: italic;
+}
+.diff-range {
+  color: var(--muted);
+  margin: 14px 0 8px;
+}
+@media (max-width: 1000px) {
+  .comparison-selectors {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .comparison-selectors > button {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+@media (max-width: 750px) {
+  .comparison-selectors {
+    grid-template-columns: 1fr;
+  }
+  .line-number {
+    flex-basis: 30px;
+  }
 }

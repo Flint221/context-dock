@@ -1,6 +1,6 @@
-# Architecture — Milestone 2
+# Architecture — Milestone 3
 
-ContextDock 0.2.0 extends the Milestone 1 Tauri/React application without changing `com.contextdock.desktop`, existing entity UUIDs, or the supported per-user application data location.
+ContextDock 0.3.0 extends the existing Tauri/React application without changing `com.contextdock.desktop`, existing entity UUIDs, or the supported per-user application data location.
 
 ## Module boundaries
 
@@ -110,8 +110,58 @@ After a crash between rename and DB commit, recovery verifies destination hash *
 
 Safety tests use temporary databases/roots and real Windows ACL, sharing-lock, junction and native-watcher fixtures. Crash tests interrupt capture before/after finalization and archive after handle rename but before the DB update. Frontend tests exercise consent separation, selection, matching decisions and history actions without building a GUI automation harness. See [verification](verification.md) and the mandatory [manual testing guide](manual-testing-milestone-2.md).
 
-Milestone 3 can add local content extraction/diffs and history comparison without changing version identity/storage. Optional cloud indexing and AI metadata belong to later migrations/services. No embeddings, vector stores, cloud sync, detailed diffs, AI summaries, rollback, signer or updater is implemented here.
+Milestone 3 adds the read-only comparison path below without changing version identity/storage. Optional cloud indexing and AI metadata belong to later migrations/services. No embeddings, vector stores, cloud sync, AI summaries, rollback, signer or updater is implemented here.
 
 Official references reviewed: [notify](https://docs.rs/notify/latest/notify/), [Rust Windows file options](https://doc.rust-lang.org/std/os/windows/fs/trait.OpenOptionsExt.html), [Windows rename semantics](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info), [SQLite transactions](https://www.sqlite.org/lang_transaction.html), and the existing Tauri/React architecture references from Milestone 1.
 
 Interrupted archive copies with a pre-existing, unfinalized temporary are retried using a newly journaled private temporary name. The earlier partial bytes are retained, never truncated or automatically deleted. This also avoids mistaking an unrelated staging-name collision for application ownership.
+
+## Local comparison (Milestone 3)
+
+`comparison_models.rs` defines format-version-1 IPC payloads; `comparison.rs` resolves stored version UUIDs and calculates exact line edits; `extraction.rs` extracts bounded Markdown/DOCX content. `src/comparison.ts` mirrors the contract. `VersionComparison.tsx` replaces the contents of the existing history dialog, without stacking another modal. The Milestone 2 tracking/documents sibling-key fix remains intact.
+
+### Identity, synchronization and read-only verification
+
+`compare_versions(earlier, later)` acquires a single comparison permit (concurrent requests receive a retry message). A short blocking registry lookup obtains both immutable version records and the family's name/type. Different document IDs are rejected. Reversed selections are ordered by internal version number. Self-comparison is allowed for identical-content testing without creating duplicate captures.
+
+The lookup returns an owned `ComparisonJob` and releases the shared registry mutex. A separate blocking worker resolves both snapshot paths with existing `storage::checked`, pins directories, rejects traversal/reparse escapes, and opens ordinary read-only handles through `locked_read`. Windows sharing denies writers/deleters. Each bounded buffer is SHA-256 verified against the stored hash before extraction; the exact verified buffer is the extraction input, avoiding a second unverified path read. Disappearance/locks/integrity conflicts abort the result. No active-source or archive fallback exists. No comparison path calls capture, reconciliation, journal recovery, SQL writes or archive operations. Schema 2 and `com.contextdock.desktop` remain unchanged.
+
+### Extraction policy
+
+Markdown is strict UTF-8, with optional BOM removed for text comparison and CRLF converted to LF. Warnings identify normalization for each side. All other text/whitespace, blank lines, markup and trailing-newline presence remain meaningful. No Markdown rendering or formatting is performed; line contents display literally. Invalid UTF-8/NUL/UTF-16 produce explanatory errors. Byte identity is computed separately from normalized text equivalence.
+
+DOCX uses `zip` 9.0.5 with only Deflate support and `quick-xml` 0.42.0 without external-resource or encoding features. An EOCD/central-directory preflight bounds entry allocations before ZIP parsing. Only `word/document.xml` is decompressed; entries are never extracted to disk. XML parsing is streaming and namespace-aware, accepting transitional and strict WordprocessingML. DTDs/custom entities are rejected. Standard/numeric character references and Unicode are preserved. No relationships or URLs are fetched.
+
+| Structure | Text policy |
+| --- | --- |
+| Body paragraphs and headings | Paragraph order, newline after each paragraph; style ignored |
+| Text split across runs | Concatenated without artificial separators; bold/italic/run changes alone do not change text |
+| Breaks, tabs, nonbreaking/soft hyphens | Explicit characters retained |
+| Tables | XML cell order; tabs between cells, newline between rows; paragraph breaks within cells retained |
+| Merged/complex cells | No visual grid reconstruction; XML order only; nested tables fail explicitly |
+| Hyperlinks | Visible label text included; targets never opened or compared |
+| Fields/generated content | Stored displayed `w:t` result included; instructions ignored and never evaluated; generated numbering not reconstructed |
+| Tracked changes | Accepted-text view: insertions/move-to included, deletions/move-from excluded; no revision metadata/Word Track Changes comparison |
+| Headers/footers, footnotes/endnotes, comments | Excluded; other package parts are not decompressed |
+| Images/charts, drawings/text boxes, embedded objects, altChunk | Excluded with scope disclosure; no execution/rendering |
+| Formatting, hidden-text visibility, layout | Not compared; body text included regardless of run visibility properties |
+
+The result always includes the DOCX scope disclosure. Equivalent text with different bytes means only equivalence under this policy, not identical Word documents. Malformed/missing bodies, invalid encodings and unsupported structures fail instead of returning a partial authoritative diff.
+
+### Algorithm, payload and complexity
+
+[`similar` 3.2.0](https://docs.rs/similar/3.2.0/similar/) uses deterministic Myers line diffing with standard-library deadline support. Myers handles insertions/deletions and shifted passages without naive positional comparison. A two-second calculation timeout bounds highly divergent inputs; because the library may return an approximate script on timeout, ContextDock checks elapsed time and rejects a deadline-crossing result. Accepted results contain the exact edit script. Modified passages appear as related removals/additions. Final-newline presence participates in comparison.
+
+`Comparison` contains format version, family identity/name/type, ordered version IDs/numbers/source names/capture times/hashes, byte identity, text equivalence, added/removed totals, changed-block count, warnings, and ordered `DiffBlock`s. Blocks are unchanged runs or contiguous edits, with stable positional IDs, one-based old/new start lines and counts (zero count for insertion/deletion gaps). `DiffLine` has kind, nullable old/new numbers, literal text and final-newline status. Unchanged blocks supply expandable context; no changed section is silently truncated. Totals use the full native result, independently of the visible page.
+
+Bounds: one comparison worker; 16 MiB per snapshot, 4 MiB extracted text per side, 20,000 lines per side, 64 KiB per line; 2048 ZIP entries, 128 MiB declared total expanded package, 32 MiB per entry, 200:1 ratio, 8 MiB decompressed body XML and nesting depth 128. Unsupported ZIP64/multi-volume layouts fail. Content is held in bounded memory, not persisted. No comparison cache exists: every request revalidates hashes. These are supported limits, not claims of arbitrary-size handling.
+
+### UI and lifecycle
+
+History offers Compare Versions with two or more captures and defaults to the latest two. Each selector shows internal number, capture date and original source name. Users can independently choose any historical pair; reversed inputs are explained and normalized natively. A single-version family gets explanatory text. The same version on both sides provides a controlled identical-content case.
+
+Unified/split views show literal monospace text, line numbers and +/− markers as well as theme-compatible colors. Split rows pair replacement lines and retain blanks for one-sided edits. Previous/Next change selects and scrolls the corresponding region; context is three lines by default, expandable. Only 100 unified lines or split rows render at a time; paging exposes all remaining content within input bounds. Equivalent-text results show a clear state and separate byte status. Copy summary/changed text use the browser clipboard only after explicit clicks and copy the full result. Native file export is omitted.
+
+The existing dialog remains the sole modal and restores focus to Compare Versions on return; the comparison back button receives initial focus. Closing/changing family invalidates pending UI responses. Errors clear loading, permit reselection/retry and retain Back/Close. History-load failures show retry instead of a permanent spinner. Dispatched native requests finish under their bounds even if the view closes; no cancellation API is introduced.
+
+Primary dependency references: [similar algorithms/deadlines](https://docs.rs/similar/3.2.0/similar/), [zip reader](https://docs.rs/zip/9.0.5/zip/read/struct.ZipArchive.html), [quick-xml parser](https://docs.rs/quick-xml/0.42.0/quick_xml/). Focused tests and the [12-case manual guide](manual-testing-milestone-3.md) cover correctness and safety without a complex GUI harness.

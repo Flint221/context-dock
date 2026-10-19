@@ -8,9 +8,9 @@ Tauri/React desktop shell, existing-folder registration, independent metadata di
 
 Opt-in per-project native watchers; selected independent initial histories; deterministic filename/date matching and explicit review; SHA-256 duplicate prevention; immutable per-document snapshots; separately authorized Old Context Files archival; persisted activity and recoverable operation journals; startup reconciliation; version history and verified location actions. Existing IDs/preferences migrate in place. See the manual testing and verification records for validation and remaining distribution checks.
 
-## Milestone 3 — Local diff and history comparison
+## Implemented: Milestone 3 — Local diff and history comparison
 
-Add document-specific content extraction and local comparison between preserved versions. Define Markdown/text and DOCX extraction boundaries, unsupported binary changes, accessible comparison navigation and long-history performance. Do not conflate capture reasons/metadata with content differences.
+SHA-256-verified Markdown and bounded DOCX body extraction; exact Myers diffs for any historical pair in one family; raw bytes versus normalized text; unified/split display; paged regions, context expansion and change navigation; clipboard summaries/changed text; actionable errors and modal lifecycle coverage. No schema migration, capture changes, comparison cache or AI interpretation. See the Milestone 3 manual guide and verification record for limits and remaining interactive upgrade/Word checks.
 
 ## Milestone 4 — Optional OpenAI indexing
 
