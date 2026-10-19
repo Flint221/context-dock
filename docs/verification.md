@@ -1,4 +1,44 @@
-# Verification — ContextDock 0.2.0
+# Verification — ContextDock 0.3.0
+
+Milestone 3 local checks completed on Windows 11 on October 19, 2026, with Node.js 24.12.0, Rust 1.99.1 and the x86_64 MSVC toolchain on an ARM64 host. Tests use disposable temporary databases, source roots and snapshot stores. No registered user project, real database, archive or snapshot was modified by testing. The prior Milestone 2 record is retained below.
+
+| Check | Milestone 3 result |
+| --- | --- |
+| TypeScript / ESLint | Passed |
+| Frontend tests | Passed: 16 tests in 4 files |
+| Rust tests | Passed: 37 tests, including all 24 existing foundation/tracking/archival tests |
+| rustfmt / Clippy all targets with warnings denied | Passed |
+| Production TypeScript/Vite bundle | Passed |
+| npm audit | Zero reported vulnerabilities |
+| Windows x64 NSIS build | Passed: unsigned `ContextDock_0.3.0_x64-setup.exe`, approximately 3.47 MiB |
+| Versions / identifier / database | npm + npm lock, Cargo + Cargo lock, Tauri all 0.3.0; `com.contextdock.desktop` retained; schema stays 2 |
+| Diff manual samples | Actual Rust engine verifies A/B +4/−2, B/C +7/−2, A/C +10/−3 |
+| git diff --check | Passed |
+
+## Milestone 3 coverage
+
+- Markdown identity, empty inputs, insertions, deletions, separate edit regions, exact old/new ranges and line numbers, Unicode, BOM, CRLF/LF equivalence, meaningful whitespace and final-newline changes, invalid UTF-8/NUL/UTF-16 rejection.
+- A 10,000-line document with one real change; line-count/line-length limits reject unsupported inputs rather than truncating.
+- Actual temporary-registry captures compare nonconsecutive versions after the source disappears, normalize reversed order, allow self-comparison and distinguish byte changes from normalized equivalence. SQL total-change counts and version counts stay unchanged.
+- Different-family/missing UUID rejection; missing snapshots, hash mismatch and traversal fail closed. Real Windows exclusive sharing locks, snapshot-directory junction escape and oversized snapshot rejection are exercised.
+- Locally generated ZIP/DOCX fixtures cover paragraph/run/Unicode/entity/break/table extraction, formatting-only differences, displayed hyperlink labels, accepted inserted/deleted text policy, skipped instructions/drawings, corrupt archives, absent body, malformed XML, trailing data, custom entities/DTDs, excessive compression, XML size/depth and forged central-directory counts. These are deterministic Open XML fixtures, not a claim of passing Microsoft Word application behavior.
+- Frontend service mocks cover default/independent nonconsecutive selectors, both modes, previous/next change, summary/byte distinction, error/retry, one-dialog history transitions and focus restoration, discarded responses after switching family, 100-line rendering with all 350 changed lines reachable, and history-load retry. Existing repeated-tracking-panel/navigation tests remain green.
+
+## Architecture and validation boundaries
+
+Comparisons look up existing immutable UUID records briefly under the shared registry mutex, then release it before guarded I/O, hashing, extraction and Myers computation on a blocking worker. No migration, writes, capture, journal replay or comparison cache is introduced. The application identifier and per-user NSIS/data configuration are unchanged. Production IPC exposes version IDs only.
+
+Dependencies introduced: `similar` 3.2.0, `quick-xml` 0.42.0 and `zip` 9.0.5 (Deflate; defaults disabled), with a committed Cargo lockfile. Limits and the complete DOCX inclusion/exclusion policy are in [architecture](architecture.md#local-comparison-milestone-3) and displayed in comparison warnings. Byte identity is separate from text equivalence; no AI interpretation exists.
+
+The installer builds locally. It has not been installed by the agent over the user's real installation/database. Interactive upgrade/retention, Word save/formatting/locking behavior, SmartScreen, clipboard/Explorer and visual accessibility across themes remain user manual checks. Focused React tests do not constitute a full native GUI harness. No public tag/release or automatic updater was created, and the PR is not merged automatically.
+
+The [mandatory 12-test guide](manual-testing-milestone-3.md) provides exact A/B/C contents, safe capture order, UI clicks, expected results, failure/retry instructions, equivalent-content testing compatible with tracking deduplication, independent families, restart, optional Word, source safety, acceptance and cleanup. The final response also includes essential installation/testing steps.
+
+The retained [Windows workflow](https://github.com/Flint221/context-dock/actions/workflows/windows.yml) validates the PR and publishes **ContextDock-Windows-x64-setup** after a successful run. Check the run for the intended commit; local success does not imply remote completion. Remote status/artifact availability are reported in the PR/final response when available.
+
+---
+
+# Prior verification — ContextDock 0.2.0
 
 Local checks completed on Windows 11 on October 19, 2026, using Node.js 24.12.0, Rust 1.99.1 and the x86_64 MSVC toolchain. The host is ARM64, running x64 executables through Windows emulation. Milestone 1 is the merged foundation; the following record covers Milestone 2.
 
