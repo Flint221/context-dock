@@ -329,6 +329,8 @@ pub fn archive_copy(
         .map_err(io)?;
     std::io::copy(&mut source, &mut out).map_err(io)?;
     out.sync_all().map_err(io)?;
+    drop(out);
+    drop(source);
     verify(&temp.path, expected)?;
     fs::hard_link(&temp.path, &dest.path).map_err(io)?;
     verify(&dest.path, expected)?;
