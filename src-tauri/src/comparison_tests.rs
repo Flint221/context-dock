@@ -269,6 +269,9 @@ fn zip_directory_and_xml_nesting_claims_are_bounded() {
     assert!(extract(&bytes, "word").unwrap_err().contains("entry count"));
     let too_deep = xml(&format!("{}{}", "<w:p>".repeat(130), "</w:p>".repeat(130)));
     assert!(body_xml(&too_deep).unwrap_err().contains("128"));
+    assert!(body_xml(&format!("{}corrupt trailing text", xml("")))
+        .unwrap_err()
+        .contains("outside"));
 }
 #[cfg(windows)]
 #[test]

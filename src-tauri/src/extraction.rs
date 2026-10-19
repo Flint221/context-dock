@@ -229,7 +229,16 @@ pub(crate) fn body_xml(xml: &str) -> Result<String> {
             {
                 out.push_str(e.as_ref());
             }
+            Event::Text(e) if stack.is_empty() && !e.as_ref().trim().is_empty() => {
+                return Err("Malformed DOCX XML: text outside the document root.".into());
+            }
+            Event::CData(_) if stack.is_empty() => {
+                return Err("Malformed DOCX XML: CDATA outside the document root.".into());
+            }
             Event::GeneralRef(e) => {
+                if stack.is_empty() {
+                    return Err("Malformed DOCX XML: reference outside the document root.".into());
+                }
                 let name: &str = e.as_ref();
                 let resolved = quick_xml::escape::unescape(&format!("&{name};"))
                     .map_err(|_| "Unsupported XML entity; custom entities are not allowed.")?
