@@ -246,3 +246,66 @@ fn versions_snapshot_identity_and_integrity_fail_closed() {
     job.earlier.relative = "../outside.md".into();
     assert!(compare(job).err().unwrap().contains("Unsafe relative"));
 }
+#[test]
+fn manual_markdown_samples_have_documented_counts() {
+    let guide = include_str!("../../docs/manual-testing-milestone-3.md");
+    let samples: Vec<_> = guide
+        .split("```markdown\n")
+        .skip(1)
+        .take(3)
+        .map(|s| s.split("```").next().unwrap().replace("\r\n", "\n"))
+        .collect();
+    assert_eq!(samples.len(), 3);
+    for (a, b, added, removed) in [(0, 1, 4, 2), (1, 2, 7, 2), (0, 2, 10, 3)] {
+        let (_, actual_added, actual_removed, _) = diff(&samples[a], &samples[b]).unwrap();
+        assert_eq!((actual_added, actual_removed), (added, removed));
+    }
+}
+#[test]
+fn zip_directory_and_xml_nesting_claims_are_bounded() {
+    let mut bytes = package(&xml(""), CompressionMethod::Stored);
+    let eocd = bytes.len() - 22;
+    bytes[eocd + 8..eocd + 12].fill(0);
+    assert!(extract(&bytes, "word").unwrap_err().contains("entry count"));
+    let too_deep = xml(&format!("{}{}", "<w:p>".repeat(130), "</w:p>".repeat(130)));
+    assert!(body_xml(&too_deep).unwrap_err().contains("128"));
+}
+#[cfg(windows)]
+#[test]
+fn snapshot_locks_reparse_escape_and_oversize_are_rejected() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let f = Fixture::new();
+    let vs = f.r.versions(&f.doc).unwrap();
+    let exclusive = fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&vs[0].snapshot_path)
+        .unwrap();
+    assert!(compare(f.r.comparison_job(&vs[0].id, &vs[0].id).unwrap())
+        .err()
+        .unwrap()
+        .contains("unreadable"));
+    drop(exclusive);
+    let outside = f.root.join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("file.md"), "one\n").unwrap();
+    let link = f.r.store.join("escape");
+    assert!(std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(&outside)
+        .status()
+        .unwrap()
+        .success());
+    let mut job = f.r.comparison_job(&vs[0].id, &vs[0].id).unwrap();
+    job.earlier.relative = "escape/file.md".into();
+    assert!(compare(job).err().unwrap().contains("reparse"));
+    let large = f.r.store.join("large.md");
+    let file = fs::File::create(large).unwrap();
+    file.set_len(crate::extraction::MAX_SNAPSHOT as u64 + 1)
+        .unwrap();
+    drop(file);
+    let mut job = f.r.comparison_job(&vs[0].id, &vs[0].id).unwrap();
+    job.earlier.relative = "large.md".into();
+    assert!(compare(job).err().unwrap().contains("16 MiB"));
+}
