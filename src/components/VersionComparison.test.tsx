@@ -165,7 +165,10 @@ it("defaults to the latest pair, selects nonconsecutive versions and navigates b
   await user.selectOptions(screen.getByLabelText("Display mode"), "split");
   expect(screen.getByText("Earlier · v2")).toBeInTheDocument();
   expect(screen.getByText("Later · v3")).toBeInTheDocument();
+  const content = screen.getByRole("region", { name: "Comparison content" });
+  content.scrollTop = 500;
   await user.click(screen.getByRole("button", { name: "Next change" }));
+  expect(content.scrollTop).toBe(0);
   expect(screen.getByText("Change 2 of 2")).toBeInTheDocument();
   expect(screen.getByText("Development")).toBeInTheDocument();
   expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
@@ -273,8 +276,11 @@ it("bounds rendered changed lines and exposes every page without truncating", as
   await screen.findByText("Added 1");
   expect(document.querySelectorAll(".unified-line")).toHaveLength(100);
   expect(screen.queryByText("Added 101")).not.toBeInTheDocument();
+  const content = screen.getByRole("region", { name: "Comparison content" });
+  content.scrollTop = 500;
   for (let i = 0; i < 3; i++)
     await user.click(screen.getByRole("button", { name: "Next lines" }));
+  expect(content.scrollTop).toBe(0);
   expect(screen.getByText("Added 350")).toBeInTheDocument();
   expect(document.querySelectorAll(".unified-line")).toHaveLength(50);
   expect(screen.getByRole("button", { name: "Next lines" })).toBeDisabled();

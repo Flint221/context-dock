@@ -146,9 +146,13 @@ export function VersionComparison({
   const pages = Math.max(1, Math.ceil(count / PAGE_SIZE));
   const visiblePage = Math.min(page, pages - 1);
   const start = visiblePage * PAGE_SIZE;
+  function showPage(next: number) {
+    setPage(next);
+    if (content.current) content.current.scrollTop = 0;
+  }
   function navigate(next: number) {
     setChange(next);
-    setPage(0);
+    showPage(0);
     setContext(false);
     content.current?.scrollIntoView({ block: "nearest" });
   }
@@ -301,7 +305,7 @@ export function VersionComparison({
                 value={mode}
                 onChange={(e) => {
                   setMode(e.target.value);
-                  setPage(0);
+                  showPage(0);
                 }}
               >
                 <option value="unified">Unified diff</option>
@@ -329,7 +333,7 @@ export function VersionComparison({
               disabled={!indexes.length}
               onClick={() => {
                 setContext(!context);
-                setPage(0);
+                showPage(0);
               }}
             >
               {context
@@ -375,7 +379,7 @@ export function VersionComparison({
           <div className="diff-controls">
             <button
               disabled={visiblePage === 0}
-              onClick={() => setPage(visiblePage - 1)}
+              onClick={() => showPage(visiblePage - 1)}
             >
               Previous lines
             </button>
@@ -384,7 +388,7 @@ export function VersionComparison({
             </span>
             <button
               disabled={visiblePage === pages - 1}
-              onClick={() => setPage(visiblePage + 1)}
+              onClick={() => showPage(visiblePage + 1)}
             >
               Next lines
             </button>
