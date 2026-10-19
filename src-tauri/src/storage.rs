@@ -352,3 +352,26 @@ pub fn cleanup_archive_temp(root: &Path, temp_relative: &str, dest_relative: &st
         }
     }
 }
+#[cfg(windows)]
+pub fn file_identity(file: &File) -> Result<String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+    };
+    let mut info = std::mem::MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::uninit();
+    // Win32 initializes the entire output structure on success.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0 {
+        return Err(io(std::io::Error::last_os_error()));
+    }
+    let info = unsafe { info.assume_init() };
+    Ok(format!(
+        "{}:{}:{}",
+        info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow
+    ))
+}
+#[cfg(unix)]
+pub fn file_identity(file: &File) -> Result<String> {
+    use std::os::unix::fs::MetadataExt;
+    let m = file.metadata().map_err(io)?;
+    Ok(format!("{}:{}", m.dev(), m.ino()))
+}

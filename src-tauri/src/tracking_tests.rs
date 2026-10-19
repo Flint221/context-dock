@@ -406,11 +406,18 @@ fn archive_recovers_after_source_rename_before_database_commit() {
     let mut f = Fixture::new(&[("Master_v1.md", "one")]);
     f.enable(true);
     let document = f.prepare_replacement("Master_v1.md", "Master_v2.md", "two");
-    let (_, plan) = f.pending_archive();
+    let (operation, mut plan) = f.pending_archive();
     let root = PathBuf::from(f.r.path(&f.project).unwrap());
     let source = storage::checked(&root, "Master_v1.md", false).unwrap();
     let dest = storage::checked(&root, &plan.destination, true).unwrap();
     let old = storage::locked_read(&source.path, true).unwrap();
+    plan.old_identity = Some(storage::file_identity(&old).unwrap());
+    f.r.db
+        .execute(
+            "UPDATE operations SET payload=?1 WHERE id=?2",
+            rusqlite::params![serde_json::to_string(&plan).unwrap(), operation],
+        )
+        .unwrap();
     storage::rename_verified(&old, &dest.path).unwrap();
     drop(old);
     assert!(f.r.recover_operations(&f.project, true).unwrap().is_empty());

@@ -39,6 +39,7 @@ pub struct ArchivePlan {
     pub destination: String,
     pub temporary: String,
     pub mode: String,
+    pub old_identity: Option<String>,
 }
 fn encode<T: Serialize>(p: &T) -> Result<String> {
     serde_json::to_string(p).map_err(|e| e.to_string())
@@ -49,14 +50,15 @@ fn event(db: &Connection, project: &str, kind: &str, message: &str) -> Result<()
 }
 fn enqueue_archive(
     db: &Connection,
-    project: &str,
-    document: &str,
+    source: &Source,
     previous: Option<&str>,
     old_source: Option<&str>,
     next: &str,
-    new_source: &str,
     allowed: bool,
 ) -> Result<()> {
+    let project = &source.project_id;
+    let document = &source.document_id;
+    let new_source = &source.id;
     if !allowed {
         return Ok(());
     }
@@ -116,6 +118,7 @@ fn enqueue_archive(
         old_source: old_source.into(),
         new_source: new_source.into(),
         destination,
+        old_identity: None,
         temporary: format!("{directory}/.contextdock-{id}.tmp"),
         mode: if old_source == new_source || status == "missing" {
             "copy"
@@ -182,12 +185,10 @@ impl Registry {
             )?;
             enqueue_archive(
                 &tx,
-                &source.project_id,
-                &source.document_id,
+                source,
                 previous.as_deref(),
                 old_source.as_deref(),
                 &version,
-                &source.id,
                 may_archive,
             )?;
             if previous.as_deref() != Some(&version) || old_source.as_deref() != Some(&source.id) {
@@ -285,12 +286,10 @@ impl Registry {
         // Archive intent is committed together with the new version, never in a later best-effort step.
         enqueue_archive(
             &tx,
-            &plan.project,
-            &plan.document,
+            &source,
             plan.previous_version.as_deref(),
             plan.previous_source.as_deref(),
             &plan.version,
-            &plan.source,
             plan.may_archive,
         )?;
         tx.execute(
@@ -311,6 +310,7 @@ impl Registry {
         Ok(())
     }
     fn finish_archive(&mut self, id: &str, plan: &ArchivePlan, finalized: bool) -> Result<()> {
+        let mut plan = plan.clone();
         let (enabled, archive, _) = self.tracking_flags(&plan.project)?;
         if !enabled || !archive {
             return Ok(());
@@ -357,6 +357,10 @@ impl Registry {
                     return Err("Archive destination already exists while the previous source remains. Nothing was overwritten or moved.".into());
                 }
                 storage::verify(&dest.path, &old_hash)?;
+                let identity = storage::file_identity(&storage::locked_read(&dest.path, false)?)?;
+                if plan.old_identity.as_deref() != Some(&identity) {
+                    return Err("Archive ownership could not be proven after interruption. Existing destination was left untouched.".into());
+                }
             } else {
                 let current = storage::checked(root, &replacement.relative, false)?;
                 let mut current_file = storage::locked_read(&current.path, false)?;
@@ -366,6 +370,23 @@ impl Registry {
                 let mut old_file = storage::locked_read(&source.path, true)?;
                 if storage::hash(&mut old_file)? != old_hash {
                     return Err("Previous source changed unexpectedly. Archival conflict: nothing was moved.".into());
+                }
+                let identity = storage::file_identity(&old_file)?;
+                if plan
+                    .old_identity
+                    .as_ref()
+                    .is_some_and(|expected| expected != &identity)
+                {
+                    return Err("Previous source identity changed. Nothing was moved.".into());
+                }
+                if plan.old_identity.is_none() {
+                    plan.old_identity = Some(identity);
+                    self.db
+                        .execute(
+                            "UPDATE operations SET payload=?1,updated_at=?2 WHERE id=?3",
+                            params![encode(&plan)?, models::now(), id],
+                        )
+                        .map_err(error)?;
                 }
                 storage::rename_verified(&old_file, &dest.path)?;
             }
