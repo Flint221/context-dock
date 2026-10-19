@@ -113,3 +113,5 @@ Safety tests use temporary databases/roots and real Windows ACL, sharing-lock, j
 Milestone 3 can add local content extraction/diffs and history comparison without changing version identity/storage. Optional cloud indexing and AI metadata belong to later migrations/services. No embeddings, vector stores, cloud sync, detailed diffs, AI summaries, rollback, signer or updater is implemented here.
 
 Official references reviewed: [notify](https://docs.rs/notify/latest/notify/), [Rust Windows file options](https://doc.rust-lang.org/std/os/windows/fs/trait.OpenOptionsExt.html), [Windows rename semantics](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info), [SQLite transactions](https://www.sqlite.org/lang_transaction.html), and the existing Tauri/React architecture references from Milestone 1.
+
+Interrupted archive copies with a pre-existing, unfinalized temporary are retried using a newly journaled private temporary name. The earlier partial bytes are retained, never truncated or automatically deleted. This also avoids mistaking an unrelated staging-name collision for application ownership.
