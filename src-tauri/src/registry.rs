@@ -2,64 +2,87 @@ use crate::{
     models::{self, Document, Project, Snapshot},
     scanner,
 };
-use rusqlite::{params, Connection};
-use std::path::Path;
-type Result<T> = std::result::Result<T, String>;
-fn error(e: rusqlite::Error) -> String {
+use rusqlite::{params, Connection, OptionalExtension};
+use std::path::{Path, PathBuf};
+pub type Result<T> = std::result::Result<T, String>;
+pub fn error(e: rusqlite::Error) -> String {
     format!("Local database operation failed: {e}")
 }
 pub struct Registry {
     pub db: Connection,
+    pub store: PathBuf,
 }
 impl Registry {
     pub fn open(path: &Path) -> Result<Self> {
         let mut db = Connection::open(path).map_err(error)?;
         db.busy_timeout(std::time::Duration::from_secs(10))
             .map_err(error)?;
-        db.execute_batch("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL;")
+        db.execute_batch(
+            "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
+        )
+        .map_err(error)?;
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
-        let version: i64 = db
+        let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 1 {
+        if version > 2 {
             return Err("This database requires a newer ContextDock version.".into());
         }
-        if version == 0 {
-            let tx = db.transaction().map_err(error)?;
+        if version < 1 {
             tx.execute_batch(include_str!("../migrations/001_registry.sql"))
                 .map_err(error)?;
-            tx.pragma_update(None, "user_version", 1).map_err(error)?;
-            tx.commit().map_err(error)?;
         }
-        Ok(Self { db })
+        if version < 2 {
+            tx.execute_batch(include_str!("../migrations/002_tracking.sql"))
+                .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 2).map_err(error)?;
+        tx.commit().map_err(error)?;
+        let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
+            .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
+        Ok(Self { db, store })
     }
     pub fn add(&mut self, name: &str, path: &str) -> Result<String> {
         let name = valid_name(name)?;
         let path = scanner::canonical(path)?;
-        let id = uuid::Uuid::new_v4().to_string();
-        let exists: bool = self
+        let key = models::key(&path);
+        let existing: Option<(String, Option<String>)> = self
             .db
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM projects WHERE path_key=?1)",
-                [models::key(&path)],
-                |r| r.get(0),
+                "SELECT id,removed_at FROM projects WHERE path_key=?1",
+                [&key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
+            .optional()
             .map_err(error)?;
-        if exists {
-            return Err("This folder is already registered.".into());
-        }
-        self.db
-            .execute(
-                "INSERT INTO projects(id,name,path,path_key,created_at) VALUES(?1,?2,?3,?4,?5)",
-                params![id, name, path, models::key(&path), models::now()],
-            )
-            .map_err(error)?;
+        let id = if let Some((id, removed)) = existing {
+            if removed.is_none() {
+                return Err("This folder is already registered.".into());
+            }
+            self.db.execute("UPDATE projects SET removed_at=NULL,name=?1,path=?2,tracking_enabled=0,archive_enabled=0,watch_status='off' WHERE id=?3",params![name,path,id]).map_err(error)?;
+            id
+        } else {
+            let id = uuid::Uuid::new_v4().to_string();
+            self.db
+                .execute(
+                    "INSERT INTO projects(id,name,path,path_key,created_at) VALUES(?1,?2,?3,?4,?5)",
+                    params![id, name, path, key, models::now()],
+                )
+                .map_err(error)?;
+            id
+        };
         self.refresh(&id)?;
         Ok(id)
     }
     pub fn path(&self, id: &str) -> Result<String> {
         self.db
-            .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
+            .query_row(
+                "SELECT path FROM projects WHERE id=?1 AND removed_at IS NULL",
+                [id],
+                |r| r.get(0),
+            )
             .map_err(|_| "Project registration was not found.".into())
     }
     pub fn rename(&self, id: &str, name: &str) -> Result<()> {
@@ -71,35 +94,45 @@ impl Registry {
         Ok(())
     }
     pub fn remove(&self, id: &str) -> Result<()> {
-        self.db
-            .execute("DELETE FROM projects WHERE id=?1", [id])
-            .map_err(error)?;
+        // Tombstone the registration: captured history and bytes can be recovered by registering the same root again.
+        self.db.execute("UPDATE projects SET removed_at=?1,tracking_enabled=0,archive_enabled=0,watch_status='off' WHERE id=?2",params![models::now(),id]).map_err(error)?;
         Ok(())
     }
     pub fn refresh(&mut self, id: &str) -> Result<()> {
         let path = self.path(id)?;
-        let now = scanner::observed_at();
+        let now = models::now();
         let scan = scanner::scan(Path::new(&path));
         let tx = self.db.transaction().map_err(error)?;
         match scan {
             Err(message) => {
-                tx.execute("UPDATE projects SET status='unavailable',last_scan=?1,scan_error=?2 WHERE id=?3", params![now,message,id]).map_err(error)?;
-                tx.execute(
-                    "UPDATE documents SET status='unavailable' WHERE project_id=?1",
-                    [id],
-                )
-                .map_err(error)?;
+                tx.execute("UPDATE projects SET status='unavailable',last_scan=?1,scan_error=?2 WHERE id=?3",params![now,message,id]).map_err(error)?;
+                tx.execute("UPDATE source_files SET status='unavailable' WHERE project_id=?1 AND status!='archived'",[id]).map_err(error)?;
             }
             Ok(scan) => {
                 let complete = scan.errors.is_empty();
-                // Only a complete traversal proves a previously observed file is missing.
                 tx.execute(
-                    "UPDATE documents SET status=?1 WHERE project_id=?2",
+                    "UPDATE source_files SET status=?1 WHERE project_id=?2 AND status!='archived'",
                     params![if complete { "missing" } else { "unavailable" }, id],
                 )
                 .map_err(error)?;
                 for f in scan.files {
-                    tx.execute("INSERT INTO documents(id,project_id,name,relative_path,path_key,kind,size,modified_at,last_observed,status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,'available') ON CONFLICT(project_id,path_key) DO UPDATE SET name=excluded.name,relative_path=excluded.relative_path,kind=excluded.kind,size=excluded.size,modified_at=excluded.modified_at,last_observed=excluded.last_observed,status='available'", params![uuid::Uuid::new_v4().to_string(),id,f.name,f.relative,f.key,f.kind,f.size,f.modified,now]).map_err(error)?;
+                    let existing: Option<String> = tx
+                        .query_row(
+                            "SELECT id FROM source_files WHERE project_id=?1 AND path_key=?2",
+                            params![id, f.key],
+                            |r| r.get(0),
+                        )
+                        .optional()
+                        .map_err(error)?;
+                    if let Some(sid) = existing {
+                        tx.execute("UPDATE source_files SET name=?1,relative_path=?2,kind=?3,size=?4,modified_at=?5,last_observed=?6,status='available',disposition=CASE WHEN disposition='archived' THEN 'superseded' ELSE disposition END WHERE id=?7",params![f.name,f.relative,f.kind,f.size,f.modified,now,sid]).map_err(error)?;
+                    } else {
+                        let did = uuid::Uuid::new_v4().to_string();
+                        let sid = uuid::Uuid::new_v4().to_string();
+                        let name = crate::matching::stem(&f.name).display;
+                        tx.execute("INSERT INTO documents(id,project_id,family_name,kind,active_source_id) VALUES(?1,?2,?3,?4,?5)",params![did,id,name,f.kind,sid]).map_err(error)?;
+                        tx.execute("INSERT INTO source_files(id,project_id,document_id,name,relative_path,path_key,kind,size,modified_at,last_observed,status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'available')",params![sid,id,did,f.name,f.relative,f.key,f.kind,f.size,f.modified,now]).map_err(error)?;
+                    }
                 }
                 let message = if complete {
                     None
@@ -133,7 +166,7 @@ impl Registry {
         Ok(())
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
-        let mut q = self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM documents d WHERE d.project_id=p.id),(SELECT MAX(modified_at) FROM documents d WHERE d.project_id=p.id AND d.status='available') FROM projects p ORDER BY p.name COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id) FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
         let projects = q
             .query_map([], |r| {
                 Ok(Project {
@@ -146,12 +179,15 @@ impl Registry {
                     scan_error: r.get(6)?,
                     document_count: r.get(7)?,
                     latest_modified: r.get(8)?,
+                    tracking_enabled: r.get(9)?,
+                    archive_enabled: r.get(10)?,
+                    tracking_revision: r.get(11)?,
                 })
             })
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
-        let mut q = self.db.prepare("SELECT d.id,d.project_id,d.name,d.relative_path,p.path,d.kind,d.size,d.modified_at,d.last_observed,d.status FROM documents d JOIN projects p ON p.id=d.project_id ORDER BY d.relative_path COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT s.id,s.project_id,s.name,s.relative_path,p.path,s.kind,s.size,s.modified_at,s.last_observed,s.status,s.document_id FROM source_files s JOIN projects p ON p.id=s.project_id WHERE p.removed_at IS NULL AND s.status!='archived' ORDER BY s.relative_path COLLATE NOCASE").map_err(error)?;
         let documents = q
             .query_map([], |r| {
                 let root: String = r.get(4)?;
@@ -167,6 +203,7 @@ impl Registry {
                     modified_at: r.get(7)?,
                     last_observed: r.get(8)?,
                     status: r.get(9)?,
+                    document_id: r.get(10)?,
                 })
             })
             .map_err(error)?

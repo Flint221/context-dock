@@ -35,14 +35,17 @@ export function SettingsView({
         <ShieldCheck size={23} />
         <div>
           <h2>About ContextDock</h2>
-          <p>Version {version} · Milestone 1</p>
+          <p>Version {version} · Milestone 2</p>
           <p>
-            A local project and document registry. Scanning reads file metadata;
-            it does not index contents or create versions.
+            Discovery reads file metadata. Opt-in tracking captures immutable
+            local snapshots. Separately enabled archival preserves older sources
+            in Old Context Files.
           </p>
           <p>
-            Your registrations and preferences are stored in a per-user SQLite
-            database. No telemetry or cloud connection.
+            Registrations, history and preferences use per-user SQLite storage.
+            Snapshot bytes remain in application data across upgrades and
+            project removal. Monitoring operates only while ContextDock is
+            running. No telemetry or cloud connection.
           </p>
         </div>
       </section>

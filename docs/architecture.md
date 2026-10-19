@@ -1,62 +1,117 @@
-# Architecture
+# Architecture — Milestone 2
 
-ContextDock separates UI, typed IPC, native commands, registry persistence, and filesystem observation. The application identifier `com.contextdock.desktop` is stable across releases.
+ContextDock 0.2.0 extends the Milestone 1 Tauri/React application without changing `com.contextdock.desktop`, existing entity UUIDs, or the supported per-user application data location.
 
-## Components
+## Module boundaries
 
-- `src/App.tsx`: navigation, selected project, operation feedback, and service orchestration.
-- `src/components/`: dashboard, project cards/details, document table, settings, accessible native HTML modal, and registration form. Document table rendering is paged in batches of 100; search is deferred to keep input responsive.
-- `src/services/registry.ts`: typed Tauri invocation facade and native directory picker. `src/types.ts` mirrors serialized Rust payloads.
-- `src-tauri/src/lib.rs`: narrowly scoped commands, application startup, supported app-data path resolution, and shared registry state.
-- `registry.rs`: validation, versioned SQLite migrations, project operations, scan reconciliation, and snapshots.
-- `scanner.rs`: canonical root validation and recursive read-only traversal. It returns observations and errors, with no database responsibility.
-- `models.rs`: serialized project/document snapshots, UTC time and Windows identity-key helpers.
-- `migrations/001_registry.sql`: registry schema, uniqueness constraints, foreign keys and indexes.
-- `.github/workflows/windows.yml`: Windows validation, reproducible dependency installs, NSIS artifact creation, and isolated tag-release publishing.
+| Module | Responsibility |
+| --- | --- |
+| `src/App.tsx` | Existing shell, navigation, feedback and registry-change subscription |
+| `src/components/TrackingPanel.tsx` | Explicit tracking/archival consent, initialization selection, pending match decisions, family summaries and persisted activity |
+| `DocumentHistory.tsx` | Independent version history, metadata, verified locations and path copying |
+| `src/services/registry.ts` / `types.ts` | Typed, narrow Tauri IPC facade and payload contracts |
+| `src-tauri/src/lib.rs` | Supported data paths, one-process store lock, blocking-task IPC commands and app-lifetime monitor |
+| `registry.rs` / `models.rs` | Versioned migrations, project management, read-only metadata discovery/reconciliation and shell snapshots |
+| `tracking.rs` | Initialization, deterministic matching/review, shared change-processing pipeline and user associations |
+| `matching.rs` | Trailing date/version normalization, directory-scoped identity keys and safe display/archive names |
+| `storage.rs` | Streaming hashes, stability checks, pinned directories, staged no-overwrite finalization and verified Windows handle renames |
+| `operations.rs` | Durable capture/archive journal and crash replay; commit version and archive intent together |
+| `tracking_queries.rs` / `tracking_models.rs` | Source/family/history queries, persisted activity, narrow location validation and UI DTOs |
+| `monitor.rs` | Native watcher ownership, event coalescing, retry bounds, startup reconciliation and directory recovery |
+| `migrations/001_registry.sql`, `002_tracking.sql` | Transactional in-place evolution from Milestone 1 |
 
-The frontend can select a folder and call project-level operations. It has no filesystem plugin, shell plugin, database plugin, content-reading command, or arbitrary file-write API. The only plugin permission is `dialog:allow-open`, scoped to the main local window. Explorer opens only an existing registered project ID, resolved and validated in Rust. User-provided paths never become shell command strings. The CSP permits packaged assets and Tauri IPC, without remote scripts or network services.
+Expensive metadata traversal, hashing, snapshot work and archival run on blocking worker threads, outside Tauri's UI thread. A shared mutex serializes mutations across IPC and the monitor. A process-level store lock prevents simultaneous 0.2.0 processes from processing the same journal. SQLite uses WAL, `synchronous=FULL`, foreign keys, a busy timeout, versioned transactional migrations and uniqueness constraints.
 
-All database work and scans run through `spawn_blocking`, away from Tauri's UI thread. A mutex serializes native mutations and reconciliations so refresh/removal cannot race. SQLite also enforces canonical-folder and project/relative-path uniqueness. Snapshots may wait for an active scan; the frontend keeps navigation and progress feedback responsive. There is no background watcher. Scans are currently collected in memory; cancellation, streaming batches and larger-scale registry pagination are future hardening work.
+The frontend has no unrestricted filesystem, shell or SQL API. It selects a folder through the official dialog plugin and uses registered project/source/document/version IDs. Its additional permissions allow listening/unlistening to the native `registry-changed` event only; packaged local content remains protected by the existing CSP. Snapshot/archive opening validates a stored relative path and its hash, then opens its parent directory in Explorer. Paths are passed as process arguments, never interpolated shell commands.
 
-## Persistence and identities
+## Database evolution and identity
 
 ```text
-Project (UUID)
-  └── Logical document (UUID; Milestone 1 documents table)
-        └── Document version (future; no snapshots created in Milestone 1)
+Project (existing UUID)
+  ├── Logical document (existing documents UUID retained)
+  │     ├── Source file locations (many)
+  │     └── Immutable captured versions (many; independent sequence)
+  ├── Remembered filename/directory associations
+  ├── Pending document matches
+  ├── Recoverable capture/archive journal
+  └── Persisted tracking activity
 ```
 
-`projects` stores the display name, canonical root, normalized unique path key, creation time, scan status/time and scan warning. Display-name edits never rename the filesystem directory. Unregistering cascades only to registry documents through SQLite foreign keys.
+Migration 002 rebuilds `documents` as logical families and transfers every original observation into `source_files`, retaining both the original logical document UUID and the initial source UUID. It captures **no** versions, performs **no** folder organization, and defaults both tracking and archival to off. Existing projects/preferences are unchanged. A newer schema is rejected rather than downgraded.
 
-`documents` stores an independent logical document ID with its current observed source location and metadata: project ID, name, relative path, normalized identity key, kind, size, modification time, last successfully observed time, and availability. Absolute paths are derived from the registered canonical root and scanner-produced relative path. The `(project_id, path_key)` constraint distinguishes equal filenames in different directories. Repeated scans upsert observations without replacing UUIDs.
+- `projects`: original registration plus tracking/archival flags, initialization state, watcher status, actionable tracking errors and a removal tombstone.
+- `documents`: logical family identity/name/type, tracking state, active source ID and current captured version ID. A provisional observation associated with another family retains a hidden `merged_into` tombstone; identities are not recycled.
+- `source_files`: project/document association, relative-path identity, metadata/availability, capture disposition and last-hashed fingerprint/hash. Multiple paths can belong to one family. Superseded sources are not repeatedly reactivated merely because they remain on disk with archival off.
+- `document_versions`: version UUID, family-scoped sequential number, original filename/relative path, UTC capture/source times, byte count, SHA-256, snapshot path, optional archive path and capture reason. Unique `(document_id, number)` and `(document_id, sha256)` constraints prevent duplicate sequences/content. The active pointer can reuse an older version if identical historical bytes return; no duplicate content version or rollback action is invented.
+- `document_aliases`: user-established family association scoped by project, parent directory, normalized stem and document type. Conflicting associations require review.
+- `pending_matches`: source, candidate family IDs, explanation, observed hash and creation time. No automatic move occurs for a pending match.
+- `operations`: unique intent/deduplication key, project/family, operation kind, typed serialized plan, state, error and timestamps.
+- `tracking_activity`: durable meaningful capture/archive/match/watcher/failure/recovery events; the UI loads the latest 50.
 
-Milestone 1 associates each logical document with one source path. Path changes currently create a new identity and retain the old missing observation. Paths are not the final long-term document matching strategy. A later source-locations table can separate multiple filesystem observations from a logical identity while retaining current document UUIDs. Explicit user matching, content hashes and similarity can reconcile exports with different filenames without merging every Markdown file in a project into one history.
+Unregistering tombstones the registration and stops tracking. Sources, archives and snapshot bytes are untouched, and retained family/version metadata can be recovered by registering the same canonical root again with tracking/archival off. There is no automatic retention deletion. A project is never a single global version chain.
 
-A future `document_versions` table should have its own UUID, a required `document_id` foreign key, capture UTC time, immutable archive location and content hash. Version ordering/uniqueness belongs within each document, never at project scope. The source modification timestamp is an observation, not a capture timestamp. Baseline selection should reference a particular document/version. Hashing, archive writes and captured versions are deliberately absent now. Vector-store associations and cached analysis should be introduced with the features that need them rather than preallocated speculative tables.
+## Matching and initialization
 
-`preferences` currently stores theme selection. Migrations run transactionally under `PRAGMA user_version`; launch is idempotent, and a database created by a newer schema is rejected rather than downgraded. Foreign keys are enabled on every connection. WAL and a busy timeout protect persistence. Metadata survives restarts and installation upgrades; the stable app identifier must not change.
+Initial selection deliberately creates a separate v1 for each selected existing observation, even if filenames look related. Unselected existing files become ignored for tracking. New files added later enter the shared pipeline.
 
-## Observation semantics
+Matching precedence:
 
-1. Registration validates an absolute folder in Rust, canonicalizes it, verifies directory access, rejects a duplicate, persists its identity and performs an initial scan.
-2. Opening a project or manual refresh runs a recursive metadata scan. Child symlinks and reparse points are excluded, including junctions. Standard dependency/output/archive folders are pruned.
-3. Available files are upserted in a transaction. Missing-file status is assigned only after a complete traversal. Partial scans assign unavailable status to previously observed but unconfirmed files; a root failure makes the project unavailable.
-4. `last_observed` advances only for files actually observed. Missing/unavailable records retain their previous size and modification timestamp. Reappearing files at the same relative path recover their UUID.
-5. Dashboard counts include retained observations, with an available count shown separately. Recency uses observed file modification metadata. No live filesystem monitoring is implied.
+1. An exact associated source path retains its family.
+2. An explicit remembered directory/name/type association takes priority; conflicting aliases require review.
+3. An identical SHA-256 at a new path is a relocation only if one matching family has a missing active source. A live duplicate or multiple hash matches requires review. Identical bytes never create another version within a family.
+4. Normalized stems must agree completely. Only recognizable **trailing** groups such as `v2.1`, `version_3`, `2026-10-19`, and `20261019` are removed. A unique family in the same parent directory/type, with recognizable version/date evidence, is high confidence.
+5. Multiple existing candidates, multiple same-stem incoming files, another workstream directory, or a previous pending decision requires confirmation. Matching never uses common-word overlap or AI/content similarity.
+6. An unrelated file starts its own family at v1.
 
-The scanner reads directory entries and metadata, without opening document contents or writing into project roots. Reparse points are excluded to prevent recursive loops and unrelated traversal. As with ordinary filesystem traversal, concurrent external directory replacement is not an adversarial sandbox guarantee; handle-based traversal would be additional hardening if threat requirements expand.
+Assign/new/ignore decisions are explicit. Changes to a superseded source require review rather than silently replacing the current active document. An assignment of unchanged duplicate bytes may add a location and update the active pointer, but does not move another source or invent a version. Match explanations and high-confidence decisions are persisted in activity.
 
-## Validation and extending the application
+## Watcher lifecycle and performance
 
-Rust tests use temporary roots/databases, including a Windows junction fixture and explicit ACL denial restored by a scope guard. React interaction tests mock only the typed native facade. Formatting, TypeScript, ESLint, tests, clippy and production packaging run in Windows CI.
+`notify` recommended native recursive watchers exist only for opted-in registered projects while this application process runs. Enabling starts a watcher; disabling/unregistering drops its ownership and processing checks the persisted opt-in again. Startup installs watchers before reconciliation so a new event cannot silently fall into a scan/watch gap. Projects that cannot be watched show a visible status and retain manual reconciliation. Missing/unwatchable roots are retried every 30 seconds.
 
-New modules can add sidebar entries and screen components while retaining the service boundary. Add native services behind project/document IDs rather than exposing arbitrary filesystem APIs. New persistent concepts require numbered transactional migrations and reconnection tests. Milestone 2 must define explicit safe archive ownership and opt-in tracking before adding writes; the Milestone 1 discovery code should remain a read-only observation service.
+Native access events and excluded directory components are ignored. Event delivery uses a bounded channel; overflow requests a full reconciliation. Events coalesce for approximately 950 ms of quiet with a 4-second batching bound. Changed paths force hash checks even when size/mtime were preserved. Metadata gates unchanged files during normal watcher work. Startup/manual reconciliation intentionally performs a full integrity/change check. Transient capture failures retry after bounded 2/5/15-second delays; persistent errors stay visible for manual action. Native events and IPC refresh use the same serialized, hash-idempotent pipeline.
 
-## Official references reviewed
+Files are streamed in 64 KiB chunks. Recent writes receive an additional 650 ms stability sample; size/high-resolution modification metadata is compared before/after reading. Windows read handles deny writes/deletion while bytes are captured; Word sharing locks therefore cause a retry. No event alone proves a completed save. A writer that closes a file for an extended pause can still present a stable intermediate state; no general filesystem API provides a universal application-level save-complete signal. Missing paths never authorize deletion or archival.
 
-- [Tauri Rust commands](https://v2.tauri.app/develop/calling-rust/)
-- [Tauri capabilities](https://v2.tauri.app/security/capabilities/)
-- [Tauri dialog plugin](https://v2.tauri.app/plugin/dialog/)
-- [Tauri Windows installers](https://v2.tauri.app/distribute/windows-installer/)
-- [Tailwind Vite installation](https://tailwindcss.com/docs/installation/using-vite)
-- [GitHub Actions security](https://docs.github.com/en/actions/reference/security/secure-use)
+The current implementation scans project metadata per coalesced batch and keeps results in memory. Hashing is selective for normal events, UI document rendering is paged, and family/review lists load in bounded visible groups. Very large-scale DB pagination, scan cancellation and parallel project throughput remain future hardening work. Native state snapshots may wait for the current serialized operation; the UI thread remains responsive.
+
+## Snapshot and journal protocol
+
+Application-owned storage is outside source and installation directories:
+
+```text
+<local app data>/com.contextdock.desktop/
+  contextdock.db
+  staging/<random UUID>.tmp
+  snapshots/<project UUID>/<document UUID>/<version UUID>.<extension>
+```
+
+A capture streams a stable source into a newly created temporary file, flushes it, hashes it and verifies the staged bytes. A durable capture plan reserves a version UUID/sequence and records source metadata, hash, staging/final locations, prior active pointers and whether archival is authorized. The snapshot finalizes by a no-overwrite hard link on supported local storage. A pending collision is accepted only when staging/final refer to the same file, or when a prior durable `finalized` marker proves ownership. Snapshot bytes are reverified, staging is unlinked, and the snapshot is sealed read-only. The version insert, active pointer, capture event, archive intent and journal completion commit in one SQLite transaction.
+
+Committed snapshots are never overwritten or automatically removed. Read-only attributes are protection against accidental edits, not an administrator-proof security boundary; hashes detect external tampering when a saved location is opened. A crash before a capture plan exists can leave an unreferenced staging file; it is not a committed version and source bytes remain intact. Orphan staging/snapshots are retained conservatively rather than deleted automatically. Disk usage/retention tooling is future work.
+
+Journal states are `pending`, `finalized`, `done`, or `blocked` (with an error). A finalized ownership marker is retained if a later metadata step fails. Startup and explicit retry can finish partial captures and archives without creating duplicate versions. Disabling tracking pauses recovery; disabling archival separately pauses archive operations. Re-enabling permission resumes safe recovery. No automatic rollback or destructive cleanup is performed.
+
+## Archive protocol
+
+Archive destinations use `Old Context Files/<sanitized family> - <document UUID>/vN - <sanitized original stem> - <operation UUID>.<extension>`. Original filenames remain in metadata. All components are validated and parents are guarded against traversal and Windows reparse points. Existing directories may be used as containers, but unrelated files are never claimed, overwritten or cleaned up.
+
+Both old/new snapshots must pass SHA-256 verification before an archive operation proceeds:
+
+- **Same source path:** stream the previous immutable snapshot to a newly created archive temporary, flush and verify, then finalize without overwrite. The new active source is never moved. The archive copy has independent bytes from the immutable snapshot.
+- **Different source paths:** pin source/destination directories; open and verify the replacement; open the previous source with read/delete access and deny other writers/deleters; require its expected hash; record its Windows volume/file identity durably; then rename that exact handle using `SetFileInformationByHandle` with replacement disabled. No generic copy/delete or overwrite fallback exists.
+- **Previously missing old source:** a safe snapshot copy can provide the archived old version without interpreting the missing path as permission to delete anything.
+
+After a crash between rename and DB commit, recovery verifies destination hash **and persisted file identity**, requires the previous source to be absent, and finishes metadata only. A different existing file, even with identical bytes, is a conflict without ownership proof. Snapshot/archive collisions, unexpected source changes, locked files and unsupported/cross-volume moves remain pending; originals and immutable copies are retained. Network/removable filesystems that do not support these primitives fail safely instead of weakening the protocol.
+
+`Old Context Files` is excluded case-insensitively from discovery and event processing, including manually edited archived files. Opening an archive verifies its hash and reports external edits; its independent snapshot is unaffected. User archives and captured snapshots are never automatically purged when sources disappear or projects are removed.
+
+## Validation and future work
+
+Safety tests use temporary databases/roots and real Windows ACL, sharing-lock, junction and native-watcher fixtures. Crash tests interrupt capture before/after finalization and archive after handle rename but before the DB update. Frontend tests exercise consent separation, selection, matching decisions and history actions without building a GUI automation harness. See [verification](verification.md) and the mandatory [manual testing guide](manual-testing-milestone-2.md).
+
+Milestone 3 can add local content extraction/diffs and history comparison without changing version identity/storage. Optional cloud indexing and AI metadata belong to later migrations/services. No embeddings, vector stores, cloud sync, detailed diffs, AI summaries, rollback, signer or updater is implemented here.
+
+Official references reviewed: [notify](https://docs.rs/notify/latest/notify/), [Rust Windows file options](https://doc.rust-lang.org/std/os/windows/fs/trait.OpenOptionsExt.html), [Windows rename semantics](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info), [SQLite transactions](https://www.sqlite.org/lang_transaction.html), and the existing Tauri/React architecture references from Milestone 1.
+
+Interrupted archive copies with a pre-existing, unfinalized temporary are retried using a newly journaled private temporary name. The earlier partial bytes are retained, never truncated or automatically deleted. This also avoids mistaking an unrelated staging-name collision for application ownership.

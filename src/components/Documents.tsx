@@ -9,6 +9,10 @@ export function Documents({ documents }: { documents: Document[] }) {
   const filtered = documents.filter((d) =>
     d.relativePath.toLowerCase().includes(deferredQuery.toLowerCase()),
   );
+  const visiblePage = Math.min(
+    page,
+    Math.max(0, Math.ceil(filtered.length / 100) - 1),
+  );
   return (
     <section className="panel">
       <div className="section-heading">
@@ -49,39 +53,41 @@ export function Documents({ documents }: { documents: Document[] }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.slice(page * 100, (page + 1) * 100).map((d) => (
-                <tr key={d.id}>
-                  <td>
-                    <div className="file-name">
-                      <FileText size={17} />
-                      <strong>{d.name}</strong>
-                    </div>
-                    <small title={d.absolutePath}>{d.relativePath}</small>
-                  </td>
-                  <td>{d.kind === "word" ? "Word" : "Markdown"}</td>
-                  <td>{size(d.size)}</td>
-                  <td>{date(d.modifiedAt)}</td>
-                  <td>
-                    <span className={`badge ${d.status}`}>{d.status}</span>
-                  </td>
-                </tr>
-              ))}
+              {filtered
+                .slice(visiblePage * 100, (visiblePage + 1) * 100)
+                .map((d) => (
+                  <tr key={d.id}>
+                    <td>
+                      <div className="file-name">
+                        <FileText size={17} />
+                        <strong>{d.name}</strong>
+                      </div>
+                      <small title={d.absolutePath}>{d.relativePath}</small>
+                    </td>
+                    <td>{d.kind === "word" ? "Word" : "Markdown"}</td>
+                    <td>{size(d.size)}</td>
+                    <td>{date(d.modifiedAt)}</td>
+                    <td>
+                      <span className={`badge ${d.status}`}>{d.status}</span>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
           {filtered.length > 100 && (
             <div className="pagination">
               <button
-                disabled={page === 0}
-                onClick={() => setPage((p) => p - 1)}
+                disabled={visiblePage === 0}
+                onClick={() => setPage(visiblePage - 1)}
               >
                 Previous
               </button>
               <span>
-                Page {page + 1} of {Math.ceil(filtered.length / 100)}
+                Page {visiblePage + 1} of {Math.ceil(filtered.length / 100)}
               </span>
               <button
-                disabled={(page + 1) * 100 >= filtered.length}
-                onClick={() => setPage((p) => p + 1)}
+                disabled={(visiblePage + 1) * 100 >= filtered.length}
+                onClick={() => setPage(visiblePage + 1)}
               >
                 Next
               </button>

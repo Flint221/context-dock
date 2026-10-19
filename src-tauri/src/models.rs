@@ -11,6 +11,9 @@ pub struct Project {
     pub scan_error: Option<String>,
     pub document_count: i64,
     pub latest_modified: Option<String>,
+    pub tracking_enabled: bool,
+    pub archive_enabled: bool,
+    pub tracking_revision: i64,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +23,7 @@ pub struct Document {
     pub name: String,
     pub relative_path: String,
     pub absolute_path: String,
+    pub document_id: String,
     pub kind: String,
     pub size: i64,
     pub modified_at: Option<String>,

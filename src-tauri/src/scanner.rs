@@ -1,4 +1,4 @@
-use crate::models::{key, now};
+use crate::models::key;
 use std::{fs, path::Path};
 use walkdir::{DirEntry, WalkDir};
 pub struct Observed {
@@ -13,25 +13,28 @@ pub struct Scan {
     pub files: Vec<Observed>,
     pub errors: Vec<String>,
 }
-fn excluded(e: &DirEntry) -> bool {
-    let name = e.file_name().to_string_lossy().to_lowercase();
-    e.depth() > 0
-        && (is_link(e.path())
-            || (e.file_type().is_dir()
-                && matches!(
-                    name.as_str(),
-                    ".git"
-                        | "node_modules"
-                        | "target"
-                        | "dist"
-                        | "build"
-                        | ".next"
-                        | ".contextdock"
-                        | ".contextdock-archive"
-                        | "contextdock-archive"
-                )))
+pub fn ignored_directory(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".contextdock"
+            | ".contextdock-archive"
+            | "contextdock-archive"
+            | "old context files"
+    )
 }
-fn is_link(path: &Path) -> bool {
+fn excluded(e: &DirEntry) -> bool {
+    e.depth() > 0
+        && (e.file_name().to_string_lossy().starts_with("~$")
+            || is_link(e.path())
+            || (e.file_type().is_dir() && ignored_directory(&e.file_name().to_string_lossy())))
+}
+pub fn is_link(path: &Path) -> bool {
     let Ok(m) = fs::symlink_metadata(path) else {
         return false;
     };
@@ -111,14 +114,11 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
             size: m.len().min(i64::MAX as u64) as i64,
             modified: m.modified().ok().map(|t| {
                 chrono::DateTime::<chrono::Utc>::from(t)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
             }),
         });
     }
     Ok(scan)
-}
-pub fn observed_at() -> String {
-    now()
 }
 #[cfg(windows)]
 pub fn explorer_path(path: &str) -> String {

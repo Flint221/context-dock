@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
@@ -14,11 +14,26 @@ vi.mock("./services/registry", () => ({
     open: vi.fn(),
     theme: vi.fn(),
     pickFolder: vi.fn(),
+    subscribe: vi.fn(),
+    tracking: vi.fn(),
   },
 }));
 let state: Snapshot;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(registry.subscribe).mockResolvedValue(() => {});
+  vi.mocked(registry.tracking).mockResolvedValue({
+    enabled: false,
+    archiveEnabled: false,
+    initialized: false,
+    watchStatus: "off",
+    error: null,
+    families: [],
+    sources: [],
+    reviews: [],
+    activity: [],
+    operations: [],
+  });
   state = { projects: [], documents: [], theme: "system" };
   vi.mocked(registry.snapshot).mockImplementation(async () =>
     structuredClone(state),
@@ -38,10 +53,14 @@ it("registers a real picker selection and opens its discovered documents", async
       scanError: null,
       documentCount: 1,
       latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
+      trackingRevision: 0,
     });
     state.documents.push({
       id: "d1",
       projectId: "p1",
+      documentId: "d1",
       name: "Context.md",
       relativePath: "docs/Context.md",
       absolutePath: path + "\\docs\\Context.md",
@@ -106,7 +125,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.1.0 · Milestone 1")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.2.0 · Milestone 2")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -121,6 +140,9 @@ it("renames, refreshes and removes only after the final confirmation", async () 
       scanError: null,
       documentCount: 0,
       latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
+      trackingRevision: 0,
     },
   ];
   vi.mocked(registry.rename).mockImplementation(async (_id, name) => {
@@ -145,4 +167,85 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   await user.click(screen.getByText("Remove registration"));
   await screen.findByText("Add your first project");
   expect(registry.remove).toHaveBeenCalledWith("p1");
+});
+
+it("keeps one live tracking panel through updates and removes it on navigation", async () => {
+  const user = userEvent.setup();
+  state.projects = [
+    {
+      id: "p1",
+      name: "Tracked project",
+      path: "C:\\Test",
+      createdAt: "",
+      status: "available",
+      lastScan: null,
+      scanError: null,
+      documentCount: 0,
+      latestModified: null,
+      trackingEnabled: true,
+      archiveEnabled: false,
+      trackingRevision: 0,
+    },
+  ];
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (listener) => {
+    notify = listener;
+    return () => {};
+  });
+  vi.mocked(registry.tracking).mockResolvedValue({
+    enabled: true,
+    archiveEnabled: false,
+    initialized: true,
+    watchStatus: "watching",
+    error: null,
+    families: [],
+    sources: [],
+    reviews: [],
+    activity: [],
+    operations: [],
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Tracked project/ }),
+  );
+  await screen.findByRole("button", { name: "Disable tracking" });
+  for (let revision = 1; revision <= 8; revision++) {
+    state.projects[0].trackingRevision = revision;
+    await act(async () => notify());
+    expect(
+      screen.getAllByRole("heading", { name: "Document tracking" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("button", { name: "Refresh documents" }),
+    ).toBeEnabled();
+  }
+  await user.click(screen.getByRole("button", { name: "Scan for changes" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Disable tracking" }),
+    ).toBeEnabled(),
+  );
+  expect(screen.queryByText("Working…")).not.toBeInTheDocument();
+  for (const page of ["Dashboard", "Projects1", "Settings"]) {
+    await user.click(screen.getByRole("button", { name: page }));
+    expect(
+      screen.queryByRole("heading", { name: "Document tracking" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Refresh documents" }),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Projects1" }));
+    await user.click(screen.getByRole("button", { name: /Tracked project/ }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Refresh documents" }),
+      ).toBeEnabled(),
+    );
+    expect(
+      screen.getAllByRole("heading", { name: "Document tracking" }),
+    ).toHaveLength(1);
+    expect(
+      screen.getByRole("heading", { name: "Registered folder" }),
+    ).toBeInTheDocument();
+  }
 });

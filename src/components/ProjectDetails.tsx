@@ -1,3 +1,4 @@
+import { TrackingPanel } from "./TrackingPanel";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -11,6 +12,7 @@ import type { Project, Document } from "../types";
 import { date, displayPath } from "../format";
 import { Documents } from "./Documents";
 export function ProjectDetails({
+  changed,
   project,
   documents,
   busy,
@@ -21,6 +23,7 @@ export function ProjectDetails({
   remove,
   refresh,
 }: {
+  changed: () => Promise<void>;
   project: Project;
   documents: Document[];
   busy: boolean;
@@ -74,7 +77,12 @@ export function ProjectDetails({
           Refresh documents
         </button>
       </div>
-      <Documents key={project.id + project.lastScan} documents={documents} />
+      <TrackingPanel
+        key={`tracking:${project.id}`}
+        project={project}
+        changed={changed}
+      />
+      <Documents key={`documents:${project.id}`} documents={documents} />
     </>
   );
 }

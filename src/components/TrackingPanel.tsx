@@ -1,0 +1,532 @@
+import { useEffect, useState } from "react";
+import { Archive, BookOpen, Check, Eye, RefreshCw } from "lucide-react";
+import type { Project, TrackingView, PendingMatch, Family } from "../types";
+import { registry } from "../services/registry";
+import { date } from "../format";
+import { Modal } from "./Modal";
+import { DocumentHistory } from "./DocumentHistory";
+function MatchDecision({
+  review,
+  families,
+  busy,
+  decide,
+}: {
+  review: PendingMatch;
+  families: Family[];
+  busy: boolean;
+  decide: (action: "assign" | "new" | "ignore", target?: string) => void;
+}) {
+  const [target, setTarget] = useState("");
+  return (
+    <article className="review-card">
+      <strong>{review.relativePath}</strong>
+      <p>{review.explanation}</p>
+      <label>
+        Assign to document family
+        <select
+          value={target}
+          disabled={busy}
+          onChange={(e) => setTarget(e.target.value)}
+        >
+          <option value="">Choose a family…</option>
+          {families
+            .filter((f) => f.versionCount > 0 && f.state === "tracked")
+            .map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.name} — {f.activeFilename}
+                {review.candidateIds.includes(f.id) ? " (suggested)" : ""}
+              </option>
+            ))}
+        </select>
+      </label>
+      <div className="toolbar-actions">
+        <button
+          disabled={busy || !target}
+          onClick={() => decide("assign", target)}
+        >
+          <Check size={14} />
+          Assign as version
+        </button>
+        <button disabled={busy} onClick={() => decide("new")}>
+          New independent document
+        </button>
+        <button disabled={busy} onClick={() => decide("ignore")}>
+          Ignore for tracking
+        </button>
+      </div>
+    </article>
+  );
+}
+export function TrackingPanel({
+  project,
+  changed,
+}: {
+  project: Project;
+  changed: () => Promise<void>;
+}) {
+  const [view, setView] = useState<TrackingView | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [initialize, setInitialize] = useState(false);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [archive, setArchive] = useState(false);
+  const [history, setHistory] = useState<string | null>(null);
+  const [limit, setLimit] = useState(100);
+  const [choiceLimit, setChoiceLimit] = useState(100);
+  useEffect(() => {
+    let active = true;
+    registry
+      .tracking(project.id)
+      .then((v) => {
+        if (active) setView(v);
+      })
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [
+    project.id,
+    project.lastScan,
+    project.trackingEnabled,
+    project.archiveEnabled,
+    project.trackingRevision,
+  ]);
+  async function mutate(work: () => Promise<unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await work();
+      setView(await registry.tracking(project.id));
+      await changed();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const eligible =
+    view?.sources.filter(
+      (s) => s.status === "available" && s.disposition !== "superseded",
+    ) || [];
+  const family = view?.families.find((f) => f.id === history);
+  const captured = view?.families.filter((f) => f.versionCount > 0) || [];
+  return (
+    <section className="panel tracking-panel">
+      <div className="section-heading">
+        <div>
+          <h2>
+            <Eye size={18} />
+            Document tracking
+          </h2>
+          <p>
+            Discovery reads metadata. Tracking saves immutable local snapshots.
+            Archival organizes replaced sources.
+          </p>
+        </div>
+        {view && (
+          <span
+            className={`badge ${view.enabled && view.watchStatus === "watching" ? "available" : ""}`}
+          >
+            {view.enabled ? view.watchStatus : "Tracking off"}
+          </span>
+        )}
+      </div>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {view === null ? (
+        <p className="padded">Loading tracking settings…</p>
+      ) : (
+        <>
+          <div className="tracking-controls">
+            <div>
+              <strong>Automatic tracking</strong>
+              <p>
+                Runs while ContextDock is open; changes made while closed are
+                reconciled on launch or resume.
+              </p>
+            </div>
+            <button
+              disabled={busy}
+              className={view.enabled ? "" : "primary"}
+              onClick={() => {
+                if (view.enabled)
+                  void mutate(() =>
+                    registry.configureTracking(
+                      project.id,
+                      false,
+                      view.archiveEnabled,
+                    ),
+                  );
+                else if (view.initialized)
+                  void mutate(() =>
+                    registry.configureTracking(
+                      project.id,
+                      true,
+                      view.archiveEnabled,
+                    ),
+                  );
+                else {
+                  setSelected(eligible.map((s) => s.id));
+                  setArchive(false);
+                  setChoiceLimit(100);
+                  setInitialize(true);
+                }
+              }}
+            >
+              {busy
+                ? "Working…"
+                : view.enabled
+                  ? "Disable tracking"
+                  : view.initialized
+                    ? "Resume tracking"
+                    : "Enable tracking…"}
+            </button>
+          </div>
+          <label className="tracking-toggle">
+            <input
+              type="checkbox"
+              checked={view.archiveEnabled}
+              disabled={busy || !view.enabled}
+              onChange={(e) =>
+                void mutate(() =>
+                  registry.configureTracking(
+                    project.id,
+                    view.enabled,
+                    e.target.checked,
+                  ),
+                )
+              }
+            />
+            <span>
+              <strong>
+                Enable automatic archival of replaced source files
+              </strong>
+              <small>
+                Separately opt in to Old Context Files. A confirmed replacement
+                can move the previous source after both snapshots are verified.
+                In-place edits archive a copy of the old snapshot and leave the
+                current source untouched.
+              </small>
+            </span>
+          </label>
+          {!view.enabled && view.initialized && (
+            <p className="tracking-note">
+              Tracking is paused. Your history is retained. Resume catches up
+              with changes; pending archives run only if archival is also
+              enabled.
+            </p>
+          )}
+          {view.error && (
+            <div className="banner warning">
+              <span>{view.error}</span>
+            </div>
+          )}
+          <div className="toolbar-actions">
+            <button
+              disabled={busy}
+              onClick={() => void mutate(() => registry.refresh(project.id))}
+            >
+              <RefreshCw size={15} />
+              Scan for changes
+            </button>
+          </div>
+          {view.reviews.length > 0 && (
+            <div className="review-section">
+              <h3>
+                Needs Review{" "}
+                <span className="count">{view.reviews.length}</span>
+              </h3>
+              <p>
+                These files will not be moved while a decision is pending.
+                Assignments are remembered for future matching within the same
+                folder.
+              </p>
+              {view.reviews.slice(0, 100).map((review) => (
+                <MatchDecision
+                  key={review.sourceId}
+                  review={review}
+                  families={view.families}
+                  busy={busy || !view.enabled}
+                  decide={(action, target) =>
+                    void mutate(() =>
+                      registry.resolve(
+                        project.id,
+                        review.sourceId,
+                        action,
+                        target || null,
+                      ),
+                    )
+                  }
+                />
+              ))}
+              {view.reviews.length > 100 && (
+                <p>Resolve the first 100 to see additional pending files.</p>
+              )}
+            </div>
+          )}
+          <div className="family-section">
+            <h3>
+              <BookOpen size={17} />
+              Document families <span className="count">{captured.length}</span>
+            </h3>
+            {captured.length === 0 ? (
+              <p className="tracking-note">
+                No captured versions yet. Enable tracking and select files to
+                create their independent v1 snapshots.
+              </p>
+            ) : (
+              <>
+                <div className="table-scroll">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Document family / active source</th>
+                        <th>Current</th>
+                        <th>Versions</th>
+                        <th>Last capture</th>
+                        <th>Status</th>
+                        <th>History</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {captured.slice(0, limit).map((f) => (
+                        <tr key={f.id}>
+                          <td>
+                            <strong>{f.name}</strong>
+                            <small>
+                              {f.activeFilename || "No active source"}
+                            </small>
+                          </td>
+                          <td>
+                            {f.currentNumber ? `v${f.currentNumber}` : "—"}
+                          </td>
+                          <td>{f.versionCount}</td>
+                          <td>{date(f.lastCaptured)}</td>
+                          <td>
+                            <span className={`badge ${f.sourceStatus}`}>
+                              {f.needsReview
+                                ? "Needs Review"
+                                : view.enabled
+                                  ? f.sourceStatus
+                                  : "Paused"}
+                            </span>
+                          </td>
+                          <td>
+                            <button onClick={() => setHistory(f.id)}>
+                              View history
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {captured.length > limit && (
+                  <button onClick={() => setLimit((n) => n + 100)}>
+                    Show 100 more families
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+          {view.enabled &&
+            view.sources.some(
+              (s) =>
+                s.status === "available" &&
+                (s.disposition === "ignored" || s.disposition === "discovered"),
+            ) && (
+              <details className="untracked">
+                <summary>Files not being tracked</summary>
+                <p>
+                  These files remain available for discovery. Start an
+                  independent history when you choose.
+                </p>
+                {view.sources
+                  .filter(
+                    (s) =>
+                      s.status === "available" &&
+                      (s.disposition === "ignored" ||
+                        s.disposition === "discovered"),
+                  )
+                  .slice(0, limit)
+                  .map((s) => (
+                    <div className="untracked-row" key={s.id}>
+                      <span>{s.relativePath}</span>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          void mutate(() =>
+                            registry.resolve(project.id, s.id, "new"),
+                          )
+                        }
+                      >
+                        Track independently
+                      </button>
+                    </div>
+                  ))}
+              </details>
+            )}
+          {view.operations.length > 0 && (
+            <div className="operation-section">
+              <h3>
+                <Archive size={17} />
+                Pending operations{" "}
+                <span className="count">{view.operations.length}</span>
+              </h3>
+              <p>
+                Failed or interrupted work is retained for safe retry. Existing
+                files are never overwritten. Archives pause when archival is
+                off.
+              </p>
+              {view.operations.map((op) => (
+                <div className="operation" key={op.id}>
+                  <strong>
+                    {op.kind} · {op.state}
+                  </strong>
+                  <p>
+                    {op.error || "Awaiting completion or project permission."}
+                  </p>
+                  <small>{date(op.createdAt)}</small>
+                </div>
+              ))}
+              <button
+                disabled={busy || !view.enabled}
+                onClick={() => void mutate(() => registry.retry(project.id))}
+              >
+                Retry pending operations
+              </button>
+            </div>
+          )}
+          {view.activity.length > 0 && (
+            <details className="tracking-activity">
+              <summary>
+                Recent tracking activity ({view.activity.length})
+              </summary>
+              <ol>
+                {view.activity.map((event) => (
+                  <li key={event.id}>
+                    <span>{event.message}</span>
+                    <time>{date(event.createdAt)}</time>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          )}
+        </>
+      )}
+      {initialize && view && (
+        <Modal
+          title="Initialize document tracking"
+          close={() => {
+            if (!busy) setInitialize(false);
+          }}
+        >
+          <p>
+            Select files to capture as independent document families. Each
+            selected file starts at v1. Existing similarly named files will stay
+            separate, and initialization will not move them.
+          </p>
+          <p className="tracking-note">
+            Unselected existing files are ignored for tracking until you
+            explicitly choose Track independently. New unrelated files added
+            later are tracked automatically.
+          </p>
+          <div className="selection-actions">
+            <button
+              disabled={busy}
+              onClick={() => setSelected(eligible.map((s) => s.id))}
+            >
+              Select all
+            </button>
+            <button disabled={busy} onClick={() => setSelected([])}>
+              Clear selection
+            </button>
+            <span>{selected.length} selected</span>
+          </div>
+          <div className="source-selection">
+            {eligible.slice(0, choiceLimit).map((s) => (
+              <label key={s.id} className="tracking-toggle">
+                <input
+                  type="checkbox"
+                  disabled={busy}
+                  checked={selected.includes(s.id)}
+                  onChange={(e) =>
+                    setSelected((ids) =>
+                      e.target.checked
+                        ? [...ids, s.id]
+                        : ids.filter((id) => id !== s.id),
+                    )
+                  }
+                />
+                <span>{s.relativePath}</span>
+              </label>
+            ))}
+            {eligible.length > choiceLimit && (
+              <button onClick={() => setChoiceLimit((n) => n + 100)}>
+                Show 100 more files
+              </button>
+            )}
+            {eligible.length === 0 && (
+              <p>
+                No available supported files. Tracking can wait for new
+                documents.
+              </p>
+            )}
+          </div>
+          <label className="tracking-toggle">
+            <input
+              type="checkbox"
+              disabled={busy}
+              checked={archive}
+              onChange={(e) => setArchive(e.target.checked)}
+            />
+            <span>
+              Also enable automatic archival
+              <small>
+                Future confirmed replacements may move previous sources into Old
+                Context Files. Initial sources remain in place.
+              </small>
+            </span>
+          </label>
+          {error && (
+            <p role="alert" className="error">
+              {error}
+            </p>
+          )}
+          <div className="actions">
+            <button disabled={busy} onClick={() => setInitialize(false)}>
+              Cancel
+            </button>
+            <button
+              disabled={busy}
+              className="primary"
+              onClick={() =>
+                void mutate(async () => {
+                  await registry.configureTracking(
+                    project.id,
+                    true,
+                    archive,
+                    selected,
+                  );
+                  setInitialize(false);
+                })
+              }
+            >
+              {busy
+                ? "Capturing selected files…"
+                : "Capture selected and enable"}
+            </button>
+          </div>
+        </Modal>
+      )}
+      {family && (
+        <DocumentHistory family={family} close={() => setHistory(null)} />
+      )}
+    </section>
+  );
+}

@@ -1,0 +1,165 @@
+import { useEffect, useState } from "react";
+import { Copy, FolderOpen } from "lucide-react";
+import type { Family, Version } from "../types";
+import { registry } from "../services/registry";
+import { date, displayPath, size } from "../format";
+import { Modal } from "./Modal";
+export function DocumentHistory({
+  family,
+  close,
+}: {
+  family: Family;
+  close: () => void;
+}) {
+  const [versions, setVersions] = useState<Version[] | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    let active = true;
+    registry
+      .versions(family.id)
+      .then((v) => {
+        if (active) setVersions(v);
+      })
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    return () => {
+      active = false;
+    };
+  }, [family.id, family.versionCount, family.currentNumber]);
+  async function action(work: () => Promise<unknown>, message = "") {
+    setError("");
+    setNotice("");
+    try {
+      await work();
+      setNotice(message);
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+  return (
+    <Modal title={`${family.name} — version history`} close={close}>
+      <p>
+        Each captured version preserves exact file bytes. Opening a saved
+        location verifies its SHA-256 hash first.
+      </p>
+      <button
+        className="history-current"
+        disabled={!family.activeSourceId}
+        onClick={() => void action(() => registry.openCurrent(family.id))}
+      >
+        <FolderOpen size={15} />
+        Current document location
+      </button>
+      {error && (
+        <p role="alert" className="error">
+          {error}
+        </p>
+      )}
+      {notice && <p role="status">{notice}</p>}
+      {versions === null ? (
+        <p className="padded">Loading saved versions…</p>
+      ) : versions.length === 0 ? (
+        <p className="padded">No versions captured for this document.</p>
+      ) : (
+        <div className="version-list">
+          {versions.map((v) => (
+            <article className="version-card" key={v.id}>
+              <div className="section-heading">
+                <strong>v{v.number}</strong>
+                <span className={`badge ${v.current ? "available" : ""}`}>
+                  {v.current
+                    ? "Current"
+                    : v.archiveAvailable
+                      ? "Archived"
+                      : "Snapshot only"}
+                </span>
+                <time>{date(v.capturedAt)}</time>
+              </div>
+              <strong>{v.sourceName}</strong>
+              <p>
+                {v.reason.replaceAll("_", " ")} · {size(v.size)}
+              </p>
+              <div className="toolbar-actions">
+                <button
+                  disabled={!v.snapshotAvailable}
+                  onClick={() =>
+                    void action(() => registry.openVersion(v.id, false))
+                  }
+                >
+                  <FolderOpen size={14} />
+                  Snapshot location
+                </button>
+                <button
+                  onClick={() =>
+                    void action(
+                      () =>
+                        navigator.clipboard.writeText(
+                          displayPath(v.snapshotPath),
+                        ),
+                      "Snapshot path copied.",
+                    )
+                  }
+                >
+                  <Copy size={14} />
+                  Copy snapshot path
+                </button>
+                {v.archivePath && (
+                  <>
+                    <button
+                      disabled={!v.archiveAvailable}
+                      onClick={() =>
+                        void action(() => registry.openVersion(v.id, true))
+                      }
+                    >
+                      <FolderOpen size={14} />
+                      Archive location
+                    </button>
+                    <button
+                      onClick={() =>
+                        void action(
+                          () =>
+                            navigator.clipboard.writeText(
+                              displayPath(v.archivePath!),
+                            ),
+                          "Archive path copied.",
+                        )
+                      }
+                    >
+                      <Copy size={14} />
+                      Copy archive path
+                    </button>
+                  </>
+                )}
+              </div>
+              <details>
+                <summary>Version metadata</summary>
+                <dl>
+                  <dt>Original source</dt>
+                  <dd>{v.sourceRelative}</dd>
+                  <dt>Source modified</dt>
+                  <dd>{date(v.modifiedAt)}</dd>
+                  <dt>SHA-256</dt>
+                  <dd className="hash">{v.sha256}</dd>
+                  <dt>Immutable snapshot</dt>
+                  <dd>{displayPath(v.snapshotPath)}</dd>
+                  <dt>Availability</dt>
+                  <dd>
+                    Snapshot: {v.snapshotAvailable ? "present" : "unavailable"}{" "}
+                    · Archive:{" "}
+                    {v.archivePath
+                      ? v.archiveAvailable
+                        ? "present"
+                        : "unavailable"
+                      : "not created"}
+                  </dd>
+                </dl>
+              </details>
+            </article>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}

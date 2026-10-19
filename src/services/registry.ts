@@ -1,7 +1,32 @@
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Snapshot, Theme } from "../types";
+import type { Snapshot, Theme, TrackingView, Version } from "../types";
 export const registry = {
+  subscribe: (changed: () => void) =>
+    listen<string>("registry-changed", changed),
+  tracking: (project: string) =>
+    invoke<TrackingView>("tracking_view", { project }),
+  configureTracking: (
+    project: string,
+    enabled: boolean,
+    archive: boolean,
+    selected: string[] = [],
+  ) =>
+    invoke<void>("configure_tracking", { project, enabled, archive, selected }),
+  resolve: (
+    project: string,
+    source: string,
+    action: "assign" | "new" | "ignore",
+    target: string | null = null,
+  ) => invoke<void>("resolve_match", { project, source, action, target }),
+  versions: (document: string) =>
+    invoke<Version[]>("document_versions", { document }),
+  openVersion: (version: string, archive: boolean) =>
+    invoke<void>("open_version_location", { version, archive }),
+  openCurrent: (document: string) =>
+    invoke<void>("open_current_location", { document }),
+  retry: (project: string) => invoke<void>("retry_operations", { project }),
   snapshot: () => invoke<Snapshot>("snapshot"),
   add: (name: string, path: string) =>
     invoke<string>("add_project", { name, path }),

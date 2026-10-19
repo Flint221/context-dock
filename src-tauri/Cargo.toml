@@ -1,6 +1,6 @@
 [package]
 name = "contextdock"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first project document registry"
 authors = ["ContextDock contributors"]
 edition = "2021"
@@ -20,6 +20,14 @@ rusqlite = { version = "0.38", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 walkdir = "2"
+sha2 = "0.10"
+notify = "8.2"
+regex = "1"
+serde_json = "1"
+same-file = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [dev-dependencies]
 tempfile = "3"
