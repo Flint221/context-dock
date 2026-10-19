@@ -199,16 +199,31 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     owns_association(&remote, &attrs, store)?;
     let status = s(&remote, "status");
     match status {
-        "completed"=>{
+        "completed" => {
             execute(db,"UPDATE cloud_jobs SET state='indexed',phase='poll',association_status='completed',usage_bytes=?2,remote_current=?3,error=NULL,attempts=0,next_at=0 WHERE id=?1",&[&s(j,"id"),&remote["usage_bytes"].as_i64(),&attrs["is_current"].as_bool()])?;
-            log(db,s(p,"project_id"),"Snapshot indexing completed; remote association verified.")
-        },
-        "in_progress"=>execute(db,"UPDATE cloud_jobs SET state='indexing',phase='poll',association_status='in_progress',next_at=?2 WHERE id=?1",&[&s(j,"id"),&(chrono::Utc::now().timestamp()+15)]),
-        "failed"|"cancelled"=>{
-            execute(db,"UPDATE cloud_jobs SET association_status=?2,phase='retry_attach' WHERE id=?1",&[&s(j,"id"),&status])?;
+            log(
+                db,
+                s(p, "project_id"),
+                "Snapshot indexing completed; remote association verified.",
+            )
+        }
+        "in_progress" => {
+            if n(j, "poll_count") >= 120 {
+                return Err(ApiError::local("Index processing exceeded 120 polls (about 30 minutes). Retry/Reconcile to resume checking the existing File; no new upload is needed."));
+            }
+            execute(db,"UPDATE cloud_jobs SET state='indexing',phase='poll',association_status='in_progress',poll_count=poll_count+1,next_at=?2 WHERE id=?1",&[&s(j,"id"),&(chrono::Utc::now().timestamp()+15)])
+        }
+        "failed" | "cancelled" => {
+            execute(
+                db,
+                "UPDATE cloud_jobs SET association_status=?2,phase='retry_attach' WHERE id=?1",
+                &[&s(j, "id"), &status],
+            )?;
             Err(ApiError::local("OpenAI could not index this snapshot. Check file support and limits. Retry/Reconcile will replace only the failed association and reuse the uploaded File."))
-        },
-        _=>Err(ApiError::local("OpenAI returned an unknown indexing state."))
+        }
+        _ => Err(ApiError::local(
+            "OpenAI returned an unknown indexing state.",
+        )),
     }
 }
 fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResult<()> {
@@ -230,6 +245,15 @@ fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
         s(p, "project_id"),
         "Removed vector-store association. Uploaded File retained; local snapshot unchanged.",
     )
+}
+pub fn remove_owned(
+    db: &Connection,
+    p: &Value,
+    j: &Value,
+    api: &dyn CloudApi,
+) -> std::result::Result<(), String> {
+    cloud::owned_store(api, db, p).map_err(|e| e.message)?;
+    detach(db, p, j, api).map_err(|e| e.message)
 }
 fn reconcile(db: &Connection, p: &Value, api: &dyn CloudApi) -> ApiResult<()> {
     let store = cloud::owned_store(api, db, p)?;
@@ -363,6 +387,24 @@ pub fn step(
         Ok(())
     })();
     if let Err(e) = result {
+        // A concurrently persisted pause/disconnect is a control decision, not
+        // a provider failure. Preserve it instead of overwriting its status.
+        let Ok(current) = cloud::project(db, id) else {
+            return Ok(());
+        };
+        let connected: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_connection WHERE scope=?1 AND status='connected'",
+                [key_scope],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if n(&current, "enabled") != 1
+            || (n(&current, "paused") == 1 && n(&current, "delete_requested") != 1)
+            || connected != 1
+        {
+            return Ok(());
+        }
         let tries = n(&p, "attempts") + 1;
         let delay = e.delay.max(2_i64.pow(tries.min(10) as u32)).min(3600);
         let next = if e.retry && tries <= 6 {
@@ -382,6 +424,9 @@ pub fn step(
     Ok(())
 }
 fn job_failure(db: &Connection, j: &Value, e: &ApiError) -> ApiResult<()> {
+    if e.message == "Cloud sync paused, disconnected or stopped before the next request." {
+        return Ok(());
+    }
     let tries = n(j, "attempts") + 1;
     let state = if e.ambiguous {
         "uncertain"
@@ -440,15 +485,16 @@ pub fn search(
     }
     cloud::owned_store(api, db, &p).map_err(|e| e.message)?;
     let known = cloud::jobs(db, id)?;
-    if cloud::desired(db, id, &cloud::draft(db, &p)?)?
+    let wanted = cloud::desired(db, id, &cloud::draft(db, &p)?)?;
+    if wanted.iter().any(|v| {
+        !known
+            .iter()
+            .any(|j| s(j, "version_id") == v.id && s(j, "state") == "indexed")
+    }) || known
         .iter()
-        .any(|v| {
-            !known
-                .iter()
-                .any(|j| s(j, "version_id") == v.id && s(j, "state") == "indexed")
-        })
+        .any(|j| s(j, "state") == "indexed" && !wanted.iter().any(|v| v.id == s(j, "version_id")))
     {
-        return Err("Selected snapshots are not fully indexed. Sync/reconcile before searching this project.".into());
+        return Err("Cloud selection changes are not fully synchronized. Sync/reconcile before searching this project.".into());
     }
     let mut filters = vec![
         json!({"type":"eq","key":"contextdock","value":cloud::install(db)?}),
@@ -472,6 +518,12 @@ pub fn search(
             .find(|j| s(j, "file_id") == s(hit, "file_id") && s(j, "state") == "indexed")
             .ok_or("Search returned an unknown file. Reconcile before searching again.")?;
         let attrs = identity(db, &p, job).map_err(|e| e.message)?;
+        if !wanted.iter().any(|v| v.id == s(job, "version_id"))
+            || (s(&p, "mode") == "current"
+                && hit["attributes"]["is_current"] != attrs["is_current"])
+        {
+            return Err("Local selection/current version changed during search. Synchronize and search again.".into());
+        }
         if ["contextdock", "project", "document", "version", "sha256"]
             .iter()
             .any(|k| hit["attributes"][k] != attrs[k])

@@ -167,6 +167,12 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
     }
     let bound:String=tx.query_row("SELECT COALESCE(scope,'') FROM cloud_connection WHERE singleton=1 AND status='connected'",[],|r|r.get(0)).map_err(|_|"Test the saved OpenAI key successfully before enabling cloud indexing.".to_string())?;
     let p = project(&tx, id)?;
+    if n(&p, "delete_requested") == 1 {
+        return Err(
+            "Finish or disconnect the pending index deletion before changing cloud configuration."
+                .into(),
+        );
+    }
     if !s(&p, "scope").is_empty() && s(&p, "scope") != bound {
         return Err(
             "Verify the existing index with the replacement key before changing its configuration."
@@ -193,6 +199,25 @@ pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
 }
 pub fn view(db: &Connection, id: &str) -> Result<Value> {
     let mut p = project(db, id)?;
+    if n(&p, "enabled") == 1 && s(&p, "store_state") != "deleted" {
+        let connection = rows(
+            db,
+            "SELECT status,scope FROM cloud_connection WHERE singleton=1",
+            &[],
+        )?
+        .pop()
+        .ok_or("Connection state unavailable.")?;
+        if s(&connection, "status") != "connected" {
+            p["status"] = json!("key_disconnected");
+            p["error"] = json!("Save/test the OpenAI key in Settings to resume cloud operations.");
+        } else if p["scope"] != connection["scope"] {
+            p["status"] = json!("credential_changed");
+            p["error"] =
+                json!("Verify this index with the tested replacement key before resuming.");
+        } else if n(&p, "paused") == 1 && n(&p, "delete_requested") != 1 {
+            p["status"] = json!("paused");
+        }
+    }
     let js = jobs(db, id)?;
     p["families"] = json!(families(db, id)?);
     p["activity"]=json!(rows(db,"SELECT kind,message,created_at FROM cloud_activity WHERE project_id=?1 ORDER BY id DESC LIMIT 30",&[&id])?);

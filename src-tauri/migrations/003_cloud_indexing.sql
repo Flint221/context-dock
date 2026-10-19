@@ -46,7 +46,7 @@ CREATE TABLE cloud_jobs (
  state TEXT NOT NULL DEFAULT 'pending', phase TEXT NOT NULL DEFAULT 'upload',
  desired INTEGER NOT NULL DEFAULT 1, remote_current INTEGER,
  association_status TEXT, usage_bytes INTEGER,
- attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
+ attempts INTEGER NOT NULL DEFAULT 0, poll_count INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL DEFAULT 0,
  error TEXT, updated_at TEXT NOT NULL,
  UNIQUE(project_id,version_id)
 );

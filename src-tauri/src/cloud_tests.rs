@@ -860,3 +860,99 @@ fn resumed_store_before_initial_start_becomes_idle_without_uploading() {
     assert!(api.0.borrow().store.is_some());
     assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
 }
+#[test]
+fn request_guard_stops_next_http_call_on_pause_disconnect_or_shutdown() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    let stop = Arc::new(AtomicBool::new(false));
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        stop.clone(),
+    )
+    .unwrap();
+    guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=1", [])
+        .unwrap();
+    assert!(guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .is_err());
+    assert!(guard.upload("not-sent.md", b"blocked".to_vec()).is_err());
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=0", [])
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_connection SET status='disconnected'", [])
+        .unwrap();
+    assert!(guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .is_err());
+    f.r.db
+        .execute("UPDATE cloud_connection SET status='connected'", [])
+        .unwrap();
+    stop.store(true, Ordering::Relaxed);
+    assert!(guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .is_err());
+    assert_eq!(api.0.borrow().calls.len(), 1);
+}
+#[test]
+fn processing_polls_are_bounded_without_reuploading_or_deleting_file() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().processing = true;
+    f.sync(&api);
+    f.r.db
+        .execute("UPDATE cloud_jobs SET poll_count=120,next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "failed");
+    assert!(s(&f.jobs()[0], "error").contains("120 polls"));
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+}
+#[test]
+fn explicit_association_cleanup_works_while_cloud_sync_is_disconnected() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let job = f.jobs().remove(0);
+    cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).unwrap();
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "remove",
+        &json!({"version":job["version_id"],"confirm":true}),
+    )
+    .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    cloud_sync::remove_owned(&f.r.db, &p, &job, &api).unwrap();
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 0);
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+#[test]
+fn search_waits_for_deselected_associations_to_be_removed() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let mut draft = f.draft();
+    draft.documents.clear();
+    f.apply(draft);
+    assert!(cloud_sync::search(&f.r.db, &f.id, "old selected content", &api, "bound").is_err());
+    assert!(api.0.borrow().calls.iter().all(|c| !c.ends_with("/search")));
+}

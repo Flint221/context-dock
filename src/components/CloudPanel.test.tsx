@@ -196,3 +196,45 @@ it("shows an actionable configuration failure inside its consent dialog", async 
   );
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
 });
+it("allows an explicitly confirmed association cleanup while sync is paused without resuming uploads", async () => {
+  const user = userEvent.setup();
+  view.enabled = 0;
+  view.paused = 1;
+  view.store_id = "vs_owned";
+  view.store_state = "linked";
+  view.jobs = [
+    {
+      id: "j1",
+      version_id: "v1",
+      file_id: "file-owned",
+      familyName: "Master Context",
+      number: 1,
+      state: "indexed",
+      error: null,
+      usage_bytes: 42,
+      rawBytes: 100,
+    },
+  ];
+  render(<CloudPanel project="p1" />);
+  await screen.findByLabelText(/Master Context/);
+  await user.click(
+    screen.getByRole("button", { name: "View Cloud Index / Test Search" }),
+  );
+  await user.click(screen.getByRole("button", { name: "Remove association" }));
+  const modal = screen.getByRole("dialog", { name: "Confirm remote deletion" });
+  await user.click(
+    within(modal).getByRole("button", { name: "Confirm remote deletion" }),
+  );
+  await waitFor(() =>
+    expect(cloud.action).toHaveBeenCalledWith(
+      "p1",
+      "remove_now",
+      expect.objectContaining({ version: "v1", confirm: true }),
+    ),
+  );
+  expect(cloud.action).not.toHaveBeenCalledWith(
+    "p1",
+    "resume",
+    expect.anything(),
+  );
+});

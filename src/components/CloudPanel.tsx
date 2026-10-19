@@ -618,12 +618,18 @@ export function CloudPanel({ project }: { project: string }) {
               }
               onClick={() =>
                 void run(async () => {
-                  await cloud.action(project, destruction.action, {
-                    version: destruction.job?.version_id,
-                    confirm: true,
-                    confirmation,
-                    noOtherReferences: attestation,
-                  });
+                  await cloud.action(
+                    project,
+                    destruction.action === "remove"
+                      ? "remove_now"
+                      : destruction.action,
+                    {
+                      version: destruction.job?.version_id,
+                      confirm: true,
+                      confirmation,
+                      noOtherReferences: attestation,
+                    },
+                  );
                   setDestruction(null);
                 })
               }

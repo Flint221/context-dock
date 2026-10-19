@@ -17,6 +17,63 @@ use std::{
     thread,
 };
 use tauri::Emitter;
+/// Recheck persisted authorization between individual outbound requests.
+pub struct ProjectApi<'a> {
+    api: &'a dyn CloudApi,
+    db: Connection,
+    project: String,
+    scope: String,
+    stop: Arc<AtomicBool>,
+}
+impl<'a> ProjectApi<'a> {
+    pub fn new(
+        api: &'a dyn CloudApi,
+        path: &std::path::Path,
+        project: &str,
+        scope: &str,
+        stop: Arc<AtomicBool>,
+    ) -> Result<Self> {
+        Ok(Self {
+            api,
+            db: cloud::connect(path)?,
+            project: project.into(),
+            scope: scope.into(),
+            stop,
+        })
+    }
+    fn check(&self) -> std::result::Result<(), cloud_api::ApiError> {
+        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND (c.paused=0 OR c.delete_requested=1) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
+        if active != 1 || self.stop.load(Ordering::Relaxed) {
+            return Err(cloud_api::ApiError::local(
+                "Cloud sync paused, disconnected or stopped before the next request.",
+            ));
+        }
+        Ok(())
+    }
+}
+impl CloudApi for ProjectApi<'_> {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> std::result::Result<Value, cloud_api::ApiError> {
+        self.check()?;
+        self.api.request(method, path, body)
+    }
+    fn upload(
+        &self,
+        name: &str,
+        bytes: Vec<u8>,
+    ) -> std::result::Result<Value, cloud_api::ApiError> {
+        self.check()?;
+        self.api.upload(name, bytes)
+    }
+    fn content(&self, id: &str) -> std::result::Result<Vec<u8>, cloud_api::ApiError> {
+        self.check()?;
+        self.api.content(id)
+    }
+}
 pub struct CloudRuntime {
     path: PathBuf,
     gate: Arc<Mutex<()>>,
@@ -122,7 +179,9 @@ impl CloudRuntime {
                             if needed(&db,p).unwrap_or(false) {
                                 if let Ok((api,scope))=current_api(&db) {
                                     if s(p,"scope")==scope {
-                                        let _=cloud_sync::step(&mut db,&root,s(p,"project_id"),&api,&scope);
+                                        if let Ok(guarded)=ProjectApi::new(&api,&worker_path,s(p,"project_id"),&scope,worker_stop.clone()) {
+                                            let _=cloud_sync::step(&mut db,&root,s(p,"project_id"),&guarded,&scope);
+                                        }
                                         let _=app.emit("cloud-changed",s(p,"project_id"));
                                     }
                                 }
@@ -226,7 +285,11 @@ pub async fn cloud_action(
     let path = state.path.clone();
     let gate = state.gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = gate.lock().map_err(|_| "Cloud worker unavailable.")?;
+        let _guard = if ["pause", "disconnect", "disconnect_key"].contains(&action.as_str()) {
+            None
+        } else {
+            Some(gate.lock().map_err(|_| "Cloud worker unavailable.")?)
+        };
         let mut db = cloud::connect(&path)?;
         action_impl(&mut db, project.as_deref(), &action, &payload)
     })
@@ -240,13 +303,13 @@ pub fn action_impl(
     payload: &Value,
 ) -> Result<Value> {
     if action == "disconnect_key" {
-        cloud_credentials::delete()?;
         db.execute(
             "UPDATE cloud_connection SET status='disconnected',error=NULL",
             [],
         )
         .map_err(error)?;
         db.execute("UPDATE cloud_projects SET status='key_disconnected',error='Reconnect and test an API key to resume cloud operations.' WHERE enabled=1",[]).map_err(error)?;
+        cloud_credentials::delete()?;
         return Ok(Value::Null);
     }
     if action == "test" {
@@ -289,6 +352,9 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "start" | "sync" | "resume" | "reconcile" => {
+            if n(&p, "delete_requested") == 1 && action != "reconcile" {
+                return Err("Project index deletion is pending. Wait for completion or Disconnect local cloud sync to stop future requests.".into());
+            }
             if n(&p, "enabled") != 1 {
                 return Err("Enable cloud indexing with a reviewed selection first.".into());
             }
@@ -304,9 +370,9 @@ pub fn action_impl(
                 )
                 .map_err(error)?;
             }
-            db.execute("UPDATE cloud_projects SET paused=0,started=CASE WHEN ?2='start' THEN 1 ELSE started END,sync_requested=CASE WHEN ?2 IN ('start','sync','resume') THEN 1 ELSE sync_requested END,reconcile_requested=CASE WHEN store_id IS NOT NULL THEN 1 ELSE 0 END,next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",params![id,action]).map_err(error)?;
+            db.execute("UPDATE cloud_projects SET paused=CASE WHEN delete_requested=1 THEN 1 ELSE 0 END,started=CASE WHEN ?2='start' THEN 1 ELSE started END,sync_requested=CASE WHEN ?2 IN ('start','sync','resume') THEN 1 ELSE sync_requested END,reconcile_requested=CASE WHEN store_id IS NOT NULL THEN 1 ELSE 0 END,next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",params![id,action]).map_err(error)?;
             // Preserve the irreversible phase. An uncertain upload is reconciled, never reposted.
-            db.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' OR state='uncertain' OR state='uploading' THEN 'uploading' ELSE 'pending' END,next_at=0,attempts=0,error=NULL WHERE project_id=?1 AND state IN ('failed','uncertain','uploading')",[id]).map_err(error)?;
+            db.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' OR state='uncertain' OR state='uploading' THEN 'uploading' ELSE 'pending' END,next_at=0,attempts=0,poll_count=0,error=NULL WHERE project_id=?1 AND state IN ('failed','uncertain','uploading')",[id]).map_err(error)?;
             cloud::activity(
                 db,
                 id,
@@ -318,6 +384,30 @@ pub fn action_impl(
         "search" => {
             let (api, bound) = current_api(db)?;
             cloud_sync::search(db, id, s(payload, "query"), &api, &bound)
+        }
+        "remove_now" => {
+            let (api, bound) = current_api(db)?;
+            if s(&p, "scope") != bound {
+                return Err(
+                    "Verify this index with the saved key before deleting an association.".into(),
+                );
+            }
+            action_impl(db, Some(id), "remove", payload)?;
+            let jobs = cloud::jobs(db, id)?;
+            let job = jobs
+                .iter()
+                .find(|j| s(j, "version_id") == s(payload, "version"))
+                .ok_or("Owned version not found.")?;
+            let result = cloud_sync::remove_owned(db, &p, job, &api);
+            if let Err(message) = &result {
+                db.execute(
+                    "UPDATE cloud_jobs SET error=?2 WHERE id=?1",
+                    params![s(job, "id"), message],
+                )
+                .map_err(error)?;
+            }
+            result?;
+            Ok(Value::Null)
         }
         "remove" => {
             if payload["confirm"] != true {
@@ -367,7 +457,7 @@ pub fn action_impl(
                 }
                 Err(e) => return Err(e.message),
             }
-            db.execute("UPDATE cloud_projects SET delete_requested=1,paused=1,auto_sync=0,next_at=0,status='deleting' WHERE project_id=?1",[id]).map_err(error)?;
+            db.execute("UPDATE cloud_projects SET enabled=1,delete_requested=1,paused=1,auto_sync=0,next_at=0,status='deleting' WHERE project_id=?1",[id]).map_err(error)?;
             Ok(Value::Null)
         }
         "purge_file" => purge(db, &p, payload),
