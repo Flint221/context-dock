@@ -339,6 +339,29 @@ impl Registry {
         storage::verify(&new.path, &new_hash)?;
         let dest = storage::checked(root, &plan.destination, true)?;
         if plan.mode == "copy" {
+            let prior_temp = storage::checked(root, &plan.temporary, true)?;
+            if !dest.path.exists() && prior_temp.path.exists() {
+                // A crash can leave an incomplete temporary. Retain it, journal a fresh private
+                // name and copy again; never truncate/delete a file whose ownership is uncertain.
+                let parent = Path::new(&plan.destination)
+                    .parent()
+                    .ok_or("Archive has no parent")?;
+                plan.temporary = parent
+                    .join(format!(".contextdock-{}.tmp", uuid::Uuid::new_v4()))
+                    .to_string_lossy()
+                    .into();
+                self.db
+                    .execute(
+                        "UPDATE operations SET payload=?1,updated_at=?2 WHERE id=?3",
+                        params![encode(&plan)?, models::now(), id],
+                    )
+                    .map_err(error)?;
+                self.activity(
+                    &plan.project,
+                    "recovered",
+                    "Incomplete archive staging retained; retrying into a fresh private temporary.",
+                )?;
+            }
             storage::archive_copy(
                 &old.path,
                 root,

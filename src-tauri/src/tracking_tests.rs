@@ -697,3 +697,42 @@ fn nested_binary_word_sources_with_identical_names_have_independent_byte_exact_h
         bytes
     );
 }
+#[test]
+fn archive_copy_recovers_partial_staging_and_final_link_without_touching_current_source() {
+    for phase in 0..2 {
+        let mut f = Fixture::new(&[("Master.md", "one")]);
+        f.enable(true);
+        let document = f.prepare_replacement("Master.md", "Master.md", "two");
+        let (_, plan) = f.pending_archive();
+        assert_eq!(plan.mode, "copy");
+        let root = PathBuf::from(f.r.path(&f.project).unwrap());
+        let original_temp = f.root.join(&plan.temporary);
+        fs::create_dir_all(original_temp.parent().unwrap()).unwrap();
+        if phase == 0 {
+            fs::write(&original_temp, "incomplete").unwrap();
+        } else {
+            let old = f.r.version_location(&plan.old_version, false).unwrap();
+            storage::archive_copy(
+                std::path::Path::new(&old),
+                &root,
+                &plan.temporary,
+                &plan.destination,
+                "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
+                false,
+            )
+            .unwrap();
+        }
+        let errors = f.r.recover_operations(&f.project, true).unwrap();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert_eq!(f.count(&document), 2);
+        assert_eq!(fs::read_to_string(f.root.join("Master.md")).unwrap(), "two");
+        assert_eq!(
+            fs::read_to_string(f.root.join(&plan.destination)).unwrap(),
+            "one"
+        );
+        if phase == 0 {
+            assert_eq!(fs::read_to_string(original_temp).unwrap(), "incomplete");
+        }
+        assert!(f.r.recover_operations(&f.project, true).unwrap().is_empty());
+    }
+}

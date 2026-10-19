@@ -317,20 +317,18 @@ pub fn archive_copy(
         }
         return verify(&dest.path, expected);
     }
-    if !temp.path.exists() {
-        let mut source = locked_read(snapshot, false)?;
-        if hash(&mut source)? != expected {
-            return Err("Snapshot integrity check failed.".into());
-        }
-        source.rewind().map_err(io)?;
-        let mut out = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp.path)
-            .map_err(io)?;
-        std::io::copy(&mut source, &mut out).map_err(io)?;
-        out.sync_all().map_err(io)?;
+    let mut source = locked_read(snapshot, false)?;
+    if hash(&mut source)? != expected {
+        return Err("Snapshot integrity check failed.".into());
     }
+    source.rewind().map_err(io)?;
+    let mut out = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp.path)
+        .map_err(io)?;
+    std::io::copy(&mut source, &mut out).map_err(io)?;
+    out.sync_all().map_err(io)?;
     verify(&temp.path, expected)?;
     fs::hard_link(&temp.path, &dest.path).map_err(io)?;
     verify(&dest.path, expected)?;
