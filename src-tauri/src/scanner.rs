@@ -13,24 +13,25 @@ pub struct Scan {
     pub files: Vec<Observed>,
     pub errors: Vec<String>,
 }
+pub fn ignored_directory(name: &str) -> bool {
+    matches!(
+        name.to_lowercase().as_str(),
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | "build"
+            | ".next"
+            | ".contextdock"
+            | ".contextdock-archive"
+            | "contextdock-archive"
+            | "old context files"
+    )
+}
 fn excluded(e: &DirEntry) -> bool {
-    let name = e.file_name().to_string_lossy().to_lowercase();
     e.depth() > 0
         && (is_link(e.path())
-            || (e.file_type().is_dir()
-                && matches!(
-                    name.as_str(),
-                    ".git"
-                        | "node_modules"
-                        | "target"
-                        | "dist"
-                        | "build"
-                        | ".next"
-                        | ".contextdock"
-                        | ".contextdock-archive"
-                        | "contextdock-archive"
-                        | "old context files"
-                )))
+            || (e.file_type().is_dir() && ignored_directory(&e.file_name().to_string_lossy())))
 }
 pub fn is_link(path: &Path) -> bool {
     let Ok(m) = fs::symlink_metadata(path) else {

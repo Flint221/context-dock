@@ -246,7 +246,7 @@ pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {
     // Buffer is aligned for FILE_RENAME_INFO, sized for its trailing UTF-16 filename.
     let ok = unsafe {
         let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
-        (*info).Anonymous.ReplaceIfExists = 0;
+        (*info).Anonymous.ReplaceIfExists = false;
         (*info).RootDirectory = std::ptr::null_mut();
         (*info).FileNameLength = (name.len() * 2) as u32;
         std::ptr::copy_nonoverlapping(
