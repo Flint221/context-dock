@@ -77,8 +77,12 @@ export function ProjectDetails({
           Refresh documents
         </button>
       </div>
-      <TrackingPanel key={project.id} project={project} changed={changed} />
-      <Documents key={project.id} documents={documents} />
+      <TrackingPanel
+        key={`tracking:${project.id}`}
+        project={project}
+        changed={changed}
+      />
+      <Documents key={`documents:${project.id}`} documents={documents} />
     </>
   );
 }

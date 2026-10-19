@@ -222,3 +222,47 @@ it("opens a preserved snapshot location by version ID and exposes its original m
   await user.click(screen.getByText("Version metadata"));
   expect(screen.getByText("a".repeat(64))).toBeInTheDocument();
 });
+
+it("unlocks resume decisions and scan controls after success or failure", async () => {
+  view.initialized = true;
+  view.reviews = [
+    {
+      sourceId: "s2",
+      name: "New.md",
+      relativePath: "New.md",
+      candidateIds: [],
+      explanation: "Select a family or keep independent.",
+    },
+  ];
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  await user.click(
+    await screen.findByRole("button", { name: "Resume tracking" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText("Assign to document family")).toBeEnabled(),
+  );
+  expect(
+    screen.getByRole("button", { name: "Disable tracking" }),
+  ).toBeEnabled();
+  vi.mocked(registry.refresh).mockRejectedValueOnce(
+    "Source is locked; retry after closing the writer.",
+  );
+  await user.click(screen.getByRole("button", { name: "Scan for changes" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Source is locked",
+  );
+  expect(
+    screen.getByRole("button", { name: "Scan for changes" }),
+  ).toBeEnabled();
+  expect(screen.getByLabelText("Assign to document family")).toBeEnabled();
+  vi.mocked(registry.refresh).mockResolvedValueOnce(undefined);
+  await user.click(screen.getByRole("button", { name: "Scan for changes" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Scan for changes" }),
+    ).toBeEnabled(),
+  );
+  expect(screen.queryByText("Working…")).not.toBeInTheDocument();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
