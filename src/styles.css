@@ -1150,3 +1150,76 @@ dialog:has(.comparison) {
     flex-basis: 30px;
   }
 }
+/* Cloud controls are independent of local tracking and wrap at the window minimum. */
+.cloud-panel {
+  padding: 1.5rem;
+  margin-block: 1.5rem;
+}
+.cloud-panel p {
+  overflow-wrap: anywhere;
+}
+.cloud-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.cloud-actions,
+.cloud-facts {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-block: 1rem;
+}
+.cloud-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin-block: 1rem;
+}
+.cloud-check {
+  display: flex;
+  align-items: start;
+  gap: 0.65rem;
+  margin-block: 1rem;
+}
+.cloud-check input,
+.cloud-family input {
+  width: auto;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+.cloud-family {
+  display: flex;
+  gap: 0.65rem;
+  padding-block: 0.65rem;
+}
+.cloud-family small {
+  display: block;
+}
+.cloud-result {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  margin-block: 1rem;
+}
+.cloud-result pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  max-height: 20rem;
+  overflow: auto;
+}
+.cloud-panel fieldset {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 1rem;
+  min-width: 0;
+}
+@media (max-width: 800px) {
+  .cloud-form {
+    grid-template-columns: 1fr;
+  }
+}

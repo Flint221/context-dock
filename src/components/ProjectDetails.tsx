@@ -1,4 +1,5 @@
 import { TrackingPanel } from "./TrackingPanel";
+import { CloudPanel } from "./CloudPanel";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -83,6 +84,7 @@ export function ProjectDetails({
         changed={changed}
       />
       <Documents key={`documents:${project.id}`} documents={documents} />
+      <CloudPanel key={`cloud:${project.id}`} project={project.id} />
     </>
   );
 }

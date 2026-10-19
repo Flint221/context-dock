@@ -1,6 +1,7 @@
 import { Moon, ShieldCheck } from "lucide-react";
 import type { Theme } from "../types";
 import { version } from "../../package.json";
+import { OpenAIConnection } from "./OpenAIConnection";
 export function SettingsView({
   theme,
   busy,
@@ -12,6 +13,7 @@ export function SettingsView({
 }) {
   return (
     <>
+      <OpenAIConnection />
       <section className="panel settings">
         <Moon size={23} />
         <div>
@@ -35,7 +37,7 @@ export function SettingsView({
         <ShieldCheck size={23} />
         <div>
           <h2>About ContextDock</h2>
-          <p>Version {version} · Milestone 3</p>
+          <p>Version {version} · Milestone 4</p>
           <p>
             Discovery reads file metadata. Opt-in tracking captures immutable
             local snapshots. Separately enabled archival preserves older sources
@@ -45,7 +47,8 @@ export function SettingsView({
             Registrations, history and preferences use per-user SQLite storage.
             Snapshot bytes remain in application data across upgrades and
             project removal. Monitoring operates only while ContextDock is
-            running. No telemetry or cloud connection.
+            running. No telemetry. Optional OpenAI indexing requires a saved
+            key, project selection and explicit upload consent.
           </p>
         </div>
       </section>
