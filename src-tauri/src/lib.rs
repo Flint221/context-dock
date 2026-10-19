@@ -1,3 +1,8 @@
+mod comparison;
+mod comparison_models;
+#[cfg(test)]
+mod comparison_tests;
+mod extraction;
 mod matching;
 mod models;
 mod monitor;
@@ -138,6 +143,35 @@ async fn document_versions(
     work(state.inner().clone(), move |r| r.versions(&document)).await
 }
 #[tauri::command]
+async fn compare_versions(
+    state: tauri::State<'_, Store>,
+    earlier: String,
+    later: String,
+) -> Result<comparison_models::Comparison, String> {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::AcqRel) {
+        return Err("A comparison is already running. Please retry when it finishes.".into());
+    }
+    struct Permit;
+    impl Drop for Permit {
+        fn drop(&mut self) {
+            RUNNING.store(false, Ordering::Release);
+        }
+    }
+    let permit = Permit;
+    let job = work(state.inner().clone(), move |r| {
+        r.comparison_job(&earlier, &later)
+    })
+    .await?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _permit = permit;
+        comparison::compare(job)
+    })
+    .await
+    .map_err(|e| format!("Comparison worker failed: {e}"))?
+}
+#[tauri::command]
 async fn open_version_location(
     state: tauri::State<'_, Store>,
     version: String,
@@ -230,6 +264,7 @@ pub fn run() {
             configure_tracking,
             resolve_match,
             document_versions,
+            compare_versions,
             open_version_location,
             open_current_location,
             retry_operations
