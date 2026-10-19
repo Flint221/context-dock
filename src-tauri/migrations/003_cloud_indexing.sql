@@ -25,7 +25,7 @@ CREATE TRIGGER cloud_project_added AFTER INSERT ON projects BEGIN
  INSERT INTO cloud_projects(project_id,store_name) VALUES(NEW.id,'ContextDock - '||NEW.name);
 END;
 CREATE TRIGGER cloud_project_removed AFTER UPDATE OF removed_at ON projects WHEN NEW.removed_at IS NOT NULL BEGIN
- UPDATE cloud_projects SET enabled=0,paused=1,auto_sync=0,started=0,status='disconnected',revision=revision+1 WHERE project_id=NEW.id;
+ UPDATE cloud_projects SET enabled=0,paused=1,auto_sync=0,started=0,delete_requested=0,status='disconnected',revision=revision+1 WHERE project_id=NEW.id;
 END;
 CREATE TABLE cloud_documents (
  project_id TEXT NOT NULL REFERENCES cloud_projects(project_id),

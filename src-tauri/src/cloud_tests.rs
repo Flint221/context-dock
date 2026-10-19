@@ -733,3 +733,116 @@ fn current_pointer_reuses_historical_identity() {
     assert_eq!(desired.len(), 1);
     assert_eq!(desired[0].number, 1);
 }
+#[test]
+fn failed_processing_can_retry_attachment_without_reuploading_file() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().processing = true;
+    f.sync(&api);
+    api.0.borrow_mut().associations[0]["status"] = json!("failed");
+    f.r.db
+        .execute("UPDATE cloud_jobs SET next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "failed");
+    assert_eq!(s(&f.jobs()[0], "phase"), "retry_attach");
+    api.0.borrow_mut().processing = false;
+    f.r.db
+        .execute("UPDATE cloud_projects SET next_at=0,attempts=0", [])
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_jobs SET state='uploaded',next_at=0", [])
+        .unwrap();
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+}
+#[test]
+fn explicit_absent_operation_retry_refuses_existing_remote_copy() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.step(&api);
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET store_id=NULL,store_state='creating'",
+            [],
+        )
+        .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let consent = json!({"confirmation":"RETRY ABSENT OPERATION","noOtherReferences":true});
+    assert!(cloud_commands::retry_absent(&f.r.db, &p, &consent, &api).is_err());
+    api.0.borrow_mut().store = None;
+    cloud_commands::retry_absent(&f.r.db, &p, &consent, &api).unwrap();
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_state"),
+        "pending"
+    );
+}
+#[test]
+fn deleted_remote_file_has_explicit_recovery_with_owned_index() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    api.0.borrow_mut().files.clear();
+    api.0.borrow_mut().associations.clear();
+    f.r.db
+        .execute("UPDATE cloud_projects SET reconcile_requested=1", [])
+        .unwrap();
+    f.step(&api);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let job = f.jobs().remove(0);
+    cloud_commands::retry_absent(&f.r.db,&p,&json!({"confirmation":"RETRY ABSENT OPERATION","noOtherReferences":true,"version":job["version_id"]}),&api).unwrap();
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+}
+#[test]
+fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let job = f.jobs().remove(0);
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "remove",
+        &json!({"version":job["version_id"],"confirm":true}),
+    )
+    .unwrap();
+    f.sync(&api);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
+    let original = api.0.borrow().files[0].1.clone();
+    api.0.borrow_mut().files[0].1 = b"different bytes".to_vec();
+    assert!(cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).is_err());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    api.0.borrow_mut().files[0].1 = original;
+    cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).unwrap();
+    assert!(api.0.borrow().files.is_empty());
+    assert_eq!(s(&f.jobs()[0], "state"), "purged");
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+#[test]
+fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.r.db
+        .execute("UPDATE documents SET tracking_state='ignored'", [])
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "needs_attention"
+    );
+}

@@ -34,6 +34,7 @@ export function CloudPanel({ project }: { project: string }) {
   } | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [attestation, setAttestation] = useState(false);
+  const [recovery, setRecovery] = useState<Job | true | null>(null);
   const alive = useRef(true);
   const dirty = useRef(false);
   const load = useCallback(async () => {
@@ -104,7 +105,14 @@ export function CloudPanel({ project }: { project: string }) {
           Refresh cloud status
         </button>
       </div>
-      {error && !plan && !index && !destruction && <p role="alert">{error}</p>}
+      {error && !plan && !index && !destruction && !recovery && (
+        <p role="alert">{error}</p>
+      )}
+      {busy && (
+        <p role="status">
+          Cloud request in progress… Local tracking remains available.
+        </p>
+      )}
       {view?.error && <p role="status">{view.error}</p>}
       <p>
         Only explicitly selected, tracked document families can be uploaded.
@@ -223,6 +231,18 @@ export function CloudPanel({ project }: { project: string }) {
             </button>
           </fieldset>
           <div className="cloud-actions">
+            {view.store_state === "creating" && !view.store_id && (
+              <button
+                disabled={busy}
+                onClick={() => {
+                  setConfirmation("");
+                  setAttestation(false);
+                  setRecovery(true);
+                }}
+              >
+                Retry confirmed absent index creation
+              </button>
+            )}
             <button
               className="primary"
               disabled={busy || !view.enabled || !!view.started}
@@ -382,7 +402,7 @@ export function CloudPanel({ project }: { project: string }) {
             if (!busy) setIndex(false);
           }}
         >
-          {error && !destruction && <p role="alert">{error}</p>}
+          {error && !destruction && !recovery && <p role="alert">{error}</p>}
           <p>
             <code>{view.store_id ?? "No cloud index"}</code> · Direct
             vector-store retrieval only; no generated answer or AI analysis.
@@ -449,6 +469,18 @@ export function CloudPanel({ project }: { project: string }) {
               </p>
               {job.error && <p>{job.error}</p>}
               <div className="cloud-actions">
+                {["failed", "uncertain", "uploaded"].includes(job.state) && (
+                  <button
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmation("");
+                      setAttestation(false);
+                      setRecovery(job);
+                    }}
+                  >
+                    Retry confirmed missing upload
+                  </button>
+                )}
                 <button
                   disabled={
                     busy ||
@@ -469,6 +501,64 @@ export function CloudPanel({ project }: { project: string }) {
               </div>
             </article>
           ))}
+        </Modal>
+      )}
+      {recovery && (
+        <Modal
+          title="Confirm recovery retry"
+          close={() => {
+            if (!busy) setRecovery(null);
+          }}
+        >
+          {error && <p role="alert">{error}</p>}
+          <p>
+            Use Retry / Reconcile first. Only continue if the previous request
+            has ended and you verified that no matching index or File exists in
+            the correct OpenAI account. ContextDock checks the accessible remote
+            listing again before retrying. A delayed or inaccessible copy can
+            still create uncertainty.
+          </p>
+          <label>
+            Type RETRY ABSENT OPERATION
+            <input
+              disabled={busy}
+              value={confirmation}
+              onChange={(e) => setConfirmation(e.target.value)}
+            />
+          </label>
+          <label className="cloud-check">
+            <input
+              type="checkbox"
+              checked={attestation}
+              onChange={(e) => setAttestation(e.target.checked)}
+            />
+            I checked the correct OpenAI account, the previous request has
+            ended, and no remote copy exists.
+          </label>
+          <div className="cloud-actions">
+            <button
+              disabled={
+                busy ||
+                confirmation !== "RETRY ABSENT OPERATION" ||
+                !attestation
+              }
+              onClick={() =>
+                void run(async () => {
+                  await cloud.action(project, "retry_absent", {
+                    version: recovery === true ? null : recovery.version_id,
+                    confirmation,
+                    noOtherReferences: attestation,
+                  });
+                  setRecovery(null);
+                })
+              }
+            >
+              Confirm recovery retry
+            </button>
+            <button disabled={busy} onClick={() => setRecovery(null)}>
+              Cancel
+            </button>
+          </div>
         </Modal>
       )}
       {destruction && (

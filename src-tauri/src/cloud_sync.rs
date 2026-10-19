@@ -64,7 +64,7 @@ fn create_store(db: &Connection, p: &Value, api: &dyn CloudApi) -> ApiResult<()>
         match result {
             Ok(store) => return adopt(db, p, &store),
             Err(e) => {
-                if e.retry && !e.ambiguous {
+                if !e.ambiguous {
                     execute(
                         db,
                         "UPDATE cloud_projects SET store_state='pending' WHERE project_id=?1",
@@ -170,7 +170,21 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     let store = s(p, "store_id");
     let file = s(j, "file_id");
     let attrs = identity(db, p, j)?;
-    let remote = match association(api, store, file)? {
+    let mut existing = association(api, store, file)?;
+    if s(j, "phase") == "retry_attach" {
+        if let Some(remote) = &existing {
+            owns_association(remote, &attrs, store)?;
+            if matches!(s(remote, "status"), "failed" | "cancelled") {
+                api.request(
+                    "DELETE",
+                    &format!("/vector_stores/{store}/files/{file}"),
+                    None,
+                )?;
+                existing = None;
+            }
+        }
+    }
+    let remote = match existing {
         Some(v) => v,
         None => {
             // Check File existence first: a missing File must never be reported as indexed.
@@ -190,7 +204,10 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
             log(db,s(p,"project_id"),"Snapshot indexing completed; remote association verified.")
         },
         "in_progress"=>execute(db,"UPDATE cloud_jobs SET state='indexing',phase='poll',association_status='in_progress',next_at=?2 WHERE id=?1",&[&s(j,"id"),&(chrono::Utc::now().timestamp()+15)]),
-        "failed"|"cancelled"=>Err(ApiError::local("OpenAI could not index this snapshot. Check file support and limits. Remove the failed association in the dashboard, then Retry/Reconcile to reuse the uploaded File.")),
+        "failed"|"cancelled"=>{
+            execute(db,"UPDATE cloud_jobs SET association_status=?2,phase='retry_attach' WHERE id=?1",&[&s(j,"id"),&status])?;
+            Err(ApiError::local("OpenAI could not index this snapshot. Check file support and limits. Retry/Reconcile will replace only the failed association and reuse the uploaded File."))
+        },
         _=>Err(ApiError::local("OpenAI returned an unknown indexing state."))
     }
 }
@@ -357,6 +374,12 @@ pub fn step(
         };
         db.execute("UPDATE cloud_projects SET status=?2,error=?3,next_at=?4,attempts=?5 WHERE project_id=?1",params![id,if e.ambiguous {"uncertain"} else if e.retry {"retry_wait"} else {"needs_attention"},e.message,next,tries]).map_err(error)?;
         cloud::activity(db, id, "error", &e.message)?;
+    } else {
+        db.execute(
+            "UPDATE cloud_projects SET attempts=0,next_at=0 WHERE project_id=?1",
+            [id],
+        )
+        .map_err(error)?;
     }
     Ok(())
 }

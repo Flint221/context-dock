@@ -285,7 +285,7 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "pause" | "disconnect" => {
-            db.execute("UPDATE cloud_projects SET paused=1,enabled=CASE WHEN ?2='disconnect' THEN 0 ELSE enabled END,status=?2,revision=revision+1 WHERE project_id=?1",params![id,action]).map_err(error)?;
+            db.execute("UPDATE cloud_projects SET paused=1,delete_requested=CASE WHEN ?2='disconnect' THEN 0 ELSE delete_requested END,enabled=CASE WHEN ?2='disconnect' THEN 0 ELSE enabled END,status=?2,revision=revision+1 WHERE project_id=?1",params![id,action]).map_err(error)?;
             Ok(Value::Null)
         }
         "start" | "sync" | "resume" | "reconcile" => {
@@ -362,7 +362,7 @@ pub fn action_impl(
                 Ok(_) => {}
                 Err(e) if e.missing => {
                     db.execute("UPDATE cloud_jobs SET state='removed',association_status=NULL WHERE project_id=?1 AND state!='purged'",[id]).map_err(error)?;
-                    db.execute("UPDATE cloud_projects SET enabled=0,paused=1,started=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",[id]).map_err(error)?;
+                    db.execute("UPDATE cloud_projects SET enabled=0,paused=1,started=0,delete_requested=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",[id]).map_err(error)?;
                     return Ok(Value::Null);
                 }
                 Err(e) => return Err(e.message),
@@ -371,6 +371,14 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "purge_file" => purge(db, &p, payload),
+        "retry_absent" => {
+            let (api, bound) = current_api(db)?;
+            if n(&p, "enabled") != 1 || s(&p, "scope") != bound {
+                return Err("Enable this project and verify the original credential first.".into());
+            }
+            retry_absent(db, &p, payload, &api)?;
+            Ok(Value::Null)
+        }
         "new_index" => {
             if s(&p, "store_state") != "deleted" || payload["confirm"] != true {
                 return Err(
@@ -387,17 +395,104 @@ pub fn action_impl(
 fn models_now() -> String {
     crate::models::now()
 }
+pub fn retry_absent(db: &Connection, p: &Value, payload: &Value, api: &dyn CloudApi) -> Result<()> {
+    if s(payload, "confirmation") != "RETRY ABSENT OPERATION"
+        || payload["noOtherReferences"] != true
+    {
+        return Err("Confirm the previous request has ended and no remote copy exists in the correct OpenAI account.".into());
+    }
+    let pid = s(p, "project_id");
+    if s(payload, "version").is_empty() {
+        if !s(p, "store_id").is_empty() || s(p, "store_state") != "creating" {
+            return Err("Only an uncertain index creation can be reset.".into());
+        }
+        let stores = cloud_api::list(api, "/vector_stores").map_err(|e| e.message)?;
+        let install = cloud::install(db)?;
+        if stores.iter().any(|v| {
+            v["metadata"]["contextdock"] == install
+                && v["metadata"]["project"] == pid
+                && v["metadata"]["operation"] == p["store_op"]
+        }) {
+            return Err("A matching index exists. Use Reconcile to recover it instead.".into());
+        }
+        db.execute(
+            "UPDATE cloud_projects SET store_state='pending' WHERE project_id=?1",
+            [pid],
+        )
+        .map_err(error)?;
+    } else {
+        cloud::owned_store(api, db, p).map_err(|e| e.message)?;
+        let jobs = cloud::jobs(db, pid)?;
+        let job = jobs
+            .iter()
+            .find(|j| {
+                s(j, "version_id") == s(payload, "version")
+                    && matches!(
+                        s(j, "state"),
+                        "failed" | "uncertain" | "uploading" | "uploaded"
+                    )
+            })
+            .ok_or("Only a failed or uncertain upload can be reset.")?;
+        let file = s(job, "file_id");
+        if !file.is_empty() {
+            match api.request("GET", &format!("/files/{file}"), None) {
+                Err(e) if e.missing => {}
+                Err(e) => return Err(e.message),
+                Ok(_) => {
+                    return Err(
+                        "The uploaded File still exists. Retry/Reconcile without a new upload."
+                            .into(),
+                    )
+                }
+            }
+            match api.request(
+                "GET",
+                &format!("/vector_stores/{}/files/{file}", s(p, "store_id")),
+                None,
+            ) {
+                Err(e) if e.missing => {}
+                Err(e) => return Err(e.message),
+                Ok(_) => {
+                    return Err(
+                        "An association still exists. Reconcile it before proceeding.".into(),
+                    )
+                }
+            }
+        } else if s(job, "phase") != "recover" {
+            return Err("This upload has no ambiguous outcome. Use Retry/Reconcile.".into());
+        }
+        let files = cloud_api::list(api, "/files?purpose=assistants").map_err(|e| e.message)?;
+        if files
+            .iter()
+            .any(|v| s(v, "filename") == s(job, "remote_name"))
+        {
+            return Err("A matching upload exists. Use Reconcile to recover it instead.".into());
+        }
+        db.execute("UPDATE cloud_jobs SET file_id=NULL,state='pending',phase='upload',attempts=0,next_at=0,error=NULL WHERE id=?1",[s(job,"id")]).map_err(error)?;
+    }
+    db.execute("UPDATE cloud_projects SET paused=0,sync_requested=1,next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",[pid]).map_err(error)?;
+    cloud::activity(db,pid,"recovery","User verified absence after the previous request ended, and explicitly authorized retrying a missing/uncertain operation.")
+}
 fn purge(db: &Connection, p: &Value, payload: &Value) -> Result<Value> {
     let (api, bound) = current_api(db)?;
     if s(p, "scope") != bound {
         return Err("Verify this project with the saved key first.".into());
     }
+    purge_owned(db, p, payload, &api)
+}
+pub fn purge_owned(
+    db: &Connection,
+    p: &Value,
+    payload: &Value,
+    api: &dyn CloudApi,
+) -> Result<Value> {
     let jobs = cloud::jobs(db, s(p, "project_id"))?;
     let job = jobs
         .iter()
         .find(|j| s(j, "version_id") == s(payload, "version") && s(j, "state") == "removed")
         .ok_or("Detach this owned version before deleting its uploaded File.")?;
     let file = s(job, "file_id");
+    cloud_api::valid_id(file, "file").map_err(|e| e.message)?;
     if s(payload, "confirmation") != format!("DELETE {file}")
         || payload["noOtherReferences"] != true
     {
@@ -406,10 +501,10 @@ fn purge(db: &Connection, p: &Value, payload: &Value) -> Result<Value> {
                 .into(),
         );
     }
-    for store in cloud_api::list(&api, "/vector_stores").map_err(|e| e.message)? {
+    for store in cloud_api::list(api, "/vector_stores").map_err(|e| e.message)? {
         cloud_api::valid_id(s(&store, "id"), "vs_").map_err(|e| e.message)?;
         let associations =
-            cloud_api::list(&api, &format!("/vector_stores/{}/files", s(&store, "id")))
+            cloud_api::list(api, &format!("/vector_stores/{}/files", s(&store, "id")))
                 .map_err(|e| e.message)?;
         if associations.iter().any(|a| s(a, "id") == file) {
             return Err(

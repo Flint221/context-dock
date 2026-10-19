@@ -126,6 +126,11 @@ impl CloudApi for OpenAi {
         let mut req = self
             .client
             .request(method, format!("https://api.openai.com/v1{path}"));
+        // The current HTTP reference retains this compatibility header for the
+        // vector-store resource. No Assistants, Threads, Runs or Responses are used.
+        if path.starts_with("/vector_stores") && !path.ends_with("/search") {
+            req = req.header("OpenAI-Beta", "assistants=v2");
+        }
         if let Some(body) = body {
             req = req.json(&body);
         }

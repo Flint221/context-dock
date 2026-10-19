@@ -41,6 +41,12 @@ export function OpenAIConnection() {
     <section className="panel cloud-panel">
       <h2>OpenAI connection</h2>
       <p>
+        <CloudLink href="https://platform.openai.com/api-keys">
+          Create or manage your personal OpenAI API key
+        </CloudLink>
+        . Enter it only here; do not share it in chat.
+      </p>
+      <p>
         Optional cloud indexing. Local discovery, snapshots and comparisons work
         without an API key. Each project needs a separate selection and upload
         consent.
