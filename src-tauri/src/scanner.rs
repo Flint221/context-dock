@@ -29,9 +29,10 @@ fn excluded(e: &DirEntry) -> bool {
                         | ".contextdock"
                         | ".contextdock-archive"
                         | "contextdock-archive"
+                        | "old context files"
                 )))
 }
-fn is_link(path: &Path) -> bool {
+pub fn is_link(path: &Path) -> bool {
     let Ok(m) = fs::symlink_metadata(path) else {
         return false;
     };
@@ -111,7 +112,7 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
             size: m.len().min(i64::MAX as u64) as i64,
             modified: m.modified().ok().map(|t| {
                 chrono::DateTime::<chrono::Utc>::from(t)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+                    .to_rfc3339_opts(chrono::SecondsFormat::Nanos, true)
             }),
         });
     }

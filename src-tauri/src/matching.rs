@@ -1,0 +1,69 @@
+use regex::Regex;
+use std::{path::Path, sync::OnceLock};
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Stem {
+    pub normalized: String,
+    pub display: String,
+    pub versioned: bool,
+}
+/// Only remove recognizable *trailing* version/date groups. Never match by shared words.
+pub fn stem(name: &str) -> Stem {
+    static SUFFIX: OnceLock<Regex> = OnceLock::new();
+    let suffix=SUFFIX.get_or_init(|| Regex::new(r"(?i)(?:[\s_\-]*(?:\(?v(?:ersion)?[\s_\-]*\d+(?:\.\d+)*\)?|(?:19|20)\d{2}[-_]\d{2}[-_]\d{2}|(?:19|20)\d{6}))$").expect("constant filename pattern"));
+    let raw = Path::new(name)
+        .file_stem()
+        .and_then(|x| x.to_str())
+        .unwrap_or(name);
+    let mut base = raw.trim().to_string();
+    let mut versioned = false;
+    loop {
+        let trimmed = suffix
+            .replace(&base, "")
+            .trim_matches([' ', '_', '-'])
+            .to_string();
+        if trimmed == base || trimmed.is_empty() {
+            break;
+        }
+        base = trimmed;
+        versioned = true;
+    }
+    let display = base
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    Stem {
+        normalized: display.to_lowercase(),
+        display,
+        versioned,
+    }
+}
+pub fn parent_key(relative: &str) -> String {
+    crate::models::key(
+        Path::new(relative)
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_str()
+            .unwrap_or(""),
+    )
+}
+pub fn safe_name(value: &str) -> String {
+    let value: String = value
+        .chars()
+        .map(|c| {
+            if c.is_control() || "<>:\"/\\|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .take(60)
+        .collect();
+    let value = value.trim_matches([' ', '.']);
+    if value.is_empty() {
+        "Document".into()
+    } else {
+        value.into()
+    }
+}
