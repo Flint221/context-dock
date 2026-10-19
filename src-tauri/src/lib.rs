@@ -1,3 +1,9 @@
+mod cloud;
+mod cloud_api;
+mod cloud_commands;
+mod cloud_credentials;
+mod cloud_models;
+mod cloud_sync;
 mod comparison;
 mod comparison_models;
 #[cfg(test)]
@@ -245,6 +251,10 @@ pub fn run() {
                 Registry::open(&dir.join("contextdock.db")).map_err(std::io::Error::other)?,
             ));
             app.manage(Store(registry.clone()));
+            app.manage(cloud_commands::CloudRuntime::start(
+                dir.join("contextdock.db"),
+                app.handle().clone(),
+            )?);
             let handle = app.handle().clone();
             let monitor = monitor::Monitor::start(registry, move |project| {
                 let _ = handle.emit("registry-changed", project);
@@ -253,6 +263,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            cloud_commands::cloud_read,
+            cloud_commands::cloud_key,
+            cloud_commands::cloud_action,
             snapshot,
             add_project,
             rename_project,

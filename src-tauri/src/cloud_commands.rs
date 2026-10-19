@@ -1,0 +1,395 @@
+use crate::{
+    cloud::{self, n, s},
+    cloud_api::{self, CloudApi, OpenAi},
+    cloud_credentials,
+    cloud_models::CloudDraft,
+    cloud_sync,
+    registry::{error, Result},
+};
+use rusqlite::{params, Connection};
+use serde_json::{json, Value};
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
+};
+use tauri::Emitter;
+pub struct CloudRuntime {
+    path: PathBuf,
+    gate: Arc<Mutex<()>>,
+    stop: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+impl Drop for CloudRuntime {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+fn current_api(db: &Connection) -> Result<(OpenAi, String)> {
+    let key = cloud_credentials::read()?.ok_or("Save and test an API key in Settings first.")?;
+    let scope = cloud::scope(&key);
+    let connected:i64=db.query_row("SELECT COUNT(*) FROM cloud_connection WHERE singleton=1 AND scope=?1 AND status='connected'",[&scope],|r|r.get(0)).map_err(error)?;
+    if connected != 1 {
+        return Err("Test the saved key before using cloud indexing.".into());
+    }
+    Ok((OpenAi::new(&key)?, scope))
+}
+pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
+    if n(p, "enabled") != 1 || n(p, "next_at") > chrono::Utc::now().timestamp() {
+        return Ok(false);
+    }
+    if n(p, "delete_requested") == 1 {
+        return Ok(true);
+    }
+    if n(p, "paused") == 1 {
+        return Ok(false);
+    }
+    if s(p, "store_id").is_empty()
+        || n(p, "reconcile_requested") == 1
+        || n(p, "sync_requested") == 1
+    {
+        return Ok(true);
+    }
+    let jobs = cloud::jobs(db, s(p, "project_id"))?;
+    if jobs.iter().any(|j| {
+        n(j, "next_at") <= chrono::Utc::now().timestamp()
+            && !matches!(
+                s(j, "state"),
+                "indexed" | "failed" | "uncertain" | "removed" | "purged"
+            )
+    }) {
+        return Ok(true);
+    }
+    if n(p, "auto_sync") == 1 && n(p, "started") == 1 {
+        let wanted = cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?)?;
+        if wanted.iter().any(|v| {
+            !jobs.iter().any(|j| {
+                s(j, "version_id") == v.id
+                    && s(j, "state") == "indexed"
+                    && j["remote_current"].as_i64().map(|x| x == 1) == Some(v.current)
+            })
+        }) || jobs.iter().any(|j| {
+            s(j, "state") == "indexed" && !wanted.iter().any(|v| v.id == s(j, "version_id"))
+        }) {
+            return Ok(true);
+        }
+        // Periodic verification only for projects explicitly opted into automatic cloud traffic.
+        if p["last_sync"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .is_none_or(|t| chrono::Utc::now().timestamp() - t.timestamp() > 900)
+        {
+            db.execute(
+                "UPDATE cloud_projects SET reconcile_requested=1 WHERE project_id=?1",
+                [s(p, "project_id")],
+            )
+            .map_err(error)?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+impl CloudRuntime {
+    pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
+        let gate = Arc::new(Mutex::new(()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (worker_path, worker_gate, worker_stop) = (path.clone(), gate.clone(), stop.clone());
+        let worker=thread::Builder::new().name("contextdock-cloud".into()).spawn(move|| {
+            let Ok(mut db)=cloud::connect(&worker_path) else{return;};
+            let root=worker_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+            let mut cursor=0usize;
+            while !worker_stop.load(Ordering::Relaxed) {
+                if let Ok(_guard)=worker_gate.try_lock() {
+                    if let Ok(projects)=cloud::rows(&db,"SELECT c.* FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE p.removed_at IS NULL AND c.enabled=1",&[]) {
+                        for offset in 0..projects.len() {
+                            let index=(cursor+offset)%projects.len();let p=&projects[index];
+                            if needed(&db,p).unwrap_or(false) {
+                                if let Ok((api,scope))=current_api(&db) {
+                                    if s(p,"scope")==scope {
+                                        let _=cloud_sync::step(&mut db,&root,s(p,"project_id"),&api,&scope);
+                                        let _=app.emit("cloud-changed",s(p,"project_id"));
+                                    }
+                                }
+                                cursor=index+1; break;
+                            }
+                        }
+                    }
+                }
+                for _ in 0..20 {if worker_stop.load(Ordering::Relaxed){break;} thread::sleep(std::time::Duration::from_millis(100));}
+            }
+        })?;
+        Ok(Self {
+            path,
+            gate,
+            stop,
+            worker: Some(worker),
+        })
+    }
+}
+#[tauri::command]
+pub async fn cloud_read(
+    state: tauri::State<'_, CloudRuntime>,
+    project: Option<String>,
+) -> Result<Value> {
+    let path = state.path.clone();
+    tauri::async_runtime::spawn_blocking(move|| {
+        let db=cloud::connect(&path)?;
+        if let Some(id)=project {return cloud::view(&db,&id);}
+        let mut status=cloud::rows(&db,"SELECT status,tested_at,error FROM cloud_connection WHERE singleton=1",&[])?.pop().ok_or("Connection state unavailable.")?;
+        status["saved"]=json!(cloud_credentials::read()?.is_some());
+        status["usage"]=json!(cloud::rows(&db,"SELECT c.project_id,p.name,c.store_id,c.status,c.usage_bytes,(SELECT COALESCE(SUM(v.size),0) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.project_id=c.project_id AND j.state='indexed') rawBytes FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE c.store_id IS NOT NULL",&[])?);
+        Ok(status)
+    }).await.map_err(|_|"Cloud status task failed.".to_string())?
+}
+#[tauri::command]
+pub async fn cloud_key(state: tauri::State<'_, CloudRuntime>, key: String) -> Result<()> {
+    let key = cloud_credentials::validate(key)?;
+    let path = state.path.clone();
+    let gate = state.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate.lock().map_err(|_| "Cloud worker unavailable.")?;
+        let db = cloud::connect(&path)?;
+        cloud_credentials::save(&key)?;
+        db.execute(
+            "UPDATE cloud_connection SET scope=?1,status='untested',tested_at=NULL,error=NULL",
+            [cloud::scope(&key)],
+        )
+        .map_err(error)?;
+        Ok(())
+    })
+    .await
+    .map_err(|_| "Credential task failed.".to_string())?
+}
+#[tauri::command]
+pub async fn cloud_action(
+    state: tauri::State<'_, CloudRuntime>,
+    project: Option<String>,
+    action: String,
+    payload: Value,
+) -> Result<Value> {
+    let path = state.path.clone();
+    let gate = state.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate.lock().map_err(|_| "Cloud worker unavailable.")?;
+        let mut db = cloud::connect(&path)?;
+        action_impl(&mut db, project.as_deref(), &action, &payload)
+    })
+    .await
+    .map_err(|_| "Cloud operation failed.".to_string())?
+}
+pub fn action_impl(
+    db: &mut Connection,
+    project: Option<&str>,
+    action: &str,
+    payload: &Value,
+) -> Result<Value> {
+    if action == "disconnect_key" {
+        cloud_credentials::delete()?;
+        db.execute(
+            "UPDATE cloud_connection SET status='disconnected',error=NULL",
+            [],
+        )
+        .map_err(error)?;
+        return Ok(Value::Null);
+    }
+    if action == "test" {
+        let key = cloud_credentials::read()?.ok_or("No API key is saved.")?;
+        let api = OpenAi::new(&key)?;
+        let result = api.request("GET", "/vector_stores?limit=1", None);
+        db.execute(
+            "UPDATE cloud_connection SET status=?1,error=?2,tested_at=?3,scope=?4",
+            params![
+                if result.is_ok() { "connected" } else { "error" },
+                result.as_ref().err().map(|e| e.message.clone()),
+                models_now(),
+                cloud::scope(&key)
+            ],
+        )
+        .map_err(error)?;
+        result.map_err(|e| e.message)?;
+        return Ok(Value::Null);
+    }
+    let id = project.ok_or("Select a project.")?;
+    let p = cloud::project(db, id)?;
+    match action {
+        "preview" => {
+            let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
+                .map_err(|_| "Invalid cloud configuration.")?;
+            Ok(serde_json::to_value(cloud::preview(db, id, &draft)?)
+                .map_err(|_| "Invalid preview")?)
+        }
+        "apply" => {
+            let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
+                .map_err(|_| "Invalid cloud configuration.")?;
+            if payload["consent"] != true {
+                return Err("Explicit cloud upload and retention consent is required.".into());
+            }
+            cloud::apply(db, id, &draft, s(payload, "token"))?;
+            Ok(Value::Null)
+        }
+        "pause" | "disconnect" => {
+            db.execute("UPDATE cloud_projects SET paused=1,enabled=CASE WHEN ?2='disconnect' THEN 0 ELSE enabled END,status=?2,revision=revision+1 WHERE project_id=?1",params![id,action]).map_err(error)?;
+            Ok(Value::Null)
+        }
+        "start" | "sync" | "resume" | "reconcile" => {
+            if n(&p, "enabled") != 1 {
+                return Err("Enable cloud indexing with a reviewed selection first.".into());
+            }
+            let (api, bound) = current_api(db)?;
+            if s(&p, "scope") != bound {
+                if s(&p, "store_id").is_empty() {
+                    return Err("Reconnect the original credential before resolving an interrupted index creation.".into());
+                }
+                cloud::owned_store(&api, db, &p).map_err(|e| e.message)?;
+                db.execute(
+                    "UPDATE cloud_projects SET scope=?2 WHERE project_id=?1",
+                    params![id, bound],
+                )
+                .map_err(error)?;
+            }
+            db.execute("UPDATE cloud_projects SET paused=0,started=CASE WHEN ?2='start' THEN 1 ELSE started END,sync_requested=CASE WHEN ?2 IN ('start','sync','resume') THEN 1 ELSE sync_requested END,reconcile_requested=CASE WHEN store_id IS NOT NULL THEN 1 ELSE 0 END,next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",params![id,action]).map_err(error)?;
+            // Preserve the irreversible phase. An uncertain upload is reconciled, never reposted.
+            db.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN state='uncertain' OR state='uploading' THEN 'uploading' ELSE 'pending' END,next_at=0,attempts=0,error=NULL WHERE project_id=?1 AND state IN ('failed','uncertain','uploading')",[id]).map_err(error)?;
+            cloud::activity(
+                db,
+                id,
+                "request",
+                "User requested sync/resume/reconciliation.",
+            )?;
+            Ok(Value::Null)
+        }
+        "search" => {
+            let (api, bound) = current_api(db)?;
+            cloud_sync::search(db, id, s(payload, "query"), &api, &bound)
+        }
+        "remove" => {
+            if payload["confirm"] != true {
+                return Err("Confirm removal of the remote association.".into());
+            }
+            let version = s(payload, "version");
+            let job = cloud::jobs(db, id)?
+                .into_iter()
+                .find(|j| s(j, "version_id") == version)
+                .ok_or("Version is not owned by this project's cloud index.")?;
+            if s(&job, "file_id").is_empty() {
+                return Err("No known remote association for this version.")
+                    .map_err(str::to_string);
+            }
+            let tx = db.transaction().map_err(error)?;
+            tx.execute(
+                "INSERT OR IGNORE INTO cloud_exclusions VALUES(?1,?2)",
+                params![id, version],
+            )
+            .map_err(error)?;
+            tx.execute(
+                "UPDATE cloud_jobs SET desired=0 WHERE id=?1",
+                [s(&job, "id")],
+            )
+            .map_err(error)?;
+            tx.execute(
+                "UPDATE cloud_projects SET sync_requested=1,next_at=0 WHERE project_id=?1",
+                [id],
+            )
+            .map_err(error)?;
+            tx.commit().map_err(error)?;
+            Ok(Value::Null)
+        }
+        "delete_index" => {
+            if s(payload, "confirmation") != format!("DELETE {}", s(&p, "store_id")) {
+                return Err("Type DELETE followed by the exact vector-store ID.".into());
+            }
+            let (api, bound) = current_api(db)?;
+            if s(&p, "scope") != bound {
+                return Err("Verify this index with the saved key first.".into());
+            }
+            match cloud::owned_store(&api, db, &p) {
+                Ok(_) => {}
+                Err(e) if e.missing => {
+                    db.execute("UPDATE cloud_projects SET enabled=0,paused=1,started=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",[id]).map_err(error)?;
+                    return Ok(Value::Null);
+                }
+                Err(e) => return Err(e.message),
+            }
+            db.execute("UPDATE cloud_projects SET delete_requested=1,paused=1,auto_sync=0,next_at=0,status='deleting' WHERE project_id=?1",[id]).map_err(error)?;
+            Ok(Value::Null)
+        }
+        "purge_file" => purge(db, &p, payload),
+        "new_index" => {
+            if s(&p, "store_state") != "deleted" || payload["confirm"] != true {
+                return Err(
+                    "Delete or reconcile the missing index, then confirm creating a replacement."
+                        .into(),
+                );
+            }
+            db.execute("UPDATE cloud_projects SET store_id=NULL,store_op=NULL,store_state='none',started=0,enabled=0,paused=1,next_at=0,status='local_only',revision=revision+1 WHERE project_id=?1",[id]).map_err(error)?;
+            Ok(Value::Null)
+        }
+        _ => Err("Unknown cloud operation.".into()),
+    }
+}
+fn models_now() -> String {
+    crate::models::now()
+}
+fn purge(db: &Connection, p: &Value, payload: &Value) -> Result<Value> {
+    let (api, bound) = current_api(db)?;
+    if s(p, "scope") != bound {
+        return Err("Verify this project with the saved key first.".into());
+    }
+    let jobs = cloud::jobs(db, s(p, "project_id"))?;
+    let job = jobs
+        .iter()
+        .find(|j| s(j, "version_id") == s(payload, "version") && s(j, "state") == "removed")
+        .ok_or("Detach this owned version before deleting its uploaded File.")?;
+    let file = s(job, "file_id");
+    if s(payload, "confirmation") != format!("DELETE {file}")
+        || payload["noOtherReferences"] != true
+    {
+        return Err(
+            "Confirm the File ID and that you have verified no other resource uses this File."
+                .into(),
+        );
+    }
+    for store in cloud_api::list(&api, "/vector_stores").map_err(|e| e.message)? {
+        cloud_api::valid_id(s(&store, "id"), "vs_").map_err(|e| e.message)?;
+        let associations =
+            cloud_api::list(&api, &format!("/vector_stores/{}/files", s(&store, "id")))
+                .map_err(|e| e.message)?;
+        if associations.iter().any(|a| s(a, "id") == file) {
+            return Err(
+                "Another vector store still references this File. Nothing was deleted.".into(),
+            );
+        }
+    }
+    match api.request("GET", &format!("/files/{file}"), None) {
+        Ok(remote) => {
+            if s(&remote, "filename") != s(job, "remote_name")
+                || n(&remote, "bytes") != n(job, "rawBytes")
+            {
+                return Err("File ownership cannot be established.".into());
+            }
+            let bytes = api.content(file).map_err(|e| e.message)?;
+            let version = cloud::version(db, s(job, "version_id"))?;
+            use sha2::{Digest, Sha256};
+            if format!("{:x}", Sha256::digest(bytes)) != version.hash {
+                return Err("Remote File integrity mismatch; deletion refused.".into());
+            }
+            api.request("DELETE", &format!("/files/{file}"), None)
+                .map_err(|e| e.message)?;
+        }
+        Err(e) if e.missing => {}
+        Err(e) => return Err(e.message),
+    }
+    db.execute(
+        "UPDATE cloud_jobs SET state='purged',file_id=NULL WHERE id=?1",
+        [s(job, "id")],
+    )
+    .map_err(error)?;
+    cloud::activity(db,s(p,"project_id"),"deletion","Owned uploaded File explicitly deleted after checking accessible stores and user-confirmed external references.")?;
+    Ok(Value::Null)
+}
