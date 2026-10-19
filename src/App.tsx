@@ -53,8 +53,28 @@ export default function App() {
       .catch((e) => {
         if (active) setError(String(e));
       });
+    let unlisten: (() => void) | undefined;
+    registry
+      .subscribe(() => {
+        registry
+          .snapshot()
+          .then((snapshot) => {
+            if (active) setData(snapshot);
+          })
+          .catch((e) => {
+            if (active) setError(String(e));
+          });
+      })
+      .then((stop) => {
+        if (active) unlisten = stop;
+        else stop();
+      })
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
     return () => {
       active = false;
+      unlisten?.();
     };
   }, []);
   useEffect(() => {
@@ -191,7 +211,7 @@ export default function App() {
                   : page === "settings"
                     ? "Make ContextDock feel at home."
                     : project
-                      ? "Documents discovered in your registered folder."
+                      ? "Discover files and track independent document histories."
                       : "Existing folders. Independent documents. One place to find them."}
               </p>
             </div>
@@ -227,6 +247,7 @@ export default function App() {
           ) : page === "projects" && project ? (
             <ProjectDetails
               project={project}
+              changed={load}
               documents={data.documents.filter(
                 (d) => d.projectId === project.id,
               )}
@@ -350,7 +371,9 @@ export default function App() {
               <p>
                 Remove <strong>{project.name}</strong> and its saved metadata
                 from ContextDock? Your folder and all its files will remain on
-                your computer.
+                your computer. Captured history and snapshots are retained in
+                application storage; registering the same folder restores them
+                with tracking off.
               </p>
             )}
             {error && (

@@ -710,3 +710,268 @@ form > .error {
   color: var(--muted);
   font-size: 12px;
 }
+.tracking-panel {
+  margin: 0 0 24px;
+  overflow: hidden;
+}
+.tracking-panel > .error {
+  padding: 0 22px 16px;
+}
+.tracking-panel h2,
+.family-section h3,
+.operation-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.tracking-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 0 22px 20px;
+}
+.tracking-controls p,
+.tracking-panel > p,
+.tracking-toggle small,
+.review-section > p,
+.operation-section > p {
+  font-size: 12px;
+}
+.tracking-controls p {
+  margin-top: 7px;
+  max-width: 650px;
+}
+.tracking-controls button {
+  flex-shrink: 0;
+}
+.tracking-toggle {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  font-weight: 400;
+  gap: 12px;
+  margin: 0;
+  padding: 15px 22px;
+}
+.tracking-toggle input {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  accent-color: #4168ba;
+  margin-top: 2px;
+}
+.tracking-toggle strong {
+  font-weight: 550;
+}
+.tracking-toggle small {
+  display: block;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 7px;
+}
+.tracking-panel > .toolbar-actions {
+  padding: 8px 22px 20px;
+}
+.tracking-panel > .banner {
+  margin: 8px 22px;
+}
+.tracking-note {
+  font-size: 12px;
+  padding: 10px 22px;
+  line-height: 1.7;
+}
+.family-section,
+.review-section,
+.operation-section {
+  border-top: 1px solid var(--border);
+  padding: 20px 0 0;
+}
+.family-section h3,
+.review-section h3,
+.operation-section h3 {
+  padding: 0 22px 16px;
+  font-size: 14px;
+}
+.family-section > button {
+  margin: 16px 22px;
+}
+.review-section > p,
+.operation-section > p {
+  padding: 0 22px 16px;
+}
+.family-section td small {
+  margin-left: 0;
+}
+.family-section td button {
+  font-size: 11px;
+}
+.review-card {
+  margin: 0 22px 16px;
+  padding: 17px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  overflow-wrap: anywhere;
+}
+.review-card > p {
+  font-size: 12px;
+  margin: 8px 0 14px;
+}
+.review-card label {
+  max-width: 600px;
+  margin-bottom: 15px;
+}
+.review-card button {
+  font-size: 12px;
+}
+.untracked,
+.tracking-activity {
+  border-top: 1px solid var(--border);
+  padding: 18px 22px;
+}
+.untracked > p {
+  margin-top: 12px;
+  font-size: 12px;
+}
+.untracked-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.tracking-activity summary,
+.untracked summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 550;
+}
+.tracking-activity ol {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  max-height: 300px;
+  overflow: auto;
+}
+.tracking-activity li {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding: 13px 0;
+  font-size: 11px;
+}
+.tracking-activity li > span {
+  overflow-wrap: anywhere;
+}
+.tracking-activity time {
+  color: var(--muted);
+  white-space: nowrap;
+  font-size: 10px;
+}
+.operation {
+  margin: 0 22px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 13px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.operation p {
+  font-size: 12px;
+  margin: 6px 0;
+}
+.operation-section > button {
+  margin: 0 22px 20px;
+}
+.selection-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 18px 0;
+  font-size: 12px;
+}
+.selection-actions span {
+  color: var(--muted);
+  margin-left: auto;
+}
+.source-selection {
+  max-height: 250px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.source-selection .tracking-toggle {
+  padding: 12px;
+  overflow-wrap: anywhere;
+}
+.source-selection > p {
+  padding: 14px;
+}
+dialog:has(.version-list) {
+  width: min(830px, calc(100vw - 40px));
+  max-height: 90vh;
+}
+dialog {
+  max-height: 90vh;
+  overflow: auto;
+}
+.history-current {
+  margin: 16px 0;
+}
+.version-card {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  padding: 17px;
+  border-radius: 9px;
+  margin-top: 16px;
+}
+.version-card > .section-heading {
+  margin-bottom: 14px;
+}
+.version-card time {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+.version-card > strong {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.version-card p {
+  font-size: 12px;
+  margin: 7px 0 15px;
+}
+.version-card .toolbar-actions button {
+  font-size: 11px;
+}
+.version-card summary {
+  font-size: 11px;
+  cursor: pointer;
+  margin-top: 17px;
+  color: var(--muted);
+}
+.version-card dl {
+  display: grid;
+  grid-template-columns: 115px 1fr;
+  gap: 10px;
+  font-size: 11px;
+  margin: 16px 0 0;
+}
+.version-card dt {
+  color: var(--muted);
+}
+.version-card dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.hash {
+  font-family: monospace;
+}
+.tracking-panel table {
+  margin-top: 4px;
+}
