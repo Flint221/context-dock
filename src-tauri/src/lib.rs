@@ -4,6 +4,8 @@ mod cloud_commands;
 mod cloud_credentials;
 mod cloud_models;
 mod cloud_sync;
+#[cfg(test)]
+mod cloud_tests;
 mod comparison;
 mod comparison_models;
 #[cfg(test)]
@@ -264,6 +266,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             cloud_commands::cloud_read,
+            cloud_commands::cloud_link,
             cloud_commands::cloud_key,
             cloud_commands::cloud_action,
             snapshot,

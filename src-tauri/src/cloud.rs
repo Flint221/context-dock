@@ -71,7 +71,7 @@ pub fn activity(db: &Connection, id: &str, kind: &str, message: &str) -> Result<
 }
 const ELIGIBLE:&str="d.tracking_state='tracked' AND d.merged_into IS NULL AND d.current_version_id IS NOT NULL AND d.kind IN ('markdown','word') AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files sf ON sf.id=m.source_id WHERE sf.document_id=d.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))";
 pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed') cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])
+    rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])
 }
 pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<CloudVersion>> {
     if !["current", "history"].contains(&draft.mode.as_str())
@@ -120,7 +120,7 @@ pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
         soft_limit: n(p, "soft_limit"),
         documents: families(db, s(p, "project_id"))?
             .iter()
-            .filter(|f| n(f, "selected") == 1 && n(f, "eligible") == 1)
+            .filter(|f| n(f, "selected") == 1)
             .map(|f| s(f, "id").into())
             .collect(),
     })

@@ -5,6 +5,7 @@ use reqwest::{
 };
 use serde_json::{json, Value};
 use std::io::Read;
+#[derive(Debug)]
 pub struct ApiError {
     pub message: String,
     pub retry: bool,
@@ -192,9 +193,7 @@ pub fn list(api: &dyn CloudApi, path: &str) -> Result<Vec<Value>, ApiError> {
             .ok_or_else(|| ApiError::local("Remote pagination was incomplete."))?;
         valid_id(
             id,
-            if path.starts_with("/files") {
-                "file"
-            } else if path.ends_with("/files") {
+            if path.starts_with("/files") || path.ends_with("/files") {
                 "file"
             } else {
                 "vs_"

@@ -110,16 +110,16 @@ fn upload(db: &Connection, root: &Path, p: &Value, j: &Value, api: &dyn CloudApi
     if s(j, "state") == "pending" {
         execute(
             db,
-            "UPDATE cloud_jobs SET state='uploading' WHERE id=?1",
+            "UPDATE cloud_jobs SET state='uploading',phase='recover' WHERE id=?1",
             &[&jid],
         )?;
         match api.upload(s(j, "remote_name"), bytes) {
             Ok(file) => return adopt_file(db, j, &file),
             Err(e) => {
-                if e.retry && !e.ambiguous {
+                if !e.ambiguous {
                     execute(
                         db,
-                        "UPDATE cloud_jobs SET state='pending' WHERE id=?1",
+                        "UPDATE cloud_jobs SET state='pending',phase='upload' WHERE id=?1",
                         &[&jid],
                     )?;
                 }
@@ -253,7 +253,18 @@ pub fn step(
         if s(&p, "store_id").is_empty() {
             return create_store(db, &p, api);
         }
-        let store = cloud::owned_store(api, db, &p)?;
+        let store = match cloud::owned_store(api, db, &p) {
+            Ok(store) => store,
+            Err(e) if e.missing => {
+                execute(db,"UPDATE cloud_jobs SET state='uploaded',association_status=NULL WHERE project_id=?1 AND state='indexed'",&[&id])?;
+                if n(&p, "delete_requested") == 1 {
+                    execute(db,"UPDATE cloud_jobs SET state='removed' WHERE project_id=?1 AND state!='purged'",&[&id])?;
+                    return execute(db,"UPDATE cloud_projects SET enabled=0,paused=1,started=0,delete_requested=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",&[&id]);
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        };
         if s(&store, "status") == "expired" {
             return Err(ApiError::local("This project index expired. Delete/recreate explicitly; no replacement index was created."));
         }
@@ -270,6 +281,11 @@ pub fn step(
         }
         if n(&p, "started") != 1 {
             return Ok(());
+        }
+        if let Some(job) = cloud::jobs(db, id).map_err(local)?.iter().find(|j| {
+            s(j, "phase") == "remove" && s(j, "state") != "removed" && s(j, "state") != "purged"
+        }) {
+            return detach(db, &p, job, api);
         }
         if n(&p, "auto_sync") == 1 || n(&p, "sync_requested") == 1 {
             cloud::queue(db, id).map_err(local)?;
@@ -399,6 +415,17 @@ pub fn search(
         return Err("Enter a search query of 1–2000 bytes.".into());
     }
     cloud::owned_store(api, db, &p).map_err(|e| e.message)?;
+    let known = cloud::jobs(db, id)?;
+    if cloud::desired(db, id, &cloud::draft(db, &p)?)?
+        .iter()
+        .any(|v| {
+            !known
+                .iter()
+                .any(|j| s(j, "version_id") == v.id && s(j, "state") == "indexed")
+        })
+    {
+        return Err("Selected snapshots are not fully indexed. Sync/reconcile before searching this project.".into());
+    }
     let mut filters = vec![
         json!({"type":"eq","key":"contextdock","value":cloud::install(db)?}),
         json!({"type":"eq","key":"project","value":id}),

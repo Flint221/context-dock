@@ -50,13 +50,17 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     if n(p, "paused") == 1 {
         return Ok(false);
     }
-    if s(p, "store_id").is_empty()
-        || n(p, "reconcile_requested") == 1
-        || n(p, "sync_requested") == 1
-    {
+    if s(p, "store_id").is_empty() || n(p, "reconcile_requested") == 1 {
         return Ok(true);
     }
     let jobs = cloud::jobs(db, s(p, "project_id"))?;
+    if n(p, "sync_requested") == 1
+        && !jobs.iter().any(|j| {
+            s(j, "state") == "indexing" && n(j, "next_at") > chrono::Utc::now().timestamp()
+        })
+    {
+        return Ok(true);
+    }
     if jobs.iter().any(|j| {
         n(j, "next_at") <= chrono::Utc::now().timestamp()
             && !matches!(
@@ -67,7 +71,10 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
         return Ok(true);
     }
     if n(p, "auto_sync") == 1 && n(p, "started") == 1 {
-        let wanted = cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?)?;
+        let wanted = match cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?) {
+            Ok(wanted) => wanted,
+            Err(_) => return Ok(true),
+        };
         if wanted.iter().any(|v| {
             !jobs.iter().any(|j| {
                 s(j, "version_id") == v.id
@@ -97,6 +104,9 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
 }
 impl CloudRuntime {
     pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
+        if let Ok(db) = cloud::connect(&path) {
+            let _=db.execute("UPDATE cloud_projects SET reconcile_requested=1 WHERE enabled=1 AND paused=0 AND started=1",[]);
+        }
         let gate = Arc::new(Mutex::new(()));
         let stop = Arc::new(AtomicBool::new(false));
         let (worker_path, worker_gate, worker_stop) = (path.clone(), gate.clone(), stop.clone());
@@ -148,6 +158,45 @@ pub async fn cloud_read(
     }).await.map_err(|_|"Cloud status task failed.".to_string())?
 }
 #[tauri::command]
+pub fn cloud_link(url: String) -> Result<()> {
+    if ![
+        "https://platform.openai.com/usage",
+        "https://platform.openai.com/settings/organization/billing/overview",
+        "https://developers.openai.com/api/docs/pricing",
+        "https://developers.openai.com/api/docs/guides/your-data",
+        "https://platform.openai.com/storage/vector_stores",
+        "https://platform.openai.com/api-keys",
+    ]
+    .contains(&url.as_str())
+    {
+        return Err("Unsupported cloud resource link.".into());
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+        let operation = "open\0".encode_utf16().collect::<Vec<_>>();
+        let target = url.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                operation.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        if result as isize <= 32 {
+            return Err("Could not open the default browser.".into());
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Opening the platform dashboard requires Windows.".into())
+    }
+}
+#[tauri::command]
 pub async fn cloud_key(state: tauri::State<'_, CloudRuntime>, key: String) -> Result<()> {
     let key = cloud_credentials::validate(key)?;
     let path = state.path.clone();
@@ -156,6 +205,7 @@ pub async fn cloud_key(state: tauri::State<'_, CloudRuntime>, key: String) -> Re
         let _guard = gate.lock().map_err(|_| "Cloud worker unavailable.")?;
         let db = cloud::connect(&path)?;
         cloud_credentials::save(&key)?;
+        db.execute("UPDATE cloud_projects SET status='credential_changed',error='Test the replacement key, then Verify key for each existing project index.' WHERE enabled=1",[]).map_err(error)?;
         db.execute(
             "UPDATE cloud_connection SET scope=?1,status='untested',tested_at=NULL,error=NULL",
             [cloud::scope(&key)],
@@ -196,6 +246,7 @@ pub fn action_impl(
             [],
         )
         .map_err(error)?;
+        db.execute("UPDATE cloud_projects SET status='key_disconnected',error='Reconnect and test an API key to resume cloud operations.' WHERE enabled=1",[]).map_err(error)?;
         return Ok(Value::Null);
     }
     if action == "test" {
@@ -255,7 +306,7 @@ pub fn action_impl(
             }
             db.execute("UPDATE cloud_projects SET paused=0,started=CASE WHEN ?2='start' THEN 1 ELSE started END,sync_requested=CASE WHEN ?2 IN ('start','sync','resume') THEN 1 ELSE sync_requested END,reconcile_requested=CASE WHEN store_id IS NOT NULL THEN 1 ELSE 0 END,next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",params![id,action]).map_err(error)?;
             // Preserve the irreversible phase. An uncertain upload is reconciled, never reposted.
-            db.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN state='uncertain' OR state='uploading' THEN 'uploading' ELSE 'pending' END,next_at=0,attempts=0,error=NULL WHERE project_id=?1 AND state IN ('failed','uncertain','uploading')",[id]).map_err(error)?;
+            db.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' OR state='uncertain' OR state='uploading' THEN 'uploading' ELSE 'pending' END,next_at=0,attempts=0,error=NULL WHERE project_id=?1 AND state IN ('failed','uncertain','uploading')",[id]).map_err(error)?;
             cloud::activity(
                 db,
                 id,
@@ -278,8 +329,7 @@ pub fn action_impl(
                 .find(|j| s(j, "version_id") == version)
                 .ok_or("Version is not owned by this project's cloud index.")?;
             if s(&job, "file_id").is_empty() {
-                return Err("No known remote association for this version.")
-                    .map_err(str::to_string);
+                return Err("No known remote association for this version.".into());
             }
             let tx = db.transaction().map_err(error)?;
             tx.execute(
@@ -288,7 +338,7 @@ pub fn action_impl(
             )
             .map_err(error)?;
             tx.execute(
-                "UPDATE cloud_jobs SET desired=0 WHERE id=?1",
+                "UPDATE cloud_jobs SET desired=0,phase='remove',state='removing',next_at=0 WHERE id=?1",
                 [s(&job, "id")],
             )
             .map_err(error)?;
@@ -311,6 +361,7 @@ pub fn action_impl(
             match cloud::owned_store(&api, db, &p) {
                 Ok(_) => {}
                 Err(e) if e.missing => {
+                    db.execute("UPDATE cloud_jobs SET state='removed',association_status=NULL WHERE project_id=?1 AND state!='purged'",[id]).map_err(error)?;
                     db.execute("UPDATE cloud_projects SET enabled=0,paused=1,started=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",[id]).map_err(error)?;
                     return Ok(Value::Null);
                 }
