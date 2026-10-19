@@ -1,3 +1,4 @@
+import { CloudLink } from "./CloudLink";
 import { useEffect, useRef, useState } from "react";
 import { cloud, bytes, type Connection } from "../cloud";
 export function OpenAIConnection() {
@@ -120,27 +121,15 @@ export function OpenAIConnection() {
         apply; indexing is not guaranteed to be free.
       </p>
       <div className="cloud-actions">
-        <a
-          href="https://platform.openai.com/usage"
-          target="_blank"
-          rel="noreferrer"
-        >
+        <CloudLink href="https://platform.openai.com/usage">
           OpenAI usage
-        </a>
-        <a
-          href="https://platform.openai.com/settings/organization/billing/overview"
-          target="_blank"
-          rel="noreferrer"
-        >
+        </CloudLink>
+        <CloudLink href="https://platform.openai.com/settings/organization/billing/overview">
           Billing
-        </a>
-        <a
-          href="https://developers.openai.com/api/docs/pricing"
-          target="_blank"
-          rel="noreferrer"
-        >
+        </CloudLink>
+        <CloudLink href="https://developers.openai.com/api/docs/pricing">
           Current pricing
-        </a>
+        </CloudLink>
       </div>
       {connection?.usage.map((p) => (
         <p key={p.project_id}>

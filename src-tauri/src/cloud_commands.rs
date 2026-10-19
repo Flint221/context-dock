@@ -26,9 +26,9 @@ pub struct CloudRuntime {
 impl Drop for CloudRuntime {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
+        // Do not hold application shutdown on an in-flight HTTP request. Every mutation
+        // has already recorded its recovery intent; process exit can interrupt it safely.
+        self.worker.take();
     }
 }
 fn current_api(db: &Connection) -> Result<(OpenAi, String)> {

@@ -265,6 +265,9 @@ pub fn step(
             }
             Err(e) => return Err(e),
         };
+        if n(&p, "delete_requested") == 1 {
+            return delete_index(db, &p, api);
+        }
         if s(&store, "status") == "expired" {
             return Err(ApiError::local("This project index expired. Delete/recreate explicitly; no replacement index was created."));
         }

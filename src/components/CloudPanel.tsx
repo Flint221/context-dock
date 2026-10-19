@@ -1,3 +1,4 @@
+import { CloudLink } from "./CloudLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cloud,
@@ -103,7 +104,7 @@ export function CloudPanel({ project }: { project: string }) {
           Refresh cloud status
         </button>
       </div>
-      {error && <p role="alert">{error}</p>}
+      {error && !plan && !index && !destruction && <p role="alert">{error}</p>}
       {view?.error && <p role="status">{view.error}</p>}
       <p>
         Only explicitly selected, tracked document families can be uploaded.
@@ -307,6 +308,7 @@ export function CloudPanel({ project }: { project: string }) {
             if (!busy) setPlan(null);
           }}
         >
+          {error && <p role="alert">{error}</p>}
           <p>
             Store name: <strong>{plan.storeName}</strong>. OpenAI will receive
             exact immutable Markdown/DOCX snapshots and opaque ContextDock
@@ -327,21 +329,13 @@ export function CloudPanel({ project }: { project: string }) {
             are shared across your account.
           </p>
           <p>
-            <a
-              href="https://developers.openai.com/api/docs/guides/your-data"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <CloudLink href="https://developers.openai.com/api/docs/guides/your-data">
               OpenAI data controls
-            </a>{" "}
+            </CloudLink>{" "}
             ·{" "}
-            <a
-              href="https://developers.openai.com/api/docs/pricing"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <CloudLink href="https://developers.openai.com/api/docs/pricing">
               Current pricing
-            </a>
+            </CloudLink>
           </p>
           <label className="cloud-check">
             <input
@@ -388,6 +382,7 @@ export function CloudPanel({ project }: { project: string }) {
             if (!busy) setIndex(false);
           }}
         >
+          {error && !destruction && <p role="alert">{error}</p>}
           <p>
             <code>{view.store_id ?? "No cloud index"}</code> · Direct
             vector-store retrieval only; no generated answer or AI analysis.
@@ -483,6 +478,7 @@ export function CloudPanel({ project }: { project: string }) {
             if (!busy) setDestruction(null);
           }}
         >
+          {error && <p role="alert">{error}</p>}
           <p>
             Local documents, snapshots and version history remain unchanged.
           </p>

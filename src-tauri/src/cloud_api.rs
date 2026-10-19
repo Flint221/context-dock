@@ -32,6 +32,7 @@ pub trait CloudApi {
 pub struct OpenAi {
     client: Client,
     authorization: HeaderValue,
+    deadline: std::time::Instant,
 }
 impl OpenAi {
     pub fn new(key: &str) -> Result<Self, String> {
@@ -49,6 +50,7 @@ impl OpenAi {
         Ok(Self {
             client,
             authorization,
+            deadline: std::time::Instant::now() + std::time::Duration::from_secs(90),
         })
     }
     fn send(
@@ -57,6 +59,9 @@ impl OpenAi {
         mutation: bool,
         max: u64,
     ) -> Result<Vec<u8>, ApiError> {
+        if std::time::Instant::now() > self.deadline {
+            return Err(ApiError::local("Cloud reconciliation reached its time limit. No further requests were sent. Retry to continue safely."));
+        }
         let response = request
             .header(AUTHORIZATION, self.authorization.clone())
             .send()
