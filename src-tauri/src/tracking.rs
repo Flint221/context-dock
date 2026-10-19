@@ -58,7 +58,7 @@ impl Registry {
                 tx.execute("UPDATE documents SET tracking_state='tracked' WHERE id=(SELECT document_id FROM source_files WHERE id=?1)",[sid]).map_err(error)?;
             }
         }
-        tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 THEN 1 ELSE tracking_initialized END,watch_status=?3 WHERE id=?4",params![enabled,archive,if enabled {"starting"}else{"off"},project]).map_err(error)?;
+        tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 THEN 1 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
         tx.commit().map_err(error)?;
         self.activity(
             project,

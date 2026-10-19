@@ -14,11 +14,26 @@ vi.mock("./services/registry", () => ({
     open: vi.fn(),
     theme: vi.fn(),
     pickFolder: vi.fn(),
+    subscribe: vi.fn(),
+    tracking: vi.fn(),
   },
 }));
 let state: Snapshot;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(registry.subscribe).mockResolvedValue(() => {});
+  vi.mocked(registry.tracking).mockResolvedValue({
+    enabled: false,
+    archiveEnabled: false,
+    initialized: false,
+    watchStatus: "off",
+    error: null,
+    families: [],
+    sources: [],
+    reviews: [],
+    activity: [],
+    operations: [],
+  });
   state = { projects: [], documents: [], theme: "system" };
   vi.mocked(registry.snapshot).mockImplementation(async () =>
     structuredClone(state),
@@ -38,10 +53,13 @@ it("registers a real picker selection and opens its discovered documents", async
       scanError: null,
       documentCount: 1,
       latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
     });
     state.documents.push({
       id: "d1",
       projectId: "p1",
+      documentId: "d1",
       name: "Context.md",
       relativePath: "docs/Context.md",
       absolutePath: path + "\\docs\\Context.md",
@@ -121,6 +139,8 @@ it("renames, refreshes and removes only after the final confirmation", async () 
       scanError: null,
       documentCount: 0,
       latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
     },
   ];
   vi.mocked(registry.rename).mockImplementation(async (_id, name) => {

@@ -477,3 +477,103 @@ fn locked_writes_are_retried_and_archive_junctions_are_refused() {
     assert!(!f.r.tracking_view(&f.project).unwrap().operations.is_empty());
     fs::remove_dir(f.root.join("Old Context Files")).unwrap();
 }
+#[cfg(windows)]
+#[test]
+fn native_watcher_captures_changes_stops_when_disabled_and_reconciles_after_restart() {
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::{Duration, Instant},
+    };
+    fn wait_until(mut ready: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !ready() {
+            assert!(
+                Instant::now() < deadline,
+                "Native watcher did not reconcile within its test deadline"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let mut f = Fixture::new(&[("Master.md", "one")]);
+    f.enable(false);
+    let document = f.document("Master.md");
+    let root = f.root.clone();
+    let project = f.project.clone();
+    let db = f.r.store.join("registry.db");
+    let shared = Arc::new(Mutex::new(f.r));
+    let watcher = crate::monitor::Monitor::start(shared.clone(), |_| {}).unwrap();
+    wait_until(|| {
+        shared
+            .lock()
+            .unwrap()
+            .tracking_view(&project)
+            .unwrap()
+            .watch_status
+            == "watching"
+    });
+    fs::write(root.join("Master.md"), "two").unwrap();
+    wait_until(|| shared.lock().unwrap().versions(&document).unwrap().len() == 2);
+    fs::write(root.join("Master.md"), "two").unwrap();
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(shared.lock().unwrap().versions(&document).unwrap().len(), 2);
+    shared
+        .lock()
+        .unwrap()
+        .configure_tracking(&project, false, false, vec![])
+        .unwrap();
+    fs::write(root.join("Master.md"), "three while paused").unwrap();
+    thread::sleep(Duration::from_secs(2));
+    assert_eq!(shared.lock().unwrap().versions(&document).unwrap().len(), 2);
+    shared
+        .lock()
+        .unwrap()
+        .configure_tracking(&project, true, false, vec![])
+        .unwrap();
+    assert_eq!(shared.lock().unwrap().versions(&document).unwrap().len(), 3);
+    watcher.shutdown();
+    drop(shared);
+    fs::write(root.join("Master.md"), "four while closed").unwrap();
+    let shared = Arc::new(Mutex::new(Registry::open(&db).unwrap()));
+    let watcher = crate::monitor::Monitor::start(shared.clone(), |_| {}).unwrap();
+    wait_until(|| shared.lock().unwrap().versions(&document).unwrap().len() == 4);
+    watcher.shutdown();
+}
+#[test]
+fn archive_edits_do_not_change_snapshots_and_snapshot_collisions_are_non_destructive() {
+    let mut f = Fixture::new(&[("説明_設計_v1.md", "original Ω")]);
+    f.enable(true);
+    let document = f.document("説明_設計_v1.md");
+    fs::write(f.root.join("説明_設計_v1.md"), "new content").unwrap();
+    f.scan();
+    let versions = f.r.versions(&document).unwrap();
+    let archive = versions[1].archive_path.as_ref().unwrap();
+    fs::write(archive, "manually edited archive").unwrap();
+    assert_eq!(
+        fs::read_to_string(&versions[1].snapshot_path).unwrap(),
+        "original Ω"
+    );
+    assert!(f.r.version_location(&versions[1].id, true).is_err());
+    assert!(f.r.version_location(&versions[1].id, false).is_ok());
+    f.scan();
+    assert_eq!(f.count(&document), 2);
+    let root = PathBuf::from(f.r.path(&f.project).unwrap());
+    let stage = storage::stage(&root, "説明_設計_v1.md", &f.r.store).unwrap();
+    let relative = PathBuf::from(&versions[1].snapshot_path)
+        .strip_prefix(&f.r.store)
+        .unwrap()
+        .to_string_lossy()
+        .to_string();
+    assert!(storage::snapshot_finalize(
+        &f.r.store,
+        &stage.temporary,
+        &relative,
+        &stage.hash,
+        false
+    )
+    .is_err());
+    assert_eq!(
+        fs::read_to_string(&versions[1].snapshot_path).unwrap(),
+        "original Ω"
+    );
+}
