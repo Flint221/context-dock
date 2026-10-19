@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
@@ -58,14 +58,16 @@ it("registers a real picker selection and opens its discovered documents", async
   await user.type(screen.getByLabelText("Project name"), "Cattle Tool");
   await user.click(screen.getByText("Browse"));
   await user.click(
-    screen.getByRole("button", { name: "Add project", exact: true }),
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add project",
+    }),
   );
   expect(await screen.findByText("Context.md")).toBeInTheDocument();
   expect(registry.add).toHaveBeenCalledWith(
     "Cattle Tool",
     "C:\\Temporary project",
   );
-  await user.click(screen.getByRole("button", { name: "Remove", exact: true }));
+  await user.click(screen.getByRole("button", { name: "Remove" }));
   expect(screen.getByText(/all its files will remain/)).toBeInTheDocument();
   await user.click(screen.getByText("Cancel"));
   expect(registry.remove).not.toHaveBeenCalled();
@@ -78,7 +80,9 @@ it("handles cancellation and failed registration without closing the form", asyn
   await user.type(screen.getByLabelText("Project name"), "Test");
   await user.click(screen.getByText("Browse"));
   expect(
-    screen.getByRole("button", { name: "Add project", exact: true }),
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add project",
+    }),
   ).toBeDisabled();
   vi.mocked(registry.pickFolder).mockResolvedValue("C:\\Test");
   await user.click(screen.getByText("Browse"));
@@ -86,7 +90,9 @@ it("handles cancellation and failed registration without closing the form", asyn
     "This folder is already registered.",
   );
   await user.click(
-    screen.getByRole("button", { name: "Add project", exact: true }),
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Add project",
+    }),
   );
   expect(await screen.findByRole("alert")).toHaveTextContent(
     "already registered",
