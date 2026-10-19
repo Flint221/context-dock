@@ -1,56 +1,82 @@
 # ContextDock
 
-ContextDock 0.1.0 is a lightweight, local-first Windows 11 desktop utility for finding project documentation across existing folders. Each project can contain many independent Markdown and Word documents. Everything in Milestone 1 runs locally, without an account, telemetry, or cloud service.
+ContextDock 0.2.0 is a lightweight, local-first Windows 11 application for project documentation. Register existing folders, discover Markdown and Word files, and opt in to independent version histories and safe archival. It runs offline without an account, telemetry, OpenAI, or cloud storage.
 
-## Milestone 1
+## Implemented through Milestone 2
 
-- Dashboard with real project/document counts, recent file observations, and folders needing attention.
-- Register an existing folder using the native Windows folder picker and a custom display name.
-- Rename the registration, copy its folder path, open File Explorer, or remove its metadata after confirmation.
-- Recursively discover `.md`, `.markdown`, and `.docx` metadata; search and page through the document table.
-- Preserve document IDs on repeated observations, including missing-file metadata. Unreadable folders and partial scans are reported explicitly.
-- Persist projects, document observations, and light/dark/system theme preferences in SQLite.
-- Per-user NSIS Windows setup, with builds and installer artifacts in GitHub Actions and release packaging on version tags.
+- Dashboard, project registration, metadata discovery/search, rename, clipboard paths, Explorer locations, non-destructive unregistration, and light/dark/system themes.
+- Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; each starts its own independent v1 history. Initialization never moves existing files or groups similarly named historical exports.
+- Native filesystem monitoring while the app is running, debounced writes, bounded retries for unstable/locked files, and startup reconciliation of missed changes.
+- SHA-256-verified immutable local snapshots, independent version numbering, duplicate-content prevention, and remembered manual associations.
+- Conservative matching of trailing version/date filenames within the same directory. Ambiguous matches and duplicate copies go to **Needs Review** for assignment, independent tracking, or ignore.
+- Separately enabled archival into **Old Context Files**. In-place edits archive a copy of the earlier snapshot. Confirmed differently named replacements can move the previous source only after both snapshots and the old source hash are verified.
+- Document history with capture reasons, hashes, source metadata, snapshot/archive paths and availability, plus persisted activity and recoverable pending operations.
+- An unsigned per-user NSIS installer and Windows GitHub Actions build artifacts. Matching version tags can publish installers, but no public release is created automatically during development.
 
-Discovery reads filenames, paths, sizes, and timestamps. It does not read document contents, create versions, or modify registered folders. Removal only deletes ContextDock metadata. Dashboard data reflects the most recent scan; opening a project or choosing **Refresh documents** performs a new scan.
+**Discovery** reads metadata. **Tracking** reads document bytes to capture local immutable snapshots. **Archival** can move previous source files, and requires its own explicit project opt-in. Tracking alone never moves sources. Disabling tracking stops monitoring and retains history. There is no Windows service; close the app to stop it, and reopening catches up.
 
-## Download, install, and try it
+## Download and install
 
-1. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the branch/commit you intend to test.
-2. Under **Artifacts**, download **ContextDock-Windows-x64-setup** (GitHub sign-in is required for workflow artifacts). Extract the ZIP and run `ContextDock_0.1.0_x64-setup.exe`.
-3. Alternatively, after a matching version tag has built successfully, download the setup executable directly from [GitHub Releases](https://github.com/Flint221/context-dock/releases). A release does not exist merely because a PR is open.
-4. Install for your Windows user, then launch **ContextDock** from Start. The x64 build also runs on supported Windows 11 ARM machines through Windows emulation.
-5. Select **Add project**, enter a name, click **Browse**, select an existing folder, and save. Open another folder as a second project to verify independent document lists.
-6. In a project, test search, **Copy path**, **Explorer**, **Rename**, and **Refresh documents**. Close and reopen ContextDock to verify persistence.
-7. For a missing-file test, use a disposable folder you created: add a Markdown file, refresh, then move that file outside the folder and refresh again. Its metadata remains with a missing status. Restore it and refresh to recover the same ID.
-8. **Remove** unregisters the project after confirmation; verify the original folder and its files still exist.
+1. Close any running ContextDock window before upgrading.
+2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
+3. Extract the ZIP and run `ContextDock_0.2.0_x64-setup.exe`. The installer uses the existing application identifier and per-user installation so the registry and snapshot store survive upgrades. An existing 0.1.0 database migrates in place on first launch; do not delete it or reinstall into a new application identity.
+4. Launch **ContextDock** from Start. Existing project registrations and theme settings remain; tracking and archival initially remain off for migrated projects.
+5. Follow the complete [Milestone 2 manual testing guide](docs/manual-testing-milestone-2.md) using a disposable folder before enabling archival for important projects.
 
-Installers are unsigned. Windows SmartScreen may identify the publisher as unknown or show a reputation warning. Follow your organization's installation policy and verify that the installer came from this repository. No automatic updater is implemented. Future installers use the same application identifier so per-user data survives upgrades.
+Installers are unsigned. Windows SmartScreen may show an unknown-publisher or reputation warning; follow your organization's installation policy and verify that the file came from this repository. Windows 11 normally includes WebView2. If it is absent, the initial Microsoft WebView2 bootstrapper requires internet; the application then works offline.
 
-The application itself works offline. On a Windows installation missing WebView2, initial setup uses Microsoft's bootstrapper and needs internet to install that prerequisite. Windows 11 normally includes WebView2.
+The x64 build runs on Windows 11 x64 and supported Windows 11 ARM devices through emulation. No automatic updater is implemented. A future successful matching version tag exposes an installer under [GitHub Releases](https://github.com/Flint221/context-dock/releases); a PR alone does not publish a release.
 
-## Stack and prerequisites
+## First tracking workflow
 
-Tauri 2, React, TypeScript, Vite, Tailwind CSS 4, Lucide icons, Rust, bundled SQLite via rusqlite, the official Tauri dialog plugin, and NSIS.
+Register a folder using **Add project**, a display name, and **Browse**. On its detail screen choose **Enable tracking…**, select initial files, and click **Capture selected and enable**. Initially selected files are independent families, even when their names look related. Unselected existing files remain discoverable but are ignored until you choose **Track independently**.
 
-For Windows development install:
+The separate **Enable automatic archival of replaced source files** checkbox authorizes archival for future replacements. New unrelated files become independent families automatically. Exact tracked paths remain associated with their family. A unique, normalized version/date stem in the same folder can match automatically; conflicting candidates, different workstream folders and live duplicate copies require review. Assigning a pending file remembers its normalized name and directory association for future exports.
 
-- Node.js 24 LTS and npm.
-- Stable Rust with the `x86_64-pc-windows-msvc` toolchain, `rustfmt`, and `clippy`.
-- Visual Studio 2022 Build Tools: **Desktop development with C++**, the MSVC x64/x86 build tools, and a Windows SDK.
-- Microsoft Edge WebView2 Runtime.
-- Git. GitHub CLI is only needed if manually publishing releases.
+Use **Scan for changes** or **Refresh documents** for manual reconciliation. **View history** opens captured versions; **Snapshot location** opens a verified preserved location in Explorer. Open the file there in Notepad or Word to inspect it. It is marked read-only; do not edit the preserved snapshot. No rollback or content diff is provided.
 
-See the official [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) and [Windows installer documentation](https://v2.tauri.app/distribute/windows-installer/). The CLI downloads NSIS build tools as needed. Both npm and Cargo lockfiles are committed.
+Turning archival off pauses pending archive operations; enabling it again safely retries them. Turning tracking off pauses all tracking work; **Resume tracking** reconciles changes made while paused. Meaningful events and failures remain in **Recent tracking activity** and **Pending operations**. Fix permissions/locks/conflicts before choosing **Retry pending operations**. The application never overwrites an archive collision or deletes a conflicting source to make an operation succeed.
 
-## Development and checks
+## Storage, retention and safety
+
+Tauri resolves `%LOCALAPPDATA%\com.contextdock.desktop` on a normal Windows installation:
+
+```text
+contextdock.db                         Registry, versions, preferences and operation journal
+snapshots/<project UUID>/<document UUID>/<version UUID>.<extension>
+staging/<random UUID>.tmp               Temporary snapshot staging
+runtime.lock                           Single running 0.2.0 process per application store
+```
+
+Snapshots remain independent of installed executables and source folders. Back up the whole application data directory with ContextDock closed, including any SQLite WAL sidecars. Do not downgrade to 0.1.0 after migration; it does not understand the new schema.
+
+Archive files live inside the registered project:
+
+```text
+Old Context Files/<safe family name> - <document UUID>/
+  v1 - <safe original stem> - <operation UUID>.md
+```
+
+UUID suffixes prevent collisions; exact original filenames remain in history metadata. Existing unrelated files in a pre-existing archive directory are preserved. `Old Context Files` is excluded case-insensitively from discovery and monitoring. Editing an archive cannot change its independent immutable snapshot; opening an edited archive location reports a hash conflict.
+
+Unregistering hides the project and disables tracking/archival. It does **not** delete source files, archives, snapshots, or retained history metadata. Registering the same canonical folder again restores its stable project ID/history with tracking and archival off. No automatic archive/snapshot retention cleanup or storage-purge feature is implemented.
+
+Snapshots use flushed staging files, no-overwrite finalization and readonly sealing. SQLite's durable operation journal records capture and archival intent; interrupted finalization can be retried without duplicating committed versions. Windows archive moves hold write/delete-denied source handles, verify both snapshots and the replacement, verify the old source hash, persist its file identity, and rename that exact handle without replacement. Directory guards reject path traversal, symbolic links and reparse points. A destination collision, unexpected edit, lost ownership evidence, unsupported filesystem or sharing violation leaves a visible pending operation rather than falling back to deletion.
+
+Scanning also excludes `.git`, `node_modules`, `target`, `dist`, `build`, `.next`, `.contextdock`, `.contextdock-archive`, `contextdock-archive`, child symlinks/junctions and Word `~$` lock files. Tracking is refused for roots overlapping the app's own storage. Missing sources retain their observations and version history.
+
+## Development
+
+Stack: Tauri 2; Rust; React/TypeScript/Vite; Tailwind CSS 4; Lucide icons; bundled SQLite via rusqlite; notify native watchers; SHA-256; official Tauri dialog plugin; NSIS.
+
+Prerequisites: Node.js 24 LTS/npm, stable Rust x86_64 MSVC with rustfmt/clippy, Visual Studio 2022 Desktop development with C++ build tools and a Windows SDK, and Microsoft Edge WebView2. See [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) and [Windows installer instructions](https://v2.tauri.app/distribute/windows-installer/).
 
 ```powershell
 npm ci
 npm run tauri -- dev
 ```
 
-`npm run dev` alone starts the frontend in a browser but has no native registry or folder dialog; use the desktop command for working functionality.
+`npm run dev` alone has no native filesystem/database service; use the desktop command.
 
 ```powershell
 npm run typecheck
@@ -60,40 +86,11 @@ npm run build
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 cargo test --locked --manifest-path src-tauri/Cargo.toml
 cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-```
-
-Tests use disposable directories and databases. Rust coverage includes migration/reconnection, project management, canonical duplicate rejection, recursive mixed document discovery, duplicate names in subfolders, ignored directories, stable IDs, missing/reconnected folders, Windows junction exclusion, Windows permission errors, and read-only scanning. React tests mock the native service to verify picker cancellation, registration/error feedback, removal confirmation cancellation, and theme interaction. They complement native tests; they do not verify the actual Windows picker.
-
-## Build the installer
-
-```powershell
-npm ci
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Output: `src-tauri/target/release/bundle/nsis/ContextDock_0.1.0_x64-setup.exe` when building with the x64 toolchain. A production frontend build is included automatically. Unsigned builds need no signing secrets.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.2.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use temporary roots/databases; no destructive tests run against registered user projects.
 
-The **Windows installer** workflow runs for PRs to `main`, pushes to `main` and `codex/**`, manual dispatches, and `v*` tags. It runs checks and tests, builds NSIS, and retains the installer artifact for 30 days. Only the separate tag release job has repository write permission. Actions are pinned to commit SHAs and checkout does not persist credentials.
+The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
-After review/merge, a maintainer can publish a matching tag (not performed automatically by this PR):
-
-```powershell
-git switch main
-git pull --ff-only
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-The tag must match the version in `package.json`. Keep `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json` versions synchronized for subsequent releases. The workflow publishes a GitHub Release only after the build succeeds.
-
-## Local data and filesystem safety
-
-Tauri resolves its supported per-user local app-data directory. On Windows the registry is normally `%LOCALAPPDATA%\com.contextdock.desktop\contextdock.db`, with SQLite WAL sidecars alongside it. It is independent of the checkout, installation, and registered project folders. Close ContextDock before backing up the directory. Do not commit the database or personal project registrations.
-
-Migrations use SQLite `user_version` and transactions. UUIDs identify projects and independent logical documents; UTC RFC 3339 timestamps record observations. A normalized canonical folder key prevents duplicate registrations under Windows case-insensitive path semantics. Relative paths distinguish identical filenames in different subfolders. A renamed/moved file currently appears as a new document, while its old observation remains missing; explicit identity reconciliation belongs to future milestones.
-
-Scans skip child symlinks and Windows reparse points (including junctions), `.git`, `node_modules`, `target`, `dist`, `build`, `.next`, `.contextdock`, `.contextdock-archive`, and `contextdock-archive`. Only a complete traversal can mark old observations missing. A partial scan retains uncertain documents as unavailable. A disconnected drive retains its registrations and document metadata. No filesystem watcher is installed.
-
-## Architecture and roadmap
-
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification record](docs/verification.md). Future milestones cover safe archival, independent version histories, local diffing, optional cloud indexing, on-demand AI analysis, and signed updates. None of those capabilities are represented as working Milestone 1 features.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestones 3–6 remain future work: detailed diffs, optional cloud indexing, AI comparisons/baselines, signing and automatic update delivery.

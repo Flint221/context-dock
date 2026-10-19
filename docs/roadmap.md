@@ -1,23 +1,25 @@
 # Development roadmap
 
-Milestone 1 establishes project registrations, independent document observations, local persistence, desktop navigation and Windows distribution. Subsequent work is intentionally unimplemented.
+## Completed: Milestone 1 — Windows application foundation
 
-## Milestone 2 — Automatic tracking and safe archival
+Tauri/React desktop shell, existing-folder registration, independent metadata discovery, SQLite persistence, dashboard/projects/settings, themes and Windows NSIS/Actions distribution.
 
-Introduce opt-in filesystem observation, debouncing, explicit archive ownership and immutable snapshots per logical document. Define atomic capture, exclusions, recovery from interrupted writes and safe retention before modifying anything. Reconcile renamed exports using explicit matching and hashes. Preserve original source files.
+## Implemented: Milestone 2 — Automatic document tracking and safe archival
 
-## Milestone 3 — Local diff and version history
+Opt-in per-project native watchers; selected independent initial histories; deterministic filename/date matching and explicit review; SHA-256 duplicate prevention; immutable per-document snapshots; separately authorized Old Context Files archival; persisted activity and recoverable operation journals; startup reconciliation; version history and verified location actions. Existing IDs/preferences migrate in place. See the manual testing and verification records for validation and remaining distribution checks.
 
-Provide document-specific history and local comparison between immutable versions. Define Markdown/text extraction and DOCX extraction boundaries. Clearly separate source metadata, captures, diffs and unsupported binary changes. Support usable navigation across long histories.
+## Milestone 3 — Local diff and history comparison
+
+Add document-specific content extraction and local comparison between preserved versions. Define Markdown/text and DOCX extraction boundaries, unsupported binary changes, accessible comparison navigation and long-history performance. Do not conflate capture reasons/metadata with content differences.
 
 ## Milestone 4 — Optional OpenAI indexing
 
-Add opt-in, per-project cloud indexing with explicit disclosure of what leaves the machine. Store credentials securely outside SQLite/repositories. Introduce vector-store associations, upload state, deletion policy, retries and usage feedback. Offline project management remains available.
+Add explicitly opted-in per-project cloud indexing, disclosure of uploaded content, secure credential storage, vector-store associations, upload/delete policy, retries and usage feedback. Offline management and local snapshots remain available.
 
 ## Milestone 5 — On-demand AI analysis
 
-Add user-triggered comparisons, explicit project baselines, cached analysis and goal-drift assessment. Link findings to particular documents and immutable versions. Show provenance, uncertainty, cost controls and the distinction between local evidence and generated interpretation.
+Add user-triggered comparisons, document/version-specific baselines, cached analysis and goal-drift assessment with provenance, uncertainty and cost controls. Generated interpretation must remain distinguishable from local evidence.
 
 ## Milestone 6 — Production hardening and updates
 
-Add signed installers, signed update delivery, migration backup/recovery, scale testing, accessibility review, startup diagnostics, support export controls, archive retention safety, scan cancellation and installer upgrade/uninstall testing. Revisit architecture-specific installers and fully offline prerequisite packaging. Automatic updates are not present in Milestone 1.
+Signed installers and signed update delivery; clean-machine/upgrade/uninstall coverage; migration backups and diagnostics; accessibility/scale review; cancellation and streaming pagination; storage usage and explicitly authorized retention management; broader filesystem compatibility; architecture-specific installers and offline prerequisite packaging. No automatic destructive retention or update agent is implemented now.
