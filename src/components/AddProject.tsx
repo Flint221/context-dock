@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { FolderOpen } from "lucide-react";
 import { registry } from "../services/registry";
 import { Modal } from "./Modal";
+import { OperationStatus } from "./OperationStatus";
 export function AddProject({
   close,
   save,
@@ -75,12 +76,14 @@ export function AddProject({
             {error}
           </p>
         )}
+        <OperationStatus busy={saving} message="Discovering documents…" />
         <div className="actions">
           <button type="button" disabled={saving} onClick={close}>
             Cancel
           </button>
           <button
             className="primary"
+            aria-busy={saving}
             disabled={saving || !name.trim() || !path}
           >
             {saving ? "Discovering documents…" : "Add project"}

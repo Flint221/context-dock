@@ -19,6 +19,10 @@ export function SettingsView({
         <div>
           <h2>Appearance</h2>
           <p>Choose a theme for your workspace.</p>
+          <p className="motion-preference">
+            Animations follow your Windows reduced-motion preference. Progress
+            and keyboard focus stay visible with motion turned off.
+          </p>
           <label>
             Theme
             <select

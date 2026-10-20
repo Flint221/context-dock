@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, FolderOpen, LoaderCircle } from "lucide-react";
+import { AlertTriangle, FolderOpen } from "lucide-react";
 import { registry } from "../services/registry";
 import type { FolderPlan, Project } from "../types";
 import { displayPath } from "../format";
 import { Modal } from "./Modal";
+import { OperationStatus } from "./OperationStatus";
 
 export function ProjectFolder({
   project,
@@ -157,12 +158,7 @@ function ReassignFolder({
         <FolderOpen size={16} />{" "}
         {plan ? "Choose another folder" : "Choose folder"}
       </button>
-      {busy && (
-        <p role="status">
-          <LoaderCircle size={16} className="operation-spinner" /> Checking
-          folder…
-        </p>
-      )}
+      <OperationStatus busy={busy} message="Checking folder…" />
       {plan && (
         <section className="folder-review">
           <h3>Review selected folder</h3>

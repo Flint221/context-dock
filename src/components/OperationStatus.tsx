@@ -29,7 +29,7 @@ export function OperationStatus({
       </p>
       <ProgressBar
         quiet
-        label={busy ? message : success!}
+        label={busy ? message : (success ?? message)}
         value={busy ? undefined : 100}
       />
     </div>

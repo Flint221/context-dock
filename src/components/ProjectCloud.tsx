@@ -12,6 +12,7 @@ import {
   hasCloudData,
 } from "../cloudVerification";
 import { OperationStatus } from "./OperationStatus";
+import { ProgressBar } from "./ProgressBar";
 
 export function ProjectCloud({ project }: { project: string }) {
   const [view, setView] = useState<CloudView | null>(null);
@@ -81,6 +82,7 @@ export function ProjectCloud({ project }: { project: string }) {
   const cleanupNeeded =
     !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
   const retained = !!view && !enabled && hasCloudData(view);
+  const indexedTotal = view ? view.indexed + view.pending + view.failed : 0;
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
   const ready =
     enabled &&
@@ -203,6 +205,26 @@ export function ProjectCloud({ project }: { project: string }) {
           message="Saving and checking cloud status…"
           success={notice}
         />
+        {view &&
+          stateKnown &&
+          !cleanupNeeded &&
+          !!view.enabled &&
+          !!view.started &&
+          indexedTotal > 0 && (
+            <div className="cloud-index-progress">
+              <ProgressBar
+                label="Indexed versions"
+                value={(100 * view.indexed) / indexedTotal}
+                detail={`${view.indexed} of ${indexedTotal} indexed`}
+              />
+              <small className={view.failed ? "error" : undefined}>
+                {view.paused ? "Uploads paused · " : ""}
+                {view.pending} pending · {view.failed} failed or uncertain
+                {!ready &&
+                  " · Questions unlock when selected current versions are ready."}
+              </small>
+            </div>
+          )}
         <div className="toolbar-actions">
           <button
             disabled={busy || advancedBusy}
@@ -221,6 +243,8 @@ export function ProjectCloud({ project }: { project: string }) {
           )}
           {enabled && (
             <button
+              className="primary"
+              aria-busy={busy || advancedBusy}
               disabled={busy || advancedBusy}
               onClick={() =>
                 void run(async () => {

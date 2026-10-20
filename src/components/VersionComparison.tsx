@@ -3,6 +3,7 @@ import { registry } from "../services/registry";
 import type { Version } from "../types";
 import type { Comparison, DiffLine } from "../comparison";
 import { date } from "../format";
+import { OperationStatus } from "./OperationStatus";
 
 const PAGE_SIZE = 100;
 function label(v: Version) {
@@ -265,9 +266,10 @@ export function VersionComparison({
           content.
         </p>
       )}
-      {loading && (
-        <p role="status">Verifying snapshots and calculating differences…</p>
-      )}
+      <OperationStatus
+        busy={loading}
+        message="Verifying snapshots and calculating differences…"
+      />
       {error && (
         <p role="alert" className="error">
           {error}

@@ -3,6 +3,7 @@ import { MessageSquare, Plus, Send, Trash2 } from "lucide-react";
 import { chat, type Chat, type ChatSummary } from "../chat";
 import { Modal } from "./Modal";
 import { date } from "../format";
+import { OperationStatus } from "./OperationStatus";
 
 export function ProjectChat({
   project,
@@ -254,9 +255,12 @@ export function ProjectChat({
                 </div>
                 <div className="chat-answer" aria-busy="true">
                   <strong>ContextDock</strong>
-                  <p role="status">
-                    {preview ? "Writing answer…" : "Searching your documents…"}
-                  </p>
+                  <OperationStatus
+                    busy
+                    message={
+                      preview ? "Writing answer…" : "Searching your documents…"
+                    }
+                  />
                   {preview && <p>{preview}</p>}
                 </div>
               </>
@@ -301,6 +305,7 @@ export function ProjectChat({
               </small>
               <button
                 className="primary"
+                aria-busy={busy}
                 disabled={busy || !enabled || !ready || !question.trim()}
                 type="submit"
               >
