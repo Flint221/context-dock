@@ -1,5 +1,13 @@
 # Current processes — 0.6.2 manual checks
 
+## Pending polish: Local previews default
+
+Before the historical full-inventory steps below, verify the new default view: Local previews should show compact cards for typical Node/Python/frontend servers on local TCP bindings. System services, UDP, database/debug endpoints and unrelated high-port apps should be absent. Each card should expose a preview URL, Preview, Copy URL, Stop app and collapsed app details. A usual IPv4/IPv6 localhost pair should produce one preview entry; other 127.x.x.x hosts remain independent.
+
+Switch to Advanced processes to perform the full-inventory checks below. Switch back to Local previews, then back to Advanced: earlier checkbox selections must be cleared. Close/reopen the tab: Local previews must be selected again. A custom server hidden by the heuristic must remain discoverable in Advanced. Search should accept ports, app names, local URLs and localhost aliases. HTTPS on/off should update displayed/copied URLs and the native preview scheme without changing the underlying process.
+
+Review Stop app or Stop all previews, then Cancel: no native stop should occur. Confirm only disposable servers. The review must list their whole owning processes and all ports; hidden database/system owners must not enter the simplified bulk target list. No active HTTP probe, cloud request, startup change or new background polling should occur merely by switching views. New regressions are written but execution is deferred to the final polishing checks.
+
 Use a disposable preview and save work before testing Stop. Do not bulk-stop unfamiliar apps. Nothing here requires enabling document tracking or cloud access.
 
 1. Install the 0.6.2 build, preserving the existing application identifier/data. Open **Current processes** directly above Settings. It must work with no registered projects and with projects awaiting folder reassignment. Add project should not appear on this page. Check light/dark themes and narrow-window horizontal table scrolling.

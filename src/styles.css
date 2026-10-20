@@ -1789,6 +1789,20 @@ dialog:has(.comparison) {
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--bg);
+  animation: motion-reveal var(--motion-page) var(--motion-ease) backwards;
+  transition: border-color var(--motion-fast) ease;
+}
+.local-preview-card:hover {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.local-preview-card:nth-child(2) {
+  animation-delay: 45ms;
+}
+.local-preview-card:nth-child(3) {
+  animation-delay: 90ms;
+}
+.local-preview-card:nth-child(n + 4) {
+  animation-delay: 135ms;
 }
 .local-preview-heading {
   display: flex;

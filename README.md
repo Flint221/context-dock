@@ -3,6 +3,12 @@
 ContextDock 0.6.3 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
+## Pending polish: simplified local previews
+
+**Current processes** now opens in **Local previews** mode by default. Compact cards show likely local frontend/web servers with their URLs, **Preview**, **Copy URL**, **Stop app**, and a reviewed **Stop all previews** action. System services, UDP, common database/debug ports and unrelated background listeners are hidden from this view. Ordinary dual-stack localhost bindings are grouped to reduce duplicates. **Advanced processes** restores the complete original inventory, filters, selections and startup diagnostics; switching views clears pending selections, and reopening the tab defaults to Local previews again.
+
+This is a display heuristic using verified current-user process eligibility, local TCP bindings, runtime names and common preview ports. It does not probe sites or claim every result speaks HTTP; unusual/custom servers may require Advanced processes. Stopping remains a confirmed whole-process action, with all existing identity/protection checks. These changes are local pending the final checks, push and installer build.
+
 ## Motion and feedback (0.6.3)
 
 Pages reveal from top to bottom with short, capped stagger delays. Buttons respond to hover/press, project cards lift gently, dialogs ease into view, and the sidebar clearly marks the active page. Primary Refresh/Sync actions are easier to find, regular buttons have at least 40-pixel targets, and compact process controls remain at least 34 pixels tall. Light and dark themes share the same visual hierarchy.
