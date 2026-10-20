@@ -2165,7 +2165,7 @@ button[aria-busy="true"]::after {
   button:active:not(:disabled),
   .project-card:hover:not(:disabled) .folder-icon,
   .project-card:hover:not(:disabled) .card-top > svg {
-    transform: none;
+    transform: none !important;
   }
   .progress-track[data-indeterminate="true"] .progress-fill {
     transform: translateX(75%);

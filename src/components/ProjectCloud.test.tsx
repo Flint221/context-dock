@@ -19,6 +19,44 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("updates measured indexing progress from backend counts and never counts failures as indexed", async () => {
+  connected();
+  view.indexed = 2;
+  view.pending = 3;
+  view.failed = 0;
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "40");
+  view.indexed = 3;
+  view.pending = 1;
+  view.failed = 1;
+  await act(async () => changed());
+  expect(
+    screen.getByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "60");
+  expect(
+    screen.getByText(/1 pending · 1 failed or uncertain/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});
+it("keeps paused progress explicit and hides the index meter after opting out", async () => {
+  connected();
+  view.indexed = 1;
+  view.pending = 1;
+  view.paused = 1;
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "50");
+  expect(screen.getByText(/Uploads paused ·/)).toBeInTheDocument();
+  view.enabled = 0;
+  await act(async () => changed());
+  expect(
+    screen.queryByRole("progressbar", { name: "Indexed versions" }),
+  ).not.toBeInTheDocument();
+  expect(cloud.action).not.toHaveBeenCalled();
+});
 it("blocks new questions about missing selected files while saved chats remain readable", async () => {
   connected();
   chats = [structuredClone(saved)];

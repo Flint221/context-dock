@@ -30,6 +30,43 @@ vi.mock("./cloud", async (original) => ({
   },
 }));
 let state: Snapshot;
+it("preserves page controls during status updates and resets the scene and scroll only on navigation", async () => {
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
+    notify = cb;
+    return () => {};
+  });
+  const inventory = vi
+    .spyOn(processes, "inventory")
+    .mockResolvedValue({
+      processes: [],
+      warnings: [],
+      scannedAt: "2026-10-20T12:00:00Z",
+    });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "Current processes" }));
+  const search = await screen.findByRole("searchbox", {
+    name: "Search apps or ports",
+  });
+  await waitFor(() => expect(inventory).toHaveBeenCalledTimes(1));
+  await user.type(search, "5173");
+  const scene = search.closest(".page-scene");
+  const scrollCount = vi.mocked(window.scrollTo).mock.calls.length;
+  await act(async () => notify());
+  expect(screen.getByRole("searchbox")).toHaveValue("5173");
+  expect(search.closest(".page-scene")).toBe(scene);
+  expect(window.scrollTo).toHaveBeenCalledTimes(scrollCount);
+  expect(inventory).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  expect(scene).not.toBeInTheDocument();
+  expect(window.scrollTo).toHaveBeenLastCalledWith({
+    top: 0,
+    left: 0,
+    behavior: "instant",
+  });
+  inventory.mockRestore();
+});
 it("places Current processes above Settings and opens it independently of project registrations", async () => {
   const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
     processes: [],

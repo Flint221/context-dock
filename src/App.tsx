@@ -1,5 +1,11 @@
 import { displayPath } from "./format";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   Activity,
@@ -40,6 +46,10 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const route = `${page}:${page === "projects" ? (selected ?? "list") : ""}`;
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+  }, [route]);
   const active = useRef(false);
   const readSequence = useRef(0);
   const load = useCallback(async () => {
@@ -189,10 +199,7 @@ export default function App() {
             </div>
           )}
           <OperationStatus busy={busy} message="Reading local metadata…" />
-          <div
-            className="page-scene"
-            key={`${page}:${page === "projects" ? (selected ?? "list") : ""}`}
-          >
+          <div className="page-scene" key={route}>
             <div className="page-heading">
               <div>
                 <div className="eyebrow">
