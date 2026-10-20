@@ -1,3 +1,15 @@
+# Verification — ContextDock 0.6.1 toggle reversal audit
+
+October 20: **150 native tests** and **79 frontend tests** pass. TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. Version manifests and lockfiles are 0.6.1; schema 006, application identity and per-user storage are unchanged. The full [toggle audit](toggle-audit.md) records each control's stop, retention and restoration behavior.
+
+Eight additional native regressions verify paused full-family history removal/re-selection in the same store, opt-outs preceding unavailable/unrelated additions, deletion receipts and absence with restart/retry, saving pure opt-outs without sources/tested credentials with narrowly scoped deletion authorization, lost-upload recovery through deselect/reselect without duplicate Files, cleanup of all old project-owned stores while preserving another project's store, full-history/current round trips, and concurrent whole-project cleanup retaining its stop intent after an in-flight document-removal failure.
+
+Six additional frontend cases verify opt-out/cancel/pending retry without resuming uploads, empty/ineligible saved selections requiring review, preserving a saved subset on enablement, archival on/cancel/off with tracking retained, and the paused main Cloud sync switch staying checked so unchecking consistently requests verified deletion. Existing cancellation, duplicate-click/readback, ownership/scope, history, cleanup, streaming, folder recovery and migration suites remain green.
+
+All provider results, scope values and files in these tests are synthetic/disposable. No real API key, user database, registered folder or live cloud resource was changed. Installed GUI and authenticated account acceptance are the user-run scenarios in the audit; local tests do not establish actual provider/dashboard timing. Individual opt-outs retain uploaded Files for re-selection, while whole-project Off verifies owned stores and uploads are removed. Explicit pause retains cloud data. Local history remains preserved throughout.
+
+---
+
 # Verification — ContextDock 0.6.0 folder recovery (Milestone 6)
 
 October 20: **142 native tests** and **73 frontend tests** pass. TypeScript, ESLint (no warnings), rustfmt, all-target Clippy with warnings denied, production assets and Windows x64 NSIS packaging pass. Versions/lockfiles are 0.6.0; the application identifier and per-user store remain unchanged. Schema 006 upgrades existing databases in place.
