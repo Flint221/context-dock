@@ -5,17 +5,23 @@ import { registry } from "../services/registry";
 import { date, displayPath, size } from "../format";
 import { Modal } from "./Modal";
 import { VersionComparison } from "./VersionComparison";
+import { ProjectIntelligence } from "./ProjectIntelligence";
 export function DocumentHistory({
   family,
   close,
+  project,
 }: {
   family: Family;
   close: () => void;
+  project?: string;
 }) {
   const [versions, setVersions] = useState<Version[] | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [comparing, setComparing] = useState(false);
+  const [analysisPair, setAnalysisPair] = useState<[string, string] | null>(
+    null,
+  );
   const compareButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!comparing) compareButton.current?.focus();
@@ -52,11 +58,24 @@ export function DocumentHistory({
       title={`${family.name} — ${comparing ? "compare versions" : "version history"}`}
       close={close}
     >
-      {comparing && versions ? (
+      {analysisPair && project ? (
+        <>
+          <button onClick={() => setAnalysisPair(null)}>
+            ← Back to factual comparison
+          </button>
+          <ProjectIntelligence
+            key={`analysis:${project}`}
+            project={project}
+            name={family.name}
+            initialPair={analysisPair}
+          />
+        </>
+      ) : comparing && versions ? (
         <VersionComparison
           documentId={family.id}
           versions={versions}
           back={() => setComparing(false)}
+          analyze={project ? (pair) => setAnalysisPair(pair) : undefined}
         />
       ) : (
         <>

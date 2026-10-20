@@ -36,6 +36,12 @@ pub struct OpenAi {
 }
 impl OpenAi {
     pub fn new(key: &str) -> Result<Self, String> {
+        Self::with_timeout(key, 30)
+    }
+    pub fn for_analysis(key: &str) -> Result<Self, String> {
+        Self::with_timeout(key, 90)
+    }
+    fn with_timeout(key: &str, seconds: u64) -> Result<Self, String> {
         let mut authorization = HeaderValue::from_str(&format!("Bearer {key}"))
             .map_err(|_| "Invalid credential.".to_string())?;
         authorization.set_sensitive(true);
@@ -43,7 +49,7 @@ impl OpenAi {
             .https_only(true)
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(seconds))
             .min_tls_version(reqwest::tls::Version::TLS_1_2)
             .build()
             .map_err(|_| "Cannot initialize secure API client.".to_string())?;

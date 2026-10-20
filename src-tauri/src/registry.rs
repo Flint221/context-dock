@@ -27,7 +27,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 3 {
+        if version > 4 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -47,7 +47,11 @@ impl Registry {
             )
             .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 3).map_err(error)?;
+        if version < 4 {
+            tx.execute_batch(include_str!("../migrations/004_ai_analysis.sql"))
+                .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 4).map_err(error)?;
         tx.commit().map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;

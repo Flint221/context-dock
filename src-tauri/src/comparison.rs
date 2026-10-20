@@ -51,7 +51,7 @@ impl Registry {
         })
     }
 }
-fn verified_bytes(store: &std::path::Path, v: &ComparedVersion) -> Result<Vec<u8>> {
+pub(crate) fn verified_bytes(store: &std::path::Path, v: &ComparedVersion) -> Result<Vec<u8>> {
     let checked = storage::checked(store, &v.relative, false)
         .map_err(|e| format!("v{} snapshot unavailable or unsafe: {e}", v.number))?;
     let file = storage::locked_read(&checked.path, false)

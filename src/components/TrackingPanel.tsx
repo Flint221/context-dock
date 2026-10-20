@@ -525,7 +525,11 @@ export function TrackingPanel({
         </Modal>
       )}
       {family && (
-        <DocumentHistory family={family} close={() => setHistory(null)} />
+        <DocumentHistory
+          family={family}
+          project={project.id}
+          close={() => setHistory(null)}
+        />
       )}
     </section>
   );

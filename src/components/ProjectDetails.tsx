@@ -1,5 +1,6 @@
 import { TrackingPanel } from "./TrackingPanel";
 import { CloudPanel } from "./CloudPanel";
+import { ProjectIntelligence } from "./ProjectIntelligence";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -85,6 +86,11 @@ export function ProjectDetails({
       />
       <Documents key={`documents:${project.id}`} documents={documents} />
       <CloudPanel key={`cloud:${project.id}`} project={project.id} />
+      <ProjectIntelligence
+        key={`ai:${project.id}`}
+        project={project.id}
+        name={project.name}
+      />
     </>
   );
 }
