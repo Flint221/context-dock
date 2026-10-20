@@ -4,7 +4,7 @@ Milestone 5 was implemented on Windows with the existing Node/MSVC Rust toolchai
 
 | Check | Result |
 | --- | --- |
-| Rust tests, binary targets, doctests | **104 passed**: 87 prior regressions + 17 focused AI tests; no failures |
+| Rust tests, binary targets, doctests | **105 passed**: 87 prior regressions + 18 focused AI tests; no failures |
 | Frontend tests | **41 passed in 6 files**: 35 prior + 6 intelligence interaction tests |
 | TypeScript, ESLint | Passed |
 | rustfmt, all-target Clippy with -D warnings | Passed |

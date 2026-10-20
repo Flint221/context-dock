@@ -126,6 +126,30 @@ fn ai_migration_preserves_schema_three_entities_cloud_settings_and_snapshots() {
     assert_eq!(ai::view(&r, &f.p).unwrap()["baselines"], json!([]));
 }
 #[test]
+fn saved_credential_cannot_be_transmitted_as_selected_prompt_data() {
+    let synthetic = "synthetic-credential-never-a-real-key";
+    assert!(ai_inference::contains_credential(
+        &json!({"input":[{"content":format!("Untrusted source accidentally includes {synthetic}")}]}),
+        synthetic
+    ));
+    assert!(!ai_inference::contains_credential(
+        &json!({"input":[{"content":"Ordinary approved documentation"}]}),
+        synthetic
+    ));
+    let mut f = Fixture::new();
+    let mut request = f.pair();
+    f.edit(&format!("# Goal\n{}{}", "sk-", "synthetic".repeat(8)));
+    request.versions = vec![f.ids()[0].clone(), f.ids()[2].clone()];
+    assert!(ai::prepare(&f.r, &f.p, request)
+        .unwrap_err()
+        .contains("credential-like"));
+    let count: i64 =
+        f.r.db
+            .query_row("SELECT COUNT(*) FROM ai_reports", [], |v| v.get(0))
+            .unwrap();
+    assert_eq!(count, 0);
+}
+#[test]
 fn baseline_requires_approval_and_revisions_are_immutable() {
     let mut f = Fixture::new();
     assert!(ai::approve(&mut f.r, &f.p, &json!({"approve":false})).is_err());

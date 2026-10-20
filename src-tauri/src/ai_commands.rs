@@ -30,6 +30,7 @@ impl Runtime {
 }
 struct Guard<'a> {
     api: &'a OpenAi,
+    credential: &'a str,
     db: rusqlite::Connection,
     project: String,
     id: String,
@@ -37,6 +38,9 @@ struct Guard<'a> {
 }
 impl InferenceApi for Guard<'_> {
     fn respond(&self, body: Value) -> std::result::Result<Value, ApiError> {
+        if ai_inference::contains_credential(&body, self.credential) {
+            return Err(ApiError::local("Selected evidence contains the saved API credential. Redact it in a newly captured version before analysis. No request was sent."));
+        }
         let allowed:i64=self.db.query_row("SELECT COUNT(*) FROM ai_reports a JOIN projects p ON p.id=a.project_id JOIN cloud_connection k ON k.singleton=1 WHERE a.id=?1 AND a.project_id=?2 AND a.state='running' AND p.removed_at IS NULL AND k.status='connected' AND k.scope=?3",params![self.id,self.project,self.scope],|v|v.get(0)).map_err(|_|ApiError::local("Cannot verify analysis authorization."))?;
         if allowed != 1 {
             return Err(ApiError::local(
@@ -71,7 +75,7 @@ pub async fn ai_action(
             if connected!=1 {return Err("A fresh AI analysis requires a tested OpenAI connection. Saved reports and baselines remain available offline.".into());}
             let key=cloud_credentials::read()?.ok_or("Save and test your OpenAI key in Settings first.")?;
             let api=OpenAi::for_analysis(&key)?;
-            let guard=Guard{api:&api,db:cloud::connect(&path)?,project:project.clone(),id:id.into(),scope:cloud::scope(&key)};
+            let guard=Guard{api:&api,credential:&key,db:cloud::connect(&path)?,project:project.clone(),id:id.into(),scope:cloud::scope(&key)};
             ai_inference::generate(&r,&project,id,true,payload["fresh"]==true,&guard)
         } else {local(&mut r,&project,&action,&payload)}
     }).await.map_err(|_|"Analysis task could not finish. Inspect saved request status before another paid request.".to_string())?

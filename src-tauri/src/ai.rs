@@ -11,6 +11,14 @@ use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 pub const MINI: &str = "gpt-5.4-mini-2026-03-17";
 pub const QUALITY: &str = "gpt-5.4-2026-03-05";
+fn reject_credential_text(text: &str) -> Result<()> {
+    let pattern = regex::Regex::new(r"sk-[A-Za-z0-9_-]{16,}")
+        .map_err(|_| "Cannot initialize privacy validation.")?;
+    if pattern.is_match(text) {
+        return Err("Selected evidence contains credential-like text. Use a redacted newly captured version or baseline before analysis. No request was sent and no analysis plan was saved.".into());
+    }
+    Ok(())
+}
 pub fn rates(model: &str) -> Result<(f64, f64)> {
     match model {
         MINI => Ok((0.75, 4.5)),
@@ -79,6 +87,8 @@ pub fn approve(r: &mut Registry, p: &str, payload: &Value) -> Result<String> {
     let content: Goals = serde_json::from_value(payload["content"].clone())
         .map_err(|_| "Invalid baseline fields.")?;
     let serialized = serde_json::to_string(&content).map_err(|_| "Invalid baseline.")?;
+    reject_credential_text(&serialized)?;
+    reject_credential_text(title)?;
     if title.is_empty()
         || title.len() > 160
         || content.purpose.trim().is_empty()
@@ -227,6 +237,8 @@ pub fn plan(r: &Registry, p: &str, request: &Request) -> Result<Plan> {
     let mut warnings = vec![];
     let mut transitions = vec![];
     for (v, text, notes) in &data {
+        reject_credential_text(text)?;
+        reject_credential_text(&v.name)?;
         chunks(&mut evidence, &v.version, text);
         warnings.extend(
             notes
@@ -235,6 +247,7 @@ pub fn plan(r: &Registry, p: &str, request: &Request) -> Result<Plan> {
         );
     }
     if let Some(b) = &mut selected_baseline {
+        reject_credential_text(s(b, "content"))?;
         if let Some(id) = b["source_version"].as_str() {
             let verified = source(r, p, id)?;
             if verified.0.hash != s(b, "source_hash") {

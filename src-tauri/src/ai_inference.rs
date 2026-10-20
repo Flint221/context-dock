@@ -11,6 +11,19 @@ use serde_json::{json, Value};
 pub trait InferenceApi {
     fn respond(&self, body: Value) -> std::result::Result<Value, ApiError>;
 }
+pub fn contains_credential(value: &Value, credential: &str) -> bool {
+    if credential.is_empty() {
+        return false;
+    }
+    match value {
+        Value::String(text) => text.contains(credential),
+        Value::Array(values) => values.iter().any(|v| contains_credential(v, credential)),
+        Value::Object(values) => values
+            .iter()
+            .any(|(k, v)| k.contains(credential) || contains_credential(v, credential)),
+        _ => false,
+    }
+}
 impl InferenceApi for OpenAi {
     fn respond(&self, body: Value) -> std::result::Result<Value, ApiError> {
         self.request("POST", "/responses", Some(body))
