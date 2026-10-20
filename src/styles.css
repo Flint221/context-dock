@@ -4,7 +4,7 @@
   color: #252b36;
   background: #f7f8fa;
   font-synthesis: none;
-  font-size: 14px;
+  font-size: 15px;
   --bg: #f7f8fa;
   --panel: #fff;
   --sidebar: #f1f3f6;
@@ -41,6 +41,7 @@
 }
 body {
   margin: 0;
+  line-height: 1.5;
 }
 button,
 input,
@@ -265,7 +266,7 @@ select:focus-visible {
   margin-top: 10px;
 }
 .chat-source p {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
 }
 .chat-composer {
@@ -353,7 +354,7 @@ p {
   line-height: 1.7;
 }
 small {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .app-shell {
@@ -383,13 +384,17 @@ aside {
 }
 .brand small {
   display: block;
-  font-size: 9px;
-  letter-spacing: 1.2px;
+  font-size: 13px;
+  letter-spacing: 0.3px;
   font-weight: 500;
   margin-top: 4px;
 }
+.brand > div {
+  min-width: 0;
+}
 .brand-icon {
   width: 37px;
+  flex-shrink: 0;
   height: 37px;
   display: grid;
   place-items: center;
@@ -398,7 +403,7 @@ aside {
   border-radius: 10px;
 }
 .nav-label {
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   letter-spacing: 1.4px;
   margin: 42px 12px 13px;
@@ -413,6 +418,7 @@ nav button {
   background: transparent;
   border-color: transparent;
   padding: 11px 13px;
+  font-size: 14px;
   color: var(--muted);
 }
 nav button.active {
@@ -420,9 +426,13 @@ nav button.active {
   color: var(--accent);
   font-weight: 600;
 }
+nav button > svg,
+.sidebar-footer > svg {
+  flex-shrink: 0;
+}
 .nav-count {
   margin-left: auto;
-  font-size: 12px;
+  font-size: 14px;
 }
 .sidebar-footer {
   margin-top: auto;
@@ -430,11 +440,11 @@ nav button.active {
   gap: 8px;
   padding: 16px 3px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .sidebar-footer small {
   display: block;
-  font-size: 10px;
+  font-size: 13px;
   margin-top: 4px;
 }
 main {
@@ -452,7 +462,7 @@ header {
   padding: 0 34px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
-  font-size: 12px;
+  font-size: 14px;
 }
 .breadcrumb {
   display: flex;
@@ -493,7 +503,7 @@ header {
   margin-top: 8px;
 }
 .eyebrow {
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 1.7px;
   color: var(--accent);
@@ -522,7 +532,7 @@ header {
 }
 .stats span {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   padding-right: 25px;
 }
@@ -543,7 +553,7 @@ header {
   margin-bottom: 18px;
 }
 .section-heading p {
-  font-size: 12px;
+  font-size: 14px;
   margin-top: 5px;
 }
 .project-grid {
@@ -576,7 +586,7 @@ header {
   border-radius: 9px;
 }
 .path {
-  font-size: 11px;
+  font-size: 13px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -589,15 +599,19 @@ header {
   gap: 8px;
   border-top: 1px solid var(--border);
   padding-top: 14px;
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 10px;
 }
 .badge {
   display: inline-block;
   border-radius: 5px;
-  padding: 3px 7px;
-  font-size: 10px;
-  white-space: nowrap;
+  padding: 4px 9px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
   background: var(--sidebar);
   color: var(--muted);
   text-transform: capitalize;
@@ -636,7 +650,7 @@ header {
 }
 .recent strong {
   display: block;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 600;
 }
 .recent small {
@@ -645,7 +659,7 @@ header {
   margin-top: 5px;
 }
 .recent time {
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
   margin-left: 16px;
 }
@@ -709,7 +723,7 @@ header {
   border-radius: 8px;
   background: var(--panel);
   margin-bottom: 16px;
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .banner > svg {
@@ -724,7 +738,7 @@ header {
 }
 .progress {
   color: var(--accent);
-  font-size: 12px;
+  font-size: 14px;
   margin-bottom: 16px;
 }
 .back {
@@ -739,7 +753,7 @@ header {
   gap: 22px;
 }
 .full-path {
-  font-size: 12px;
+  font-size: 14px;
   margin: 8px 0;
   overflow-wrap: anywhere;
 }
@@ -750,7 +764,7 @@ header {
   gap: 10px;
 }
 .toolbar-actions button {
-  font-size: 12px;
+  font-size: 14px;
 }
 .refresh-row {
   display: flex;
@@ -763,7 +777,7 @@ header {
   margin-bottom: 0;
 }
 .count {
-  font-size: 12px;
+  font-size: 14px;
   margin-left: 6px;
   color: var(--muted);
 }
@@ -777,7 +791,7 @@ header {
 .search input {
   max-width: 190px;
   padding: 8px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .table-scroll {
   overflow-x: auto;
@@ -785,7 +799,7 @@ header {
 table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 12px;
+  font-size: 14px;
 }
 th {
   text-align: left;
@@ -801,7 +815,7 @@ td {
 }
 td small {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   margin: 6px 0 0 25px;
   overflow-wrap: anywhere;
 }
@@ -835,10 +849,11 @@ td:not(:first-child) {
 }
 footer {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   gap: 12px;
   padding: 18px 34px;
-  font-size: 10px;
+  font-size: 13px;
   color: var(--muted);
   border-top: 1px solid var(--border);
 }
@@ -869,13 +884,13 @@ dialog::backdrop {
   font-size: 20px;
 }
 dialog p {
-  font-size: 13px;
+  font-size: 14px;
 }
 label {
   display: flex;
   flex-direction: column;
   gap: 9px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 550;
 }
 form label {
@@ -903,7 +918,7 @@ select {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
-  font-size: 11px;
+  font-size: 13px;
   color: var(--muted);
 }
 .actions {
@@ -959,7 +974,7 @@ form > .error {
   padding: 16px 20px;
   border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
 }
 .tracking-panel {
   margin: 0 0 24px;
@@ -987,7 +1002,7 @@ form > .error {
 .tracking-toggle small,
 .review-section > p,
 .operation-section > p {
-  font-size: 12px;
+  font-size: 14px;
 }
 .tracking-controls p {
   margin-top: 7px;
@@ -1028,7 +1043,7 @@ form > .error {
   margin: 8px 22px;
 }
 .tracking-note {
-  font-size: 12px;
+  font-size: 14px;
   padding: 10px 22px;
   line-height: 1.7;
 }
@@ -1055,7 +1070,13 @@ form > .error {
   margin-left: 0;
 }
 .family-section td button {
-  font-size: 11px;
+  font-size: 14px;
+}
+.family-section tbody td:nth-child(2),
+.family-section tbody td:nth-child(3) {
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 .review-card {
   margin: 0 22px 16px;
@@ -1066,7 +1087,7 @@ form > .error {
   overflow-wrap: anywhere;
 }
 .review-card > p {
-  font-size: 12px;
+  font-size: 14px;
   margin: 8px 0 14px;
 }
 .review-card label {
@@ -1074,7 +1095,7 @@ form > .error {
   margin-bottom: 15px;
 }
 .review-card button {
-  font-size: 12px;
+  font-size: 14px;
 }
 .untracked,
 .tracking-activity {
@@ -1083,7 +1104,7 @@ form > .error {
 }
 .untracked > p {
   margin-top: 12px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .untracked-row {
   display: flex;
@@ -1091,13 +1112,13 @@ form > .error {
   justify-content: space-between;
   gap: 15px;
   margin-top: 12px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .tracking-activity summary,
 .untracked summary {
   cursor: pointer;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 550;
 }
 .tracking-activity ol {
@@ -1109,11 +1130,12 @@ form > .error {
 }
 .tracking-activity li {
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   border-top: 1px solid var(--border);
   padding: 13px 0;
-  font-size: 11px;
+  font-size: 13px;
 }
 .tracking-activity li > span {
   overflow-wrap: anywhere;
@@ -1121,7 +1143,7 @@ form > .error {
 .tracking-activity time {
   color: var(--muted);
   white-space: nowrap;
-  font-size: 10px;
+  font-size: 13px;
 }
 .operation {
   margin: 0 22px 14px;
@@ -1129,11 +1151,11 @@ form > .error {
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 13px;
-  font-size: 12px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .operation p {
-  font-size: 12px;
+  font-size: 14px;
   margin: 6px 0;
 }
 .operation-section > button {
@@ -1144,7 +1166,7 @@ form > .error {
   align-items: center;
   gap: 8px;
   margin: 18px 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .selection-actions span {
   color: var(--muted);
@@ -1190,26 +1212,27 @@ dialog {
   margin-top: 0;
 }
 .version-card > .section-heading {
+  flex-wrap: wrap;
   margin-bottom: 14px;
 }
 .version-card time {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   margin-left: auto;
 }
 .version-card > strong {
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .version-card p {
-  font-size: 12px;
+  font-size: 14px;
   margin: 7px 0 15px;
 }
 .version-card .toolbar-actions button {
-  font-size: 11px;
+  font-size: 13px;
 }
 .version-card summary {
-  font-size: 11px;
+  font-size: 13px;
   cursor: pointer;
   margin-top: 17px;
   color: var(--muted);
@@ -1218,7 +1241,7 @@ dialog {
   display: grid;
   grid-template-columns: 115px 1fr;
   gap: 10px;
-  font-size: 11px;
+  font-size: 13px;
   margin: 16px 0 0;
 }
 .version-card dt {
@@ -1297,7 +1320,7 @@ dialog:has(.comparison) {
 .comparison > p,
 .diff-controls,
 .diff-summary {
-  font-size: 12px;
+  font-size: 14px;
 }
 .comparison details {
   overflow-wrap: anywhere;
@@ -1361,7 +1384,7 @@ dialog:has(.comparison) {
 }
 .diff-column-head strong {
   padding: 9px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .unified-line {
   display: flex;
@@ -1545,7 +1568,7 @@ dialog:has(.comparison) {
   overflow-wrap: anywhere;
   max-height: 20rem;
   overflow: auto;
-  font-size: 0.85rem;
+  font-size: 14px;
 }
 .ai-findings,
 .ai-timeline {
@@ -1638,7 +1661,7 @@ dialog:has(.comparison) {
   display: grid;
   gap: 6px;
   flex: 1 1 140px;
-  font-size: 0.85rem;
+  font-size: 14px;
 }
 .process-filters label:first-child {
   flex: 2 1 220px;
@@ -1654,7 +1677,7 @@ dialog:has(.comparison) {
 .process-help {
   color: var(--muted);
   margin: 14px 0;
-  font-size: 0.85rem;
+  font-size: 14px;
 }
 .process-table {
   width: 100%;
@@ -1678,7 +1701,7 @@ dialog:has(.comparison) {
   color: var(--muted);
 }
 .process-path {
-  font-size: 0.8rem;
+  font-size: 13px;
 }
 .process-table td small {
   margin-left: 0;
@@ -1698,7 +1721,7 @@ dialog:has(.comparison) {
 }
 .process-endpoint code {
   overflow-wrap: anywhere;
-  font-size: 0.85rem;
+  font-size: 14px;
 }
 .process-endpoint > div,
 .process-row-actions {
@@ -1708,7 +1731,7 @@ dialog:has(.comparison) {
 }
 .process-endpoint button,
 .process-row-actions button {
-  font-size: 0.8rem;
+  font-size: 13px;
   padding: 6px 8px;
 }
 .process-row-actions {
@@ -1776,7 +1799,7 @@ dialog:has(.comparison) {
 }
 .preview-list-heading p {
   margin-top: 5px;
-  font-size: 12px;
+  font-size: 14px;
 }
 .local-preview-grid {
   display: grid;
@@ -1824,7 +1847,7 @@ dialog:has(.comparison) {
   display: block;
   overflow-wrap: anywhere;
   color: var(--accent);
-  font-size: 13px;
+  font-size: 14px;
   margin-bottom: 12px;
 }
 .local-preview-site + .local-preview-site {
@@ -1849,7 +1872,7 @@ dialog:has(.comparison) {
 }
 .local-preview-footer summary {
   padding-left: 0;
-  font-size: 12px;
+  font-size: 14px;
 }
 .local-preview-footer small {
   display: block;
@@ -2122,7 +2145,7 @@ dialog[open]::backdrop {
 }
 .operation-feedback .operation-status {
   margin: 0 0 9px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--text);
 }
 .operation-feedback[data-state="complete"] {
@@ -2146,7 +2169,7 @@ dialog[open]::backdrop {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .progress-track {
@@ -2255,8 +2278,8 @@ button[aria-busy="true"]::after {
 }
 @media (max-width: 1000px) {
   .brand small {
-    font-size: 8px;
-    letter-spacing: 0.8px;
+    font-size: 13px;
+    letter-spacing: 0;
   }
   .stats span {
     min-height: 36px;
