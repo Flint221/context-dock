@@ -1744,6 +1744,106 @@ dialog:has(.comparison) {
 }
 
 /* Motion is presentation only: it never schedules or delays an operation. */
+.process-view-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+  margin-bottom: 20px;
+}
+.process-view-switch button {
+  background: transparent;
+  border-color: transparent;
+}
+.process-view-switch button[aria-pressed="true"] {
+  background: var(--panel);
+  color: var(--accent);
+  border-color: var(--border);
+  box-shadow: var(--shadow-soft);
+}
+.preview-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 22px 0 18px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.preview-list-heading p {
+  margin-top: 5px;
+  font-size: 12px;
+}
+.local-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+.local-preview-card {
+  min-width: 0;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg);
+}
+.local-preview-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.local-preview-heading > div {
+  min-width: 0;
+}
+.local-preview-heading h3 {
+  overflow-wrap: anywhere;
+}
+.local-preview-heading small {
+  display: block;
+  margin-top: 4px;
+}
+.local-preview-site code {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.local-preview-site + .local-preview-site {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--border);
+}
+.local-preview-footer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+  margin-top: 18px;
+}
+.local-preview-footer > details {
+  flex: 1;
+  min-width: 0;
+}
+.local-preview-footer > button {
+  flex-shrink: 0;
+}
+.local-preview-footer summary {
+  padding-left: 0;
+  font-size: 12px;
+}
+.local-preview-footer small {
+  display: block;
+  margin-top: 5px;
+}
+.local-preview-empty {
+  padding: 36px 18px;
+}
 .app-shell {
   background:
     radial-gradient(

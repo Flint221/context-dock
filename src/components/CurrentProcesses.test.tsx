@@ -66,11 +66,103 @@ beforeEach(() => {
   vi.mocked(processes.openStartup).mockResolvedValue();
 });
 afterEach(() => vi.useRealTimers());
-async function ready() {
+async function ready(advanced = true) {
   const view = render(<CurrentProcesses />);
   await screen.findAllByText("node.exe");
+  if (advanced)
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Advanced processes" }));
   return view;
 }
+
+it("defaults to local preview cards and hides system, UDP, database and unrelated listeners", async () => {
+  snapshot.processes.push(
+    app(7, "postgres.exe", {
+      endpoints: [
+        { protocol: "TCP", address: "127.0.0.1", port: 5432, scope: 0 },
+      ],
+    }),
+    app(8, "helper.exe", {
+      endpoints: [
+        { protocol: "TCP", address: "127.0.0.1", port: 58211, scope: 0 },
+      ],
+    }),
+    app(9, "udp-tool.exe", {
+      endpoints: [
+        { protocol: "UDP", address: "127.0.0.1", port: 8080, scope: 0 },
+      ],
+    }),
+  );
+  await ready(false);
+  expect(
+    screen.getByRole("button", { name: "Local previews", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  expect(
+    screen.getByRole("button", {
+      name: "Preview node.exe port 5001 at 127.0.0.1",
+    }),
+  ).toBeEnabled();
+  expect(screen.getByText("http://127.0.0.1:5001/")).toBeInTheDocument();
+  for (const name of ["System", "postgres.exe", "helper.exe", "udp-tool.exe"])
+    expect(screen.queryByText(name)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Protocol")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Inspect startup entries" }),
+  ).not.toBeInTheDocument();
+});
+it("keeps simple bulk stop scoped to visible preview apps and retains stop confirmation", async () => {
+  snapshot.processes.push(
+    app(8, "database.exe", {
+      endpoints: [
+        { protocol: "TCP", address: "127.0.0.1", port: 5432, scope: 0 },
+      ],
+    }),
+  );
+  await ready(false);
+  const user = userEvent.setup();
+  await user.click(
+    screen.getByRole("button", {
+      name: "Preview node.exe port 5001 at 127.0.0.1",
+    }),
+  );
+  expect(processes.preview).toHaveBeenCalledWith(
+    snapshot.processes[0],
+    snapshot.processes[0].endpoints[0],
+    false,
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Stop all previews (2)" }),
+  );
+  const dialog = screen.getByRole("dialog");
+  expect(within(dialog).getAllByRole("listitem")).toHaveLength(2);
+  expect(within(dialog).queryByText(/database.exe/)).not.toBeInTheDocument();
+  expect(processes.stop).not.toHaveBeenCalled();
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(processes.stop).not.toHaveBeenCalled();
+});
+it("switches reversibly to the full list, clears hidden selections, and defaults back after reopening", async () => {
+  const first = await ready(false);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Advanced processes" }));
+  expect(screen.getByText("System")).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("checkbox", { name: "Select node.exe PID 1" }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Local previews", exact: true }),
+  );
+  expect(screen.queryByText("System")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Advanced processes" }));
+  expect(
+    screen.getByRole("button", { name: "Stop selected (0)" }),
+  ).toBeDisabled();
+  first.unmount();
+  await ready(false);
+  expect(
+    screen.getByRole("button", { name: "Local previews", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
 
 it("keeps protected processes visible but excludes them from bulk actions and cancellation does nothing", async () => {
   const user = userEvent.setup();
