@@ -112,6 +112,8 @@ All data is stored locally.
 
 **Click:** Version policy → **Full captured history** → Review cloud changes → verify one addition (Master Context v1) → consent → Confirm. After settling, inspect the same vector store. Optionally switch back to Current version only using another preview/confirmation; expect one removal, then return to Full history for Test 8.
 
+**Important:** Sync Now uses the last confirmed policy; changing the dropdown alone does not save it or authorize historical uploads. Local tracking already keeps immutable historical snapshots in application storage even when source archival is off. Full history reads those snapshots, not copies in Old Context Files.
+
 **Operation/result:** Three completed associations: Master Context v1/v2 and Technical Documentation v1. A retained uploaded File can be reattached without uploading its bytes again. Each association has family/version/hash/current metadata; only the real current version is marked current. The dashboard name is not the identity boundary.
 
 **Failure/recovery:** Silent history uploads before confirmation, foreign families or duplicate mappings indicate failure. If a capture occurs while the confirmation is open, a stale-preview rejection is expected: Cancel and Review again. Reconcile discrepancies; local history is never changed by policy changes.

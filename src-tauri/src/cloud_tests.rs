@@ -443,6 +443,28 @@ fn current_only_replacement_waits_for_completed_indexing() {
     assert_eq!(s(&f.jobs()[0], "state"), "removed");
 }
 #[test]
+fn history_policy_reattaches_a_completed_current_only_replacement() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.edit();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "removed");
+    let old_file = s(&f.jobs()[0], "file_id").to_string();
+    let mut draft = f.draft();
+    draft.mode = "history".into();
+    f.apply(draft);
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    assert_eq!(s(&f.jobs()[0], "file_id"), old_file);
+}
+#[test]
 fn history_mode_keeps_both_versions_and_sets_current_metadata() {
     let mut f = Fixture::new();
     f.enable();
