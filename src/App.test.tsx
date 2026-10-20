@@ -323,12 +323,15 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   await screen.findByText("Document metadata refreshed.");
   await user.click(screen.getByRole("button", { name: "Remove project" }));
   expect(registry.remove).not.toHaveBeenCalled();
+  const snapshotsBeforeRemoval = vi.mocked(registry.snapshot).mock.calls.length;
   await user.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Remove project",
     }),
   );
   await screen.findByText("Add your first project");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(registry.snapshot).toHaveBeenCalledTimes(snapshotsBeforeRemoval + 1);
   expect(registry.remove).toHaveBeenCalledWith("p1", false);
 });
 

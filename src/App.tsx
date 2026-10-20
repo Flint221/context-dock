@@ -354,8 +354,11 @@ export default function App() {
         <RemoveProject
           project={project}
           close={() => setEditing(null)}
-          removed={async () => {
-            await load();
+          removed={(snapshot) => {
+            // Reuse the verified removal readback; an older read must not restore it.
+            readSequence.current += 1;
+            setData(snapshot);
+            setLoaded(true);
             setSelected(null);
             setEditing(null);
             setNotice(
