@@ -12,7 +12,12 @@ import {
 import { Modal } from "./Modal";
 import { date } from "../format";
 import { beginOperation } from "../operations";
-import { verifyCloudAction, verifyCloudDraft } from "../cloudVerification";
+import {
+  verifyCloudAction,
+  verifyCloudDraft,
+  verifyCloudDeleted,
+  cleanupPayload,
+} from "../cloudVerification";
 import { OperationStatus } from "./OperationStatus";
 const initial: Draft = {
   enabled: true,
@@ -23,7 +28,9 @@ const initial: Draft = {
 };
 function savedDraft(view: CloudView): Draft {
   return {
-    enabled: !!view.enabled || view.store_state === "none",
+    enabled:
+      !!view.enabled ||
+      (view.store_state === "none" && view.status !== "cloud_deleted"),
     automatic: !!view.auto_sync,
     mode: view.mode,
     documents: view.families.filter((f) => f.selected).map((f) => f.id),
@@ -172,8 +179,13 @@ export function CloudPanel({
     setStopping(kind);
   }
   async function perform(name: string) {
-    await cloud.action(project, name);
-    verifyCloudAction(await load(), name);
+    if (name === "delete_cloud" && view) {
+      await cloud.action(project, name, cleanupPayload(view));
+      verifyCloudDeleted(await load());
+    } else {
+      await cloud.action(project, name);
+      verifyCloudAction(await load(), name);
+    }
   }
   const action = (name: string) =>
     void run(async () => {
@@ -194,7 +206,7 @@ export function CloudPanel({
     draft.enabled && !view?.started && draft.documents.length === 0;
   const hasChanges =
     !!view &&
-    (draft.enabled !== (!!view.enabled || view.store_state === "none") ||
+    (draft.enabled !== savedDraft(view).enabled ||
       draft.automatic !== !!view.auto_sync ||
       draft.mode !== view.mode ||
       draft.softLimit !== view.soft_limit ||
@@ -476,7 +488,7 @@ export function CloudPanel({
                 disabled={busy}
                 onClick={() => manage("delete_index")}
               >
-                Delete project cloud index
+                Delete project cloud data
               </button>
             )}
             {view.store_state === "deleted" && (
@@ -493,10 +505,12 @@ export function CloudPanel({
             )}
           </div>
           <p>
-            Disconnecting, removing a project or uninstalling ContextDock does
-            not delete remote resources. Automatic replacement detaches old
-            associations only after replacements finish. Uploaded Files are
-            retained until you explicitly delete them separately.
+            Turning off Cloud sync deletes and verifies the project vector store
+            and its uploaded Files. Pause retains cloud data temporarily.
+            Removing a project asks whether to delete or explicitly retain cloud
+            data. Uninstalling the app cannot clean up OpenAI resources.
+            Automatic version replacement retains older uploaded Files until
+            project cleanup.
           </p>
           <details>
             <summary>Recent cloud activity ({view.activity.length})</summary>
@@ -524,11 +538,13 @@ export function CloudPanel({
           />
           <p>
             {stopping === "project"
-              ? "Stop cloud syncing for this project."
+              ? "Turn off Cloud sync and permanently delete this project's vector store and uploaded Files. Re-enabling creates a fresh bucket and re-uploads selected versions. Completion is verified before success."
               : "Turn off automatic cloud sync and pause queued work. You can still use Sync Now for a manual sync."}{" "}
-            No further requests will start after this is saved. An in-flight
-            request may finish. Local tracking continues. Existing cloud files
-            and the index are kept.
+            {stopping === "automatic"
+              ? "Cloud files and the index are kept. "
+              : ""}
+            An in-flight request may finish before cleanup. Local documents,
+            history and chats stay available.
           </p>
           <div className="cloud-actions">
             <button
@@ -536,13 +552,13 @@ export function CloudPanel({
               onClick={() =>
                 void run(async () => {
                   await perform(
-                    stopping === "project" ? "disconnect" : "stop_automatic",
+                    stopping === "project" ? "delete_cloud" : "stop_automatic",
                   );
                   dirty.current = false;
                   setStopping(null);
                   setNotice(
                     stopping === "project"
-                      ? "Cloud syncing stopped."
+                      ? "Project vector store and uploaded Files deleted and verified. Cloud sync is off."
                       : "Automatic syncing stopped. Use Sync Now when you want to sync manually.",
                   );
                 })
@@ -885,7 +901,7 @@ export function CloudPanel({
             <>
               <p>
                 {destruction.action === "delete_index"
-                  ? "Delete this entire project vector store and its associations? Underlying uploaded Files remain for separate cleanup."
+                  ? "Permanently delete this project's entire OpenAI vector store bucket AND its uploaded Files, including older versions? New uploads stop first. Local files, snapshots and chats are kept. Success waits for remote verification. Turning sync on again creates a fresh bucket and re-uploads selected versions."
                   : "Permanently delete this uploaded File from OpenAI? This may affect other resources that use it."}
               </p>
               <label>
@@ -898,6 +914,10 @@ export function CloudPanel({
               </label>
             </>
           )}
+          <OperationStatus
+            busy={busy}
+            message="Deleting cloud data and verifying removal…"
+          />
           {destruction.action === "purge_file" && (
             <label className="cloud-check">
               <input
@@ -934,6 +954,12 @@ export function CloudPanel({
                       noOtherReferences: attestation,
                     },
                   );
+                  if (destruction.action === "delete_index") {
+                    verifyCloudDeleted(await load());
+                    setNotice(
+                      "Project vector store and uploaded Files deleted and verified. Cloud sync is off.",
+                    );
+                  }
                   setDestruction(null);
                 })
               }

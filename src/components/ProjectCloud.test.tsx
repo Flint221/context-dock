@@ -119,9 +119,14 @@ beforeEach(() => {
       view.families[0].selected = 1;
     }
     if (action === "start") connected();
-    if (action === "disconnect") {
+    if (action === "delete_cloud") {
       view.enabled = 0;
       view.paused = 1;
+      view.store_id = null;
+      view.store_state = "none";
+      view.status = "cloud_deleted";
+      view.jobs = [];
+      view.retainedFiles = 0;
     }
     return undefined as never;
   });
@@ -208,7 +213,7 @@ it("cancel restores the actual switch and turning off blocks new questions", asy
     within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
   );
   expect(toggle).toBeChecked();
-  expect(cloud.action).not.toHaveBeenCalledWith("p1", "disconnect");
+  expect(cloud.action).not.toHaveBeenCalledWith("p1", "delete_cloud");
   await user.click(toggle);
   await user.click(
     within(screen.getByRole("dialog")).getByRole("button", {
@@ -319,10 +324,15 @@ it("locks repeated confirmations until the backend state has been read back", as
   });
   const normal = vi.mocked(cloud.action).getMockImplementation()!;
   vi.mocked(cloud.action).mockImplementation(async (p, a, data) => {
-    if (a === "disconnect") {
+    if (a === "delete_cloud") {
       await pendingAction;
       view.enabled = 0;
       view.paused = 1;
+      view.store_id = null;
+      view.store_state = "none";
+      view.status = "cloud_deleted";
+      view.jobs = [];
+      view.retainedFiles = 0;
       verifying = true;
       return undefined as never;
     }
@@ -344,7 +354,7 @@ it("locks repeated confirmations until the backend state has been read back", as
     fireEvent.click(confirm);
   });
   expect(
-    vi.mocked(cloud.action).mock.calls.filter((c) => c[1] === "disconnect"),
+    vi.mocked(cloud.action).mock.calls.filter((c) => c[1] === "delete_cloud"),
   ).toHaveLength(1);
   expect(toggle).toBeDisabled();
   expect(confirm).toBeDisabled();
@@ -472,4 +482,52 @@ it("Enter sends a new chat, Shift+Enter adds a line, and composition Enter does 
   expect(
     vi.mocked(chat.action).mock.calls.filter((c) => c[1] === "send"),
   ).toHaveLength(1);
+});
+
+it("shows incomplete cloud deletion as cleanup needed and offers a verified retry", async () => {
+  connected();
+  const user = userEvent.setup();
+  let failed = true;
+  vi.mocked(cloud.action).mockImplementation(async (_p, action) => {
+    if (action === "delete_cloud") {
+      if (failed) {
+        view.paused = 1;
+        view.status = "cleanup_failed";
+        view.error = "Network interrupted; cloud deletion incomplete.";
+        throw new Error(view.error);
+      }
+      view.enabled = 0;
+      view.paused = 1;
+      view.store_id = null;
+      view.store_state = "none";
+      view.status = "cloud_deleted";
+      view.retainedFiles = 0;
+      view.jobs = [];
+      view.error = null;
+    }
+    return undefined as never;
+  });
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  await user.click(toggle);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off Cloud sync",
+    }),
+  );
+  expect(
+    await screen.findByText("Cloud deletion incomplete · Retry cleanup"),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText("Off · Local version history"),
+  ).not.toBeInTheDocument();
+  expect(toggle).toBeDisabled();
+  failed = false;
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off Cloud sync",
+    }),
+  );
+  await screen.findByText("Off · Local version history");
 });

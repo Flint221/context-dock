@@ -61,10 +61,6 @@ export function ProjectDetails({
               <Pencil size={16} />
               Rename
             </button>
-            <button className="danger" disabled={busy} onClick={remove}>
-              <Trash2 size={16} />
-              Remove
-            </button>
           </div>
         </section>
       </details>
@@ -76,6 +72,9 @@ export function ProjectDetails({
       )}
       <div className="refresh-row">
         <span className={`badge ${project.status}`}>{project.status}</span>
+        <button className="danger" disabled={busy} onClick={remove}>
+          <Trash2 size={16} /> Remove project
+        </button>
         <button disabled={busy} onClick={refresh}>
           <RefreshCw size={16} />
           Refresh documents

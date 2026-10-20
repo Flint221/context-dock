@@ -4,7 +4,13 @@ import { CloudPanel } from "./CloudPanel";
 import { ProjectChat } from "./ProjectChat";
 import { Modal } from "./Modal";
 import { beginOperation } from "../operations";
-import { verifyCloudAction, verifyCloudDraft } from "../cloudVerification";
+import {
+  verifyCloudAction,
+  verifyCloudDraft,
+  verifyCloudDeleted,
+  cleanupPayload,
+  hasCloudData,
+} from "../cloudVerification";
 import { OperationStatus } from "./OperationStatus";
 
 export function ProjectCloud({ project }: { project: string }) {
@@ -72,6 +78,9 @@ export function ProjectCloud({ project }: { project: string }) {
     }
   }
   const enabled = !!view?.enabled && !view.paused;
+  const cleanupNeeded =
+    !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
+  const retained = !!view && !enabled && hasCloudData(view);
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
   const ready =
     enabled &&
@@ -121,11 +130,15 @@ export function ProjectCloud({ project }: { project: string }) {
                 ? busy
                   ? "Checking cloud status…"
                   : "Cloud status unavailable · Refresh status"
-                : enabled
-                  ? ready
-                    ? "On · Documents ready for questions"
-                    : "On · Preparing your documents"
-                  : "Off · Local version history"}
+                : cleanupNeeded
+                  ? "Cloud deletion incomplete · Retry cleanup"
+                  : retained
+                    ? "Paused · Cloud data retained"
+                    : enabled
+                      ? ready
+                        ? "On · Documents ready for questions"
+                        : "On · Preparing your documents"
+                      : "Off · Local version history"}
             </p>
           </div>
           <label className="cloud-check cloud-switch">
@@ -135,7 +148,13 @@ export function ProjectCloud({ project }: { project: string }) {
               aria-label="Cloud sync"
               checked={enabled}
               disabled={
-                busy || advancedBusy || !!setup || stop || !view || !stateKnown
+                busy ||
+                advancedBusy ||
+                !!setup ||
+                stop ||
+                !view ||
+                !stateKnown ||
+                cleanupNeeded
               }
               aria-busy={busy}
               onChange={(e) => {
@@ -149,19 +168,25 @@ export function ProjectCloud({ project }: { project: string }) {
                 : "Unknown"
               : enabled
                 ? "On"
-                : "Off"}
+                : cleanupNeeded
+                  ? "Cleanup needed"
+                  : retained
+                    ? "Paused"
+                    : "Off"}
           </label>
         </div>
         <p>
           {enabled
             ? "Your selected documents sync to OpenAI. Ask project uses their current indexed versions."
-            : "Your documents and version history stay on this computer. Turn on Cloud sync to ask AI questions."}
+            : retained
+              ? "Cloud data is still retained. Delete it below to fully turn off Cloud sync; local history and chats stay available."
+              : "Your documents and version history stay on this computer. Turn on Cloud sync to ask AI questions."}
         </p>
         {view && view.connectionStatus !== "connected" && (
           <p>First, open Settings → OpenAI connection → Save and test key.</p>
         )}
         {error && !setup && !stop && <p role="alert">{error}</p>}
-        {enabled && view?.error && <p role="alert">{view.error}</p>}
+        {view?.error && <p role="alert">{view.error}</p>}
         <OperationStatus
           busy={busy || advancedBusy}
           message="Saving and checking cloud status…"
@@ -174,6 +199,15 @@ export function ProjectCloud({ project }: { project: string }) {
           >
             Refresh status
           </button>
+          {retained && (
+            <button
+              className="danger"
+              disabled={busy || advancedBusy || !stateKnown}
+              onClick={() => setStop(true)}
+            >
+              Delete cloud data
+            </button>
+          )}
           {enabled && (
             <button
               disabled={busy || advancedBusy}
@@ -315,14 +349,18 @@ export function ProjectCloud({ project }: { project: string }) {
           }}
         >
           <p>
-            Stop new uploads and AI requests for this project. Local version
-            history and saved chats stay available. Cloud files remain online;
-            an already-sent request may finish.
+            Permanently delete <strong>{view?.store_name}</strong>, its vector
+            store, and all uploaded Files belonging to this project from OpenAI.
+            New uploads and AI questions stop first. Local documents, snapshots,
+            version history and chats stay available. Turning sync on again
+            creates a fresh bucket and re-uploads your selected versions. This
+            waits for remote deletion verification; a failed cleanup remains
+            visible for retry.
           </p>
           {error && <p role="alert">{error}</p>}
           <OperationStatus
             busy={busy}
-            message="Turning off Cloud sync and checking the saved state…"
+            message="Deleting cloud data and checking the saved state…"
           />
           <div className="toolbar-actions">
             <button
@@ -331,12 +369,22 @@ export function ProjectCloud({ project }: { project: string }) {
               onClick={() =>
                 void run(async () => {
                   setStateKnown(false);
-                  await cloud.action(project, "disconnect");
-                  verifyCloudAction(await load(), "disconnect");
+                  if (!view) return;
+                  try {
+                    await cloud.action(
+                      project,
+                      "delete_cloud",
+                      cleanupPayload(view),
+                    );
+                    verifyCloudDeleted(await load());
+                  } catch (e) {
+                    await load().catch(() => {});
+                    throw e;
+                  }
                   if (alive.current) {
                     setStop(false);
                     setNotice(
-                      "Cloud sync is off — confirmed. Local history and saved chats remain available.",
+                      "Cloud sync is off — confirmed. Project vector store and uploaded Files deleted and verified. Local history and saved chats remain available.",
                     );
                   }
                 })

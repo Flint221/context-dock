@@ -164,8 +164,10 @@ export function OpenAIConnection() {
         >
           <p>
             Remove the saved key and stop new OpenAI requests for all projects.
-            Local history and chats are kept. Existing cloud files remain
-            online, and an already-sent request may finish.
+            Local history and chats are kept. First turn off Cloud sync and
+            finish cloud deletion for active projects. Data explicitly retained
+            when removing a project remains online until you delete it
+            separately.
           </p>
           <OperationStatus
             busy={busy}
@@ -179,7 +181,7 @@ export function OpenAIConnection() {
               onClick={() => {
                 void run(
                   () => cloud.action(null, "disconnect_key"),
-                  "OpenAI disconnected — confirmed. Saved key removed; remote files and indexes remain in OpenAI.",
+                  "OpenAI disconnected — confirmed. Saved key removed. Any cloud data explicitly retained when removing projects remains in OpenAI.",
                   (next) => !next.saved && next.status === "disconnected",
                 ).then((ok) => {
                   if (ok && alive.current) setDisconnecting(false);

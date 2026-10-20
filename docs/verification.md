@@ -1,3 +1,13 @@
+# Verification — ContextDock 0.5.4 cloud erasure and project removal
+
+October 20: **131 native tests** and **63 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production assets and Windows x64 NSIS packaging pass. The unsigned installer is `src-tauri/target/release/bundle/nsis/ContextDock_0.5.4_x64-setup.exe`, **4,268,411 bytes**. Application identity and schema 005 are unchanged. The agent did not install it or perform authenticated/destructive acceptance against user cloud data.
+
+Eight new native regressions verify actual mocked bucket+File deletion, fresh upload after re-enable, false deletion acknowledgements retaining IDs, lost upload/delete responses and explicit retry, shared references, hash/ownership/key-scope/confirmation refusals, native retain/delete registration choice, failed local completion rollback and global key-disconnect rejection before vault access. Five new UI regressions cover the visible removal dialog's default deletion/explicit retention, duplicate click guard through cleanup/readback, failed cleanup blocking registration removal, retry after cleanup succeeds but local removal fails, and cleanup-needed status rather than false Off. Existing streaming/context/history suites pass.
+
+Cleanup uses only synthetic resource inventories and disposable SQLite/source fixtures. No API key, user upload, real provider bucket or saved local chat was changed by agent tests. Local tests verify the intended DELETE calls, acknowledgement/absence handling and persistence; installed live-account deletion remains user acceptance. The updated manual test guide covers disposable cloud cleanup, cancellation, interruption/restart, re-enable and explicit retention. Earlier verification sections are historical behavior for their named versions.
+
+---
+
 # Verification — ContextDock 0.5.3 streamed chat
 
 October 20: **123 Rust tests** and **58 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production build and Windows x64 NSIS packaging pass. New native tests cover progressive decoded JSON text, escaped quotes/newlines/Unicode, CRLF SSE frames, completion usage, interrupted/failed/incomplete/malformed/oversized streams and split credential suppression. Chat provenance tests verify original source filenames. UI tests cover provisional text followed by the completed reply, ignored late callbacks, filename-only sources, Enter on the first chat, Shift+Enter and IME composition.

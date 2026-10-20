@@ -110,9 +110,24 @@ impl Registry {
             .map_err(error)?;
         Ok(())
     }
+    #[cfg(test)]
     pub fn remove(&self, id: &str) -> Result<()> {
+        self.remove_with_cloud_choice(id, true)
+    }
+    pub fn remove_with_cloud_choice(&self, id: &str, retain_cloud: bool) -> Result<()> {
         // Tombstone the registration: captured history and bytes can be recovered by registering the same root again.
-        self.db.execute("UPDATE projects SET removed_at=?1,tracking_enabled=0,archive_enabled=0,watch_status='off' WHERE id=?2",params![models::now(),id]).map_err(error)?;
+        let tx = self.db.unchecked_transaction().map_err(error)?;
+        let p = crate::cloud::project(&tx, id)?;
+        if !retain_cloud && crate::cloud_cleanup::has_remote(&tx, &p)? {
+            return Err("Delete and verify this project's cloud data first, or explicitly choose to retain it.".into());
+        }
+        tx.execute("UPDATE cloud_projects SET enabled=0,paused=1,sync_requested=0,delete_requested=0,auto_sync=0,status='removed_registration',revision=revision+1 WHERE project_id=?1",[id]).map_err(error)?;
+        tx.execute("UPDATE projects SET removed_at=?1,tracking_enabled=0,archive_enabled=0,watch_status='off' WHERE id=?2",params![models::now(),id]).map_err(error)?;
+        let removed: i64=tx.query_row("SELECT COUNT(*) FROM projects WHERE id=?1 AND removed_at IS NOT NULL AND tracking_enabled=0",[id],|r|r.get(0)).map_err(error)?;
+        if removed != 1 {
+            return Err("Project removal could not be verified.".into());
+        }
+        tx.commit().map_err(error)?;
         Ok(())
     }
     pub fn refresh(&mut self, id: &str) -> Result<()> {

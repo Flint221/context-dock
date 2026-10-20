@@ -33,3 +33,34 @@ export function verifyCloudAction(view: CloudView, action: string) {
       "The backend did not confirm the requested cloud action. Refresh status and try again.",
     );
 }
+
+export function hasCloudData(view: CloudView) {
+  return (
+    !!view.store_id ||
+    view.retainedFiles > 0 ||
+    ["pending", "creating", "linked", "deleted"].includes(view.store_state) ||
+    view.jobs.length > 0
+  );
+}
+export function cleanupPayload(view: CloudView) {
+  return {
+    confirm: true,
+    confirmation: view.store_name ?? "",
+    storeId: view.store_id,
+  };
+}
+export function verifyCloudDeleted(view: CloudView) {
+  if (
+    view.enabled ||
+    !view.paused ||
+    view.store_id ||
+    view.retainedFiles ||
+    view.jobs.length ||
+    view.store_state !== "none" ||
+    view.status !== "cloud_deleted"
+  ) {
+    throw new Error(
+      "The backend did not confirm cloud deletion. Refresh status and retry cleanup; cloud resources may remain.",
+    );
+  }
+}

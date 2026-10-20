@@ -2,7 +2,7 @@
 use crate::{
     cloud::{self, n, s},
     cloud_api::{self, ApiError, CloudApi},
-    cloud_commands,
+    cloud_cleanup, cloud_commands,
     cloud_models::CloudDraft,
     cloud_sync,
     registry::Registry,
@@ -19,6 +19,9 @@ struct Remote {
     calls: Vec<String>,
     fail: Option<ApiError>,
     processing: bool,
+    ignore_store_delete: bool,
+    shared_file: bool,
+    lose_file_delete_reply: bool,
 }
 #[derive(Default)]
 struct Mock(RefCell<Remote>);
@@ -35,7 +38,11 @@ impl CloudApi for Mock {
             return Err(e);
         }
         if path.starts_with("/vector_stores?") {
-            return Ok(json!({"data":r.store.iter().collect::<Vec<_>>(),"has_more":false}));
+            let mut stores = r.store.iter().cloned().collect::<Vec<_>>();
+            if r.shared_file {
+                stores.push(json!({"id":"vs_other","metadata":{}}));
+            }
+            return Ok(json!({"data":stores,"has_more":false}));
         }
         if path.starts_with("/files?") {
             return Ok(
@@ -52,10 +59,15 @@ impl CloudApi for Mock {
         }
         if path == "/vector_stores/vs_test" {
             if method == "DELETE" {
-                r.store = None;
+                if !r.ignore_store_delete {
+                    r.store = None;
+                }
                 return Ok(json!({"deleted":true}));
             }
             return r.store.clone().ok_or_else(missing);
+        }
+        if path.starts_with("/vector_stores/vs_other/files?") {
+            return Ok(json!({"data":r.associations,"has_more":false}));
         }
         if path.starts_with("/vector_stores/vs_test/files?") {
             return Ok(json!({"data":r.associations,"has_more":false}));
@@ -92,6 +104,16 @@ impl CloudApi for Mock {
                 .ok_or_else(missing)?;
             if method == "DELETE" {
                 r.files.remove(index);
+                if r.lose_file_delete_reply {
+                    r.lose_file_delete_reply = false;
+                    return Err(ApiError {
+                        message: "Synthetic lost delete response".into(),
+                        ambiguous: true,
+                        retry: false,
+                        missing: false,
+                        delay: 0,
+                    });
+                }
                 return Ok(json!({"deleted":true}));
             }
             return Ok(r.files[index].0.clone());
@@ -287,14 +309,25 @@ fn toggle_commands_reject_a_database_write_that_did_not_save_the_requested_state
     let mut f = Fixture::new();
     f.enable();
     f.r.db.execute_batch("CREATE TRIGGER reject_cloud_off AFTER UPDATE OF enabled ON cloud_projects WHEN NEW.enabled=0 BEGIN UPDATE cloud_projects SET enabled=1 WHERE project_id=NEW.project_id; END;").unwrap();
-    let err = cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({}))
-        .unwrap_err();
+    let err = cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "disconnect",
+        &json!({"retainCloud":true}),
+    )
+    .unwrap_err();
     assert!(err.contains("verification failed"));
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 1);
     f.r.db
         .execute_batch("DROP TRIGGER reject_cloud_off;")
         .unwrap();
-    cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).unwrap();
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "disconnect",
+        &json!({"retainCloud":true}),
+    )
+    .unwrap();
     cloud::verify_flags(&f.r.db, &f.id, &[("enabled", 0), ("paused", 1)]).unwrap();
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
 }
@@ -718,7 +751,13 @@ fn disconnect_and_unregister_do_not_delete_remote_resources() {
     f.enable();
     let api = Mock::default();
     f.sync(&api);
-    cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).unwrap();
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "disconnect",
+        &json!({"retainCloud":true}),
+    )
+    .unwrap();
     let count = api.0.borrow().calls.len();
     f.step(&api);
     assert_eq!(api.0.borrow().calls.len(), count);
@@ -977,7 +1016,13 @@ fn confirmed_stop_controls_block_queued_work_without_credentials_and_keep_histor
             .execute("UPDATE cloud_connection SET status='disconnected'", [])
             .unwrap();
         let before = api.0.borrow().calls.len();
-        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), action, &json!({})).unwrap();
+        cloud_commands::action_impl(
+            &mut f.r.db,
+            Some(&f.id),
+            action,
+            &json!({"retainCloud":true}),
+        )
+        .unwrap();
         let project = cloud::project(&f.r.db, &f.id).unwrap();
         assert_eq!(n(&project, "paused"), 1);
         assert_eq!(n(&project, "delete_requested"), 0);
@@ -1078,7 +1123,13 @@ fn explicit_association_cleanup_works_while_cloud_sync_is_disconnected() {
     let api = Mock::default();
     f.sync(&api);
     let job = f.jobs().remove(0);
-    cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).unwrap();
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "disconnect",
+        &json!({"retainCloud":true}),
+    )
+    .unwrap();
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -1132,4 +1183,207 @@ fn untested_connection_is_reported_before_consent_without_remote_requests() {
     let view = cloud::view(&f.r.db, &f.id).unwrap();
     assert_eq!(view["connectionStatus"], "untested");
     assert_eq!(view["enabled"], 0);
+}
+
+fn cleanup_confirm(f: &Fixture) -> Value {
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]})
+}
+#[test]
+fn explicit_cloud_cleanup_deletes_bucket_and_uploads_then_reenable_uploads_fresh() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    let chat = crate::chat::create(&f.r, &f.id).unwrap();
+    let old_file = f.jobs()[0]["file_id"].clone();
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    let result = cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert_eq!(
+        result,
+        json!({"storesDeleted":1,"filesDeleted":1,"verified":true})
+    );
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+    assert!(f.jobs().is_empty());
+    assert!(!cloud::rows(
+        &f.r.db,
+        "SELECT id FROM document_versions WHERE document_id=?1",
+        &[&f.doc]
+    )
+    .unwrap()
+    .is_empty());
+    assert!(crate::chat::get(&f.r, &f.id, s(&chat, "id")).is_ok());
+    assert!(f.root.join("Master_Context.md").exists());
+    f.enable();
+    f.sync(&api);
+    assert!(api.0.borrow().store.is_some());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(f.jobs()[0]["state"], "indexed");
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|c| *c == "UPLOAD")
+            .count(),
+        2
+    );
+    assert!(!old_file.is_null());
+}
+#[test]
+fn acknowledged_but_unfinished_cloud_deletion_retains_references_and_can_retry() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    api.0.borrow_mut().ignore_store_delete = true;
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound")
+        .unwrap_err()
+        .contains("still reports"));
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(p["status"], "cleanup_failed");
+    assert_eq!(p["paused"], 1);
+    assert!(!p["store_id"].is_null());
+    assert!(!f.jobs()[0]["file_id"].is_null());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "resume", &json!({})).is_err());
+    api.0.borrow_mut().ignore_store_delete = false;
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert!(api.0.borrow().files.is_empty());
+}
+#[test]
+fn cleanup_checks_shared_references_integrity_scope_and_confirmation_before_deleting() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    assert!(cloud_cleanup::begin(&f.r.db, &f.id, &json!({"confirm":false})).is_err());
+    assert_eq!(cloud::project(&f.r.db, &f.id).unwrap()["paused"], 0);
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "another-key").is_err());
+    api.0.borrow_mut().shared_file = true;
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound")
+        .unwrap_err()
+        .contains("Another vector store"));
+    assert!(!api.0.borrow().calls.iter().any(|c| c.starts_with("DELETE")));
+    api.0.borrow_mut().shared_file = false;
+    api.0.borrow_mut().files[0].1 = b"tampered".to_vec();
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound")
+        .unwrap_err()
+        .contains("integrity"));
+    assert!(!api.0.borrow().calls.iter().any(|c| c.starts_with("DELETE")));
+}
+#[test]
+fn cleanup_recovers_lost_upload_identity_and_verifies_missing_bucket_before_reset() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET file_id=NULL,state='uncertain' WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    // The app lost the upload acknowledgement, but the original exact job filename is recoverable.
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert!(api.0.borrow().files.is_empty());
+    assert!(api.0.borrow().store.is_none());
+}
+
+#[test]
+fn interrupted_file_deletion_is_reconciled_on_explicit_retry_without_losing_ids() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    api.0.borrow_mut().lose_file_delete_reply = true;
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").is_err());
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+    assert!(!f.jobs()[0]["file_id"].is_null());
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert!(f.jobs().is_empty());
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|s| s.starts_with("DELETE /files/"))
+            .count(),
+        1
+    );
+}
+#[test]
+fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local_history() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    assert!(f.r.remove_with_cloud_choice(&f.id, false).is_err());
+    assert!(
+        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).is_err()
+    );
+    f.r.remove_with_cloud_choice(&f.id, true).unwrap();
+    assert!(f.r.snapshot().unwrap().projects.is_empty());
+    assert!(api.0.borrow().store.is_some());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    let restored = f.r.add("Restored", f.root.to_str().unwrap()).unwrap();
+    assert_eq!(restored, f.id);
+    assert!(!f.r.snapshot().unwrap().projects[0].tracking_enabled);
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    f.r.remove_with_cloud_choice(&f.id, false).unwrap();
+    assert!(api.0.borrow().store.is_none());
+    assert!(f.root.join("Master_Context.md").exists());
+    assert_eq!(
+        cloud::rows(
+            &f.r.db,
+            "SELECT id FROM document_versions WHERE document_id=?1",
+            &[&f.doc]
+        )
+        .unwrap()
+        .len(),
+        1
+    );
+}
+#[test]
+fn cleanup_completion_rolls_back_if_saved_resource_references_do_not_clear() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    f.r.db.execute_batch("CREATE TRIGGER ignore_cleanup AFTER UPDATE OF store_id ON cloud_projects WHEN NEW.store_id IS NULL BEGIN UPDATE cloud_projects SET store_id=OLD.store_id WHERE project_id=NEW.project_id; END;").unwrap();
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").is_err());
+    assert!(!f.jobs().is_empty());
+    assert!(!cloud::project(&f.r.db, &f.id).unwrap()["store_id"].is_null());
+    f.r.db
+        .execute_batch("DROP TRIGGER ignore_cleanup;")
+        .unwrap();
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+}
+
+#[test]
+fn disconnect_key_requires_active_project_cleanup_before_any_vault_access() {
+    let mut f = Fixture::new();
+    f.enable();
+    assert!(
+        cloud_commands::action_impl(&mut f.r.db, None, "disconnect_key", &json!({}))
+            .unwrap_err()
+            .contains("Delete cloud data")
+    );
+    assert_eq!(
+        cloud::rows(&f.r.db, "SELECT status FROM cloud_connection", &[]).unwrap()[0]["status"],
+        "connected"
+    );
 }

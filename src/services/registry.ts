@@ -35,7 +35,8 @@ export const registry = {
     invoke<string>("add_project", { name, path }),
   rename: (id: string, name: string) =>
     invoke<void>("rename_project", { id, name }),
-  remove: (id: string) => invoke<void>("remove_project", { id }),
+  remove: (id: string, retainCloud = false) =>
+    invoke<void>("remove_project", { id, retainCloud }),
   refresh: (id: string) => invoke<void>("refresh_project", { id }),
   open: (id: string) => invoke<void>("open_project", { id }),
   theme: (theme: Theme) => invoke<void>("set_theme", { theme }),

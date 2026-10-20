@@ -199,7 +199,7 @@ it("opens review immediately when a saved document selection changes", async () 
   expect(screen.getByLabelText(/Master Context/)).toBeChecked();
   expect(cloud.action).toHaveBeenCalledTimes(1);
 });
-it("asks to stop immediately without a key and persists the stopped checkbox only on confirmation", async () => {
+it("asks to delete cloud data immediately and persists Off only after verified cleanup", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
   view.started = 1;
@@ -208,6 +208,11 @@ it("asks to stop immediately without a key and persists the stopped checkbox onl
   vi.mocked(cloud.action).mockImplementation(async () => {
     view.enabled = 0;
     view.paused = 1;
+    view.store_id = null;
+    view.store_state = "none";
+    view.status = "cloud_deleted";
+    view.jobs = [];
+    view.retainedFiles = 0;
     return undefined as never;
   });
   render(<CloudPanel project="p1" />);
@@ -224,7 +229,11 @@ it("asks to stop immediately without a key and persists the stopped checkbox onl
   modal = screen.getByRole("dialog");
   await user.click(within(modal).getByRole("button", { name: "Stop syncing" }));
   await waitFor(() => expect(enable).not.toBeChecked());
-  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "disconnect");
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith(
+    "p1",
+    "delete_cloud",
+    expect.objectContaining({ confirm: true }),
+  );
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sync Now" })).toBeDisabled();
 });
@@ -531,7 +540,7 @@ it("shows remote deletion confirmation without issuing deletion when cancelled",
   view.store_state = "linked";
   render(<CloudPanel project="p1" />);
   await user.click(
-    await screen.findByRole("button", { name: "Delete project cloud index" }),
+    await screen.findByRole("button", { name: "Delete project cloud data" }),
   );
   const modal = screen.getByRole("dialog");
   expect(
@@ -548,7 +557,7 @@ it("confirms index deletion with its displayed name while sending the target ID 
   view.store_name = "ContextDock - Project Ω";
   render(<CloudPanel project="p1" />);
   await user.click(
-    await screen.findByRole("button", { name: "Delete project cloud index" }),
+    await screen.findByRole("button", { name: "Delete project cloud data" }),
   );
   const modal = screen.getByRole("dialog");
   const input = within(modal).getByLabelText(
