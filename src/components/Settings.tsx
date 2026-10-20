@@ -37,7 +37,7 @@ export function SettingsView({
         <ShieldCheck size={23} />
         <div>
           <h2>About ContextDock</h2>
-          <p>Version {version} · Milestone 4</p>
+          <p>Version {version} · Milestone 5</p>
           <p>
             Discovery reads file metadata. Opt-in tracking captures immutable
             local snapshots. Separately enabled archival preserves older sources
@@ -47,8 +47,10 @@ export function SettingsView({
             Registrations, history and preferences use per-user SQLite storage.
             Snapshot bytes remain in application data across upgrades and
             project removal. Monitoring operates only while ContextDock is
-            running. No telemetry. Optional OpenAI indexing requires a saved
-            key, project selection and explicit upload consent.
+            running. Chats are also saved locally in the app database. Cloud
+            sync enables OpenAI uploads and project questions; turning it off
+            blocks new AI requests and keeps local history available. No
+            telemetry.
           </p>
         </div>
       </section>

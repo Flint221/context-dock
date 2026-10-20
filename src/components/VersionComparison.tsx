@@ -52,17 +52,23 @@ export function VersionComparison({
   documentId,
   versions,
   back,
+  initialPair,
+  analyze,
 }: {
   documentId: string;
   versions: Version[];
   back: () => void;
+  initialPair?: [string, string];
+  analyze?: (pair: [string, string]) => void;
 }) {
   const ordered = useMemo(
     () => [...versions].sort((a, b) => b.number - a.number),
     [versions],
   );
-  const [left, setLeft] = useState(ordered[1]?.id || ordered[0]?.id || "");
-  const [right, setRight] = useState(ordered[0]?.id || "");
+  const [left, setLeft] = useState(
+    initialPair?.[0] ?? ordered[1]?.id ?? ordered[0]?.id ?? "",
+  );
+  const [right, setRight] = useState(initialPair?.[1] ?? ordered[0]?.id ?? "");
   const [request, setRequest] = useState<{
     left: string;
     right: string;
@@ -185,6 +191,14 @@ export function VersionComparison({
         Local snapshot comparison. Earlier capture on the left, later on the
         right. No AI analysis.
       </p>
+      {analyze && (
+        <button
+          disabled={loading || !left || !right || left === right}
+          onClick={() => analyze([left, right])}
+        >
+          Analyze These Changes with AI · paid preview
+        </button>
+      )}
       <div className="comparison-selectors">
         <label>
           Earlier version

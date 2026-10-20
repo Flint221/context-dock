@@ -1,5 +1,17 @@
+mod ai;
+mod ai_commands;
+mod ai_inference;
+mod ai_models;
+#[cfg(test)]
+mod ai_tests;
+mod chat;
+mod chat_commands;
+mod chat_stream;
+#[cfg(test)]
+mod chat_tests;
 mod cloud;
 mod cloud_api;
+mod cloud_cleanup;
 mod cloud_commands;
 mod cloud_credentials;
 mod cloud_models;
@@ -69,8 +81,15 @@ async fn rename_project(
     work(state.inner().clone(), move |r| r.rename(&id, &name)).await
 }
 #[tauri::command]
-async fn remove_project(state: tauri::State<'_, Store>, id: String) -> Result<(), String> {
-    work(state.inner().clone(), move |r| r.remove(&id)).await
+async fn remove_project(
+    state: tauri::State<'_, Store>,
+    id: String,
+    retain_cloud: bool,
+) -> Result<(), String> {
+    work(state.inner().clone(), move |r| {
+        r.remove_with_cloud_choice(&id, retain_cloud)
+    })
+    .await
 }
 #[tauri::command]
 async fn refresh_project(state: tauri::State<'_, Store>, id: String) -> Result<(), String> {
@@ -253,6 +272,10 @@ pub fn run() {
                 Registry::open(&dir.join("contextdock.db")).map_err(std::io::Error::other)?,
             ));
             app.manage(Store(registry.clone()));
+            app.manage(
+                ai_commands::Runtime::new(dir.join("contextdock.db"))
+                    .map_err(std::io::Error::other)?,
+            );
             app.manage(cloud_commands::CloudRuntime::start(
                 dir.join("contextdock.db"),
                 app.handle().clone(),
@@ -265,6 +288,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            ai_commands::ai_action,
+            chat_commands::chat_action,
             cloud_commands::cloud_read,
             cloud_commands::cloud_link,
             cloud_commands::cloud_key,

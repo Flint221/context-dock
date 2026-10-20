@@ -1,7 +1,7 @@
 use crate::{
     cloud::{self, n, s},
     cloud_api::{self, CloudApi, OpenAi},
-    cloud_credentials,
+    cloud_cleanup, cloud_credentials,
     cloud_models::CloudDraft,
     cloud_sync,
     registry::{error, Result},
@@ -24,6 +24,7 @@ pub struct ProjectApi<'a> {
     project: String,
     scope: String,
     stop: Arc<AtomicBool>,
+    cleanup: bool,
 }
 impl<'a> ProjectApi<'a> {
     pub fn new(
@@ -39,10 +40,11 @@ impl<'a> ProjectApi<'a> {
             project: project.into(),
             scope: scope.into(),
             stop,
+            cleanup: false,
         })
     }
     fn check(&self) -> std::result::Result<(), cloud_api::ApiError> {
-        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND (c.paused=0 OR c.delete_requested=1) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
+        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND ((?3=0 AND (c.paused=0 OR c.delete_requested=1)) OR (?3=1 AND c.paused=1 AND c.status='cleanup_pending')) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope,self.cleanup as i64],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
         if active != 1 || self.stop.load(Ordering::Relaxed) {
             return Err(cloud_api::ApiError::local(
                 "Cloud sync paused, disconnected or stopped before the next request.",
@@ -59,6 +61,11 @@ impl CloudApi for ProjectApi<'_> {
         body: Option<Value>,
     ) -> std::result::Result<Value, cloud_api::ApiError> {
         self.check()?;
+        if self.cleanup && !["GET", "DELETE"].contains(&method) {
+            return Err(cloud_api::ApiError::local(
+                "Cleanup cannot upload or create resources.",
+            ));
+        }
         self.api.request(method, path, body)
     }
     fn upload(
@@ -291,6 +298,32 @@ pub async fn cloud_action(
     let path = state.path.clone();
     let gate = state.gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        if ["delete_cloud", "delete_index"].contains(&action.as_str()) {
+            let id = project.as_deref().ok_or("Select a project.")?;
+            let mut db = cloud::connect(&path)?;
+            if action == "delete_index" { validate_index_deletion(&cloud::project(&db,id)?, &payload)?; }
+            cloud_cleanup::begin(&db, id, &payload)?;
+            let generation = n(&cloud::project(&db,id)?, "revision");
+            // Persist stop first, then drain any in-flight upload before inventory/deletion.
+            let _guard = gate.lock().map_err(|_| "Cloud worker unavailable.")?;
+            let result = (|| {
+                let p = cloud::project(&db,id)?;
+                if n(&p,"revision") != generation || s(&p,"status") != "cleanup_pending" {
+                    return Err("Cloud state changed while waiting for uploads to stop. Review and retry deletion.".into());
+                }
+                if !cloud_cleanup::has_remote(&db,&p)? {
+                    return cloud_cleanup::finish(&mut db,id,json!({"storesDeleted":0,"filesDeleted":0,"verified":true}));
+                }
+                let (api,scope) = current_api(&db)?;
+                let mut guarded = ProjectApi::new(&api,&path,id,&scope,Arc::new(AtomicBool::new(false)))?;
+                guarded.cleanup = true;
+                cloud_cleanup::run(&mut db,id,&guarded,&scope)
+            })();
+            if let Err(message) = &result {
+                db.execute("UPDATE cloud_projects SET status='cleanup_failed',error=?2 WHERE project_id=?1 AND revision=?3",params![id,format!("Cloud deletion incomplete. References retained for retry. {message}"),generation]).map_err(error)?;
+            }
+            return result;
+        }
         let _guard = if ["pause", "disconnect", "disconnect_key", "stop_automatic"]
             .contains(&action.as_str())
         {
@@ -322,6 +355,10 @@ pub fn action_impl(
     payload: &Value,
 ) -> Result<Value> {
     if action == "disconnect_key" {
+        let active:i64=db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE p.removed_at IS NULL AND (c.store_id IS NOT NULL OR c.store_op IS NOT NULL OR EXISTS(SELECT 1 FROM cloud_jobs j WHERE j.project_id=c.project_id))",[],|r|r.get(0)).map_err(error)?;
+        if active != 0 {
+            return Err("Delete cloud data for your active projects before disconnecting OpenAI. Turn off each project's Cloud sync and complete cleanup first, or remove the project with an explicit keep-cloud-data choice.".into());
+        }
         db.execute(
             "UPDATE cloud_connection SET status='disconnected',error=NULL",
             [],
@@ -329,6 +366,21 @@ pub fn action_impl(
         .map_err(error)?;
         db.execute("UPDATE cloud_projects SET status='key_disconnected',error='Reconnect and test an API key to resume cloud operations.' WHERE enabled=1",[]).map_err(error)?;
         cloud_credentials::delete()?;
+        if cloud_credentials::read()?.is_some() {
+            return Err("OpenAI disconnect verification failed: the saved key is still present. Try Disconnect again.".into());
+        }
+        let status: String = db
+            .query_row(
+                "SELECT status FROM cloud_connection WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if status != "disconnected" {
+            return Err(
+                "OpenAI disconnect verification failed: refresh the connection status.".into(),
+            );
+        }
         return Ok(Value::Null);
     }
     if action == "test" {
@@ -350,6 +402,9 @@ pub fn action_impl(
     }
     let id = project.ok_or("Select a project.")?;
     let p = cloud::project(db, id)?;
+    if ["cleanup_pending", "cleanup_failed"].contains(&s(&p, "status")) {
+        return Err("Finish or retry cloud deletion before changing sync settings. Remote references have been retained.".into());
+    }
     match action {
         "preview" => {
             let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
@@ -372,6 +427,9 @@ pub fn action_impl(
         "apply" => {
             let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
                 .map_err(|_| "Invalid cloud configuration.")?;
+            if !draft.enabled && cloud_cleanup::has_remote(db, &p)? {
+                return Err("Use Turn off Cloud sync to delete and verify remote data before disabling this project.".into());
+            }
             if payload["consent"] != true {
                 return Err("Explicit cloud upload and retention consent is required.".into());
             }
@@ -380,10 +438,35 @@ pub fn action_impl(
         }
         "stop_automatic" => {
             db.execute("UPDATE cloud_projects SET auto_sync=0,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
+            cloud::verify_flags(
+                db,
+                id,
+                &[
+                    ("auto_sync", 0),
+                    ("paused", 1),
+                    ("sync_requested", 0),
+                    ("delete_requested", 0),
+                ],
+            )?;
             Ok(Value::Null)
         }
         "pause" | "disconnect" => {
+            if action == "disconnect"
+                && payload["retainCloud"] != true
+                && cloud_cleanup::has_remote(db, &p)?
+            {
+                return Err("Turn off Cloud sync using confirmed cloud deletion. Retaining cloud data requires an explicit retention choice.".into());
+            }
             db.execute("UPDATE cloud_projects SET paused=1,delete_requested=CASE WHEN ?2='disconnect' THEN 0 ELSE delete_requested END,enabled=CASE WHEN ?2='disconnect' THEN 0 ELSE enabled END,status=?2,revision=revision+1 WHERE project_id=?1",params![id,action]).map_err(error)?;
+            cloud::verify_flags(
+                db,
+                id,
+                if action == "disconnect" {
+                    &[("enabled", 0), ("paused", 1), ("delete_requested", 0)]
+                } else {
+                    &[("paused", 1)]
+                },
+            )?;
             Ok(Value::Null)
         }
         "start" | "sync" | "resume" | "reconcile" => {
@@ -414,6 +497,17 @@ pub fn action_impl(
                 "request",
                 "User requested sync/resume/reconciliation.",
             )?;
+            if action != "reconcile" {
+                cloud::verify_flags(
+                    db,
+                    id,
+                    if action == "start" {
+                        &[("enabled", 1), ("paused", 0), ("started", 1)]
+                    } else {
+                        &[("enabled", 1), ("paused", 0)]
+                    },
+                )?;
+            }
             Ok(Value::Null)
         }
         "search" => {
@@ -475,23 +569,8 @@ pub fn action_impl(
             tx.commit().map_err(error)?;
             Ok(Value::Null)
         }
-        "delete_index" => {
-            validate_index_deletion(&p, payload)?;
-            let (api, bound) = current_api(db)?;
-            if s(&p, "scope") != bound {
-                return Err("Verify this index with the saved key first.".into());
-            }
-            match cloud::owned_store(&api, db, &p) {
-                Ok(_) => {}
-                Err(e) if e.missing => {
-                    db.execute("UPDATE cloud_jobs SET state='removed',association_status=NULL WHERE project_id=?1 AND state!='purged'",[id]).map_err(error)?;
-                    db.execute("UPDATE cloud_projects SET enabled=0,paused=1,started=0,delete_requested=0,store_state='deleted',status='deleted',error=NULL WHERE project_id=?1",[id]).map_err(error)?;
-                    return Ok(Value::Null);
-                }
-                Err(e) => return Err(e.message),
-            }
-            db.execute("UPDATE cloud_projects SET enabled=1,delete_requested=1,paused=1,auto_sync=0,next_at=0,status='deleting' WHERE project_id=?1",[id]).map_err(error)?;
-            Ok(Value::Null)
+        "delete_index" | "delete_cloud" => {
+            Err("Cloud deletion must run through the guarded cleanup command.".into())
         }
         "purge_file" => purge(db, &p, payload),
         "retry_absent" => {

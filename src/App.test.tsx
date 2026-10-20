@@ -2,6 +2,7 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
+import { cloud } from "./cloud";
 import { registry } from "./services/registry";
 import type { Snapshot } from "./types";
 vi.mock("./services/registry", () => ({
@@ -18,9 +19,51 @@ vi.mock("./services/registry", () => ({
     tracking: vi.fn(),
   },
 }));
+vi.mock("./cloud", async (original) => ({
+  ...(await original<typeof import("./cloud")>()),
+  cloud: {
+    view: vi.fn(),
+    subscribe: vi.fn(),
+    action: vi.fn(),
+    connection: vi.fn(),
+  },
+}));
 let state: Snapshot;
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(cloud.subscribe).mockResolvedValue(() => {});
+  vi.mocked(cloud.connection).mockResolvedValue({
+    saved: false,
+    status: "disconnected",
+    tested_at: null,
+    error: null,
+    usage: [],
+  });
+  vi.mocked(cloud.view).mockResolvedValue({
+    enabled: 0,
+    paused: 1,
+    started: 0,
+    auto_sync: 0,
+    store_id: null,
+    store_state: "none",
+    store_name: "Test",
+    status: "local_only",
+    retainedFiles: 0,
+    jobs: [],
+    families: [],
+    activity: [],
+    connectionStatus: "disconnected",
+    mode: "current",
+    soft_limit: 52428800,
+    pending: 0,
+    indexed: 0,
+    failed: 0,
+    rawBytes: 0,
+    usage_bytes: 0,
+    error: null,
+    created_at: null,
+    last_sync: null,
+  });
   vi.mocked(registry.subscribe).mockResolvedValue(() => {});
   vi.mocked(registry.tracking).mockResolvedValue({
     enabled: false,
@@ -86,8 +129,11 @@ it("registers a real picker selection and opens its discovered documents", async
     "Cattle Tool",
     "C:\\Temporary project",
   );
-  await user.click(screen.getByRole("button", { name: "Remove" }));
-  expect(screen.getByText(/all its files will remain/)).toBeInTheDocument();
+  await user.click(screen.getByText("Project folder and options"));
+  await user.click(screen.getByRole("button", { name: "Remove project" }));
+  expect(
+    screen.getByText(/snapshots, version history and saved chats/),
+  ).toBeInTheDocument();
   await user.click(screen.getByText("Cancel"));
   expect(registry.remove).not.toHaveBeenCalled();
 });
@@ -125,7 +171,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.4.0 · Milestone 4")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.5.4 · Milestone 5")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -154,6 +200,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /Original/ }));
   expect(registry.refresh).toHaveBeenCalledWith("p1");
+  await user.click(screen.getByText("Project folder and options"));
   await user.click(screen.getByRole("button", { name: "Rename" }));
   await user.clear(screen.getByLabelText("Project name"));
   await user.type(screen.getByLabelText("Project name"), "Renamed");
@@ -162,11 +209,15 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   expect(registry.rename).toHaveBeenCalledWith("p1", "Renamed");
   await user.click(screen.getByRole("button", { name: "Refresh documents" }));
   await screen.findByText("Document metadata refreshed.");
-  await user.click(screen.getByRole("button", { name: "Remove" }));
+  await user.click(screen.getByRole("button", { name: "Remove project" }));
   expect(registry.remove).not.toHaveBeenCalled();
-  await user.click(screen.getByText("Remove registration"));
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Remove project",
+    }),
+  );
   await screen.findByText("Add your first project");
-  expect(registry.remove).toHaveBeenCalledWith("p1");
+  expect(registry.remove).toHaveBeenCalledWith("p1", false);
 });
 
 it("keeps one live tracking panel through updates and removes it on navigation", async () => {

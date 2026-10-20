@@ -14,12 +14,20 @@ SHA-256-verified Markdown and bounded DOCX body extraction; exact Myers diffs fo
 
 ## Implemented: Milestone 4 — Optional OpenAI indexing
 
-Windows Credential Manager; transactional schema 003; explicit per-project selection/preview/retention consent; one owned vector store per project; verified original snapshot uploads; current-only/full-history sync; durable queue, processing polling, bounded retries and uncertain-operation reconciliation; direct retrieval tests with provenance; separate association/store/File cleanup and measured usage. Local tracking, archival and diffs remain independent and available offline. Version 0.4.0 retains application identity and per-user installer/data paths. Live authorized OpenAI testing and installed upgrade acceptance are user-run tasks in the 14-test guide; no AI interpretation is implemented.
+Windows Credential Manager; transactional schema 003; explicit per-project selection/preview/retention consent; one owned vector store per project; verified original snapshot uploads; current-only/full-history sync; durable queue, processing polling, bounded retries and uncertain-operation reconciliation; direct retrieval tests with provenance; separate association/store/File cleanup and measured usage. Local tracking, archival and diffs remain independent and available offline. Version 0.4.0 retains application identity and per-user installer/data paths. Live authorized OpenAI testing and installed upgrade acceptance are user-run tasks in the Milestone 4 guide; AI interpretation is added separately in Milestone 5.
 
-## Milestone 5 — On-demand AI analysis
+## Implemented: Milestone 5 — On-demand AI analysis, baselines and evolution
 
-Add user-triggered comparisons, document/version-specific baselines, cached analysis and goal-drift assessment with provenance, uncertainty and cost controls. Generated interpretation must remain distinguishable from local evidence.
+Version 0.5.0 adds explicitly approved Responses requests for exact version comparison, baseline alignment, ordered evolution and cross-document consistency. Immutable approved baseline revisions, snapshot/diff evidence, validated quotations, local report/decision persistence, exact cache reuse, usage/price previews, bounded one-request plans and restart/cancellation uncertainty are implemented. Schema 004 preserves the existing system. All 105 Rust tests and 41 frontend tests pass with TypeScript, ESLint, rustfmt, Clippy and local NSIS packaging. The mandatory Milestone 5 guide covers live user acceptance and upgrade checks; authenticated model testing and installed upgrade were not performed by the agent. Interpretation remains separate from authoritative local evidence.
 
 ## Milestone 6 — Production hardening and updates
 
+The 0.5.1 simplification replaces main-page baseline setup with one Cloud sync switch and Ask project: version-filtered vector retrieval, one generated answer per Send, multiple persisted local chats and local-only deletion. Schema 005 preserves existing data. Advanced AI tools are deferred; baseline/report records from 0.5.0 remain stored. See manual-testing-chat.md for current acceptance steps.
+
+Version 0.5.2 adds confirmations, duplicate-click protection, loading/check indicators and native/readback verification for major settings. The simple cloud-chat feature is implemented. A redesigned AI tool interface, historical-version chat selection, chat export and storage/retention controls are outside this first pass; production hardening and user-run live account acceptance remain.
+
 Signed installers and signed update delivery; clean-machine/upgrade/uninstall coverage; migration backups and diagnostics; accessibility/scale review; cancellation and streaming pagination; storage usage and explicitly authorized retention management; broader filesystem compatibility; architecture-specific installers and offline prerequisite packaging. No automatic destructive retention or update agent is implemented now.
+
+Version 0.5.3 adds live Responses streaming, filename-only source labels, a correctly sized Cloud sync switch, and Enter/Shift+Enter chat shortcuts. Existing bounded six-exchange context remains enabled. Historical version selection, export, retention controls and a redesigned advanced AI tool interface remain future work.
+
+Version 0.5.4 makes project removal visible and adds explicit cloud retain/delete choice. Cloud sync off and project cloud deletion verify erasure of the owned vector store and uploaded Files, retain retry evidence on failure, and recreate/re-upload on re-enable. Pause retains data explicitly. Local source/history/chat retention is unchanged; general local storage purge remains future work.

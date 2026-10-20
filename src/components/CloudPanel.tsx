@@ -11,6 +11,14 @@ import {
 } from "../cloud";
 import { Modal } from "./Modal";
 import { date } from "../format";
+import { beginOperation } from "../operations";
+import {
+  verifyCloudAction,
+  verifyCloudDraft,
+  verifyCloudDeleted,
+  cleanupPayload,
+} from "../cloudVerification";
+import { OperationStatus } from "./OperationStatus";
 const initial: Draft = {
   enabled: true,
   automatic: false,
@@ -20,14 +28,24 @@ const initial: Draft = {
 };
 function savedDraft(view: CloudView): Draft {
   return {
-    enabled: !!view.enabled || view.store_state === "none",
+    enabled:
+      !!view.enabled ||
+      (view.store_state === "none" && view.status !== "cloud_deleted"),
     automatic: !!view.auto_sync,
     mode: view.mode,
     documents: view.families.filter((f) => f.selected).map((f) => f.id),
     softLimit: view.soft_limit,
   };
 }
-export function CloudPanel({ project }: { project: string }) {
+export function CloudPanel({
+  project,
+  onBusyChange,
+  onChanged,
+}: {
+  project: string;
+  onBusyChange?: (busy: boolean) => void;
+  onChanged?: () => Promise<unknown>;
+}) {
   const [view, setView] = useState<CloudView | null>(null);
   const [draft, setDraft] = useState<Draft>(initial);
   const [busy, setBusy] = useState(false);
@@ -39,6 +57,7 @@ export function CloudPanel({ project }: { project: string }) {
   const [stopping, setStopping] = useState<"project" | "automatic" | null>(
     null,
   );
+  const [transition, setTransition] = useState<"pause" | "resume" | null>(null);
   const [index, setIndex] = useState(false);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -54,12 +73,16 @@ export function CloudPanel({ project }: { project: string }) {
   const [attestation, setAttestation] = useState(false);
   const [recovery, setRecovery] = useState<Job | true | null>(null);
   const alive = useRef(true);
+  const readSequence = useRef(0);
   const dirty = useRef(false);
   const load = useCallback(async () => {
+    const sequence = ++readSequence.current;
     const next = await cloud.view(project);
-    if (!alive.current) return;
-    setView(next);
-    if (!dirty.current) setDraft(savedDraft(next));
+    if (alive.current && sequence === readSequence.current) {
+      setView(next);
+      if (!dirty.current) setDraft(savedDraft(next));
+    }
+    return next;
   }, [project]);
   useEffect(() => {
     alive.current = true;
@@ -83,16 +106,30 @@ export function CloudPanel({ project }: { project: string }) {
     };
   }, [load]);
   async function run(action: () => Promise<unknown>) {
+    const release = beginOperation(`cloud:${project}`);
+    if (!release) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError("");
     setNotice("");
     try {
       await action();
       await load();
     } catch (e) {
-      if (alive.current) setError(String(e));
+      if (alive.current) {
+        setError(String(e));
+        setNotice("");
+      }
       await load().catch(() => {});
     } finally {
+      await onChanged?.().catch((e) => {
+        if (alive.current) {
+          setError(`Could not refresh confirmed cloud status: ${String(e)}`);
+          setNotice("");
+        }
+      });
+      release();
+      onBusyChange?.(false);
       if (alive.current) setBusy(false);
     }
   }
@@ -134,13 +171,31 @@ export function CloudPanel({ project }: { project: string }) {
     setPlan(null);
     setAfterReview(null);
     setStopping(null);
+    setTransition(null);
     setError("");
   }
   function stopSync(kind: "project" | "automatic") {
     setError("");
     setStopping(kind);
   }
-  const action = (name: string) => void run(() => cloud.action(project, name));
+  async function perform(name: string) {
+    if (name === "delete_cloud" && view) {
+      await cloud.action(project, name, cleanupPayload(view));
+      verifyCloudDeleted(await load());
+    } else {
+      await cloud.action(project, name);
+      verifyCloudAction(await load(), name);
+    }
+  }
+  const action = (name: string) =>
+    void run(async () => {
+      await perform(name);
+      setNotice(
+        ["start", "sync", "resume"].includes(name)
+          ? "Sync request confirmed. Indexing may still be in progress."
+          : "Cloud action confirmed.",
+      );
+    });
   function manage(action: string, job?: Job) {
     setConfirmation("");
     setAttestation(false);
@@ -151,7 +206,7 @@ export function CloudPanel({ project }: { project: string }) {
     draft.enabled && !view?.started && draft.documents.length === 0;
   const hasChanges =
     !!view &&
-    (draft.enabled !== (!!view.enabled || view.store_state === "none") ||
+    (draft.enabled !== savedDraft(view).enabled ||
       draft.automatic !== !!view.auto_sync ||
       draft.mode !== view.mode ||
       draft.softLimit !== view.soft_limit ||
@@ -186,13 +241,12 @@ export function CloudPanel({ project }: { project: string }) {
       {error && !plan && !stopping && !index && !destruction && !recovery && (
         <p role="alert">{error}</p>
       )}
-      {busy && (
-        <p role="status">
-          Cloud request in progress… Local tracking remains available.
-        </p>
-      )}
+      <OperationStatus
+        busy={busy}
+        message="Applying and checking cloud settings… Local tracking remains available."
+        success={notice}
+      />
       {view?.error && <p role="status">{view.error}</p>}
-      {notice && <p role="status">{notice}</p>}
       {view && !view.enabled && !view.started && (
         <div className="cloud-setup">
           <p>
@@ -403,7 +457,7 @@ export function CloudPanel({ project }: { project: string }) {
             </button>
             <button
               disabled={busy || !view.enabled}
-              onClick={() => action(view.paused ? "resume" : "pause")}
+              onClick={() => setTransition(view.paused ? "resume" : "pause")}
             >
               {view.paused ? "Resume cloud sync" : "Pause cloud sync"}
             </button>
@@ -434,7 +488,7 @@ export function CloudPanel({ project }: { project: string }) {
                 disabled={busy}
                 onClick={() => manage("delete_index")}
               >
-                Delete project cloud index
+                Delete project cloud data
               </button>
             )}
             {view.store_state === "deleted" && (
@@ -451,10 +505,12 @@ export function CloudPanel({ project }: { project: string }) {
             )}
           </div>
           <p>
-            Disconnecting, removing a project or uninstalling ContextDock does
-            not delete remote resources. Automatic replacement detaches old
-            associations only after replacements finish. Uploaded Files are
-            retained until you explicitly delete them separately.
+            Turning off Cloud sync deletes and verifies the project vector store
+            and its uploaded Files. Pause retains cloud data temporarily.
+            Removing a project asks whether to delete or explicitly retain cloud
+            data. Uninstalling the app cannot clean up OpenAI resources.
+            Automatic version replacement retains older uploaded Files until
+            project cleanup.
           </p>
           <details>
             <summary>Recent cloud activity ({view.activity.length})</summary>
@@ -473,29 +529,36 @@ export function CloudPanel({ project }: { project: string }) {
           }
           close={cancelChanges}
         >
-          {error && <p role="alert">Could not stop syncing. {error}</p>}
+          {error && (
+            <p role="alert">Could not confirm syncing stopped. {error}</p>
+          )}
+          <OperationStatus
+            busy={busy}
+            message="Stopping sync and checking the saved state…"
+          />
           <p>
             {stopping === "project"
-              ? "Stop cloud syncing for this project."
+              ? "Turn off Cloud sync and permanently delete this project's vector store and uploaded Files. Re-enabling creates a fresh bucket and re-uploads selected versions. Completion is verified before success."
               : "Turn off automatic cloud sync and pause queued work. You can still use Sync Now for a manual sync."}{" "}
-            No further requests will start after this is saved. An in-flight
-            request may finish. Local tracking continues. Existing cloud files
-            and the index are kept.
+            {stopping === "automatic"
+              ? "Cloud files and the index are kept. "
+              : ""}
+            An in-flight request may finish before cleanup. Local documents,
+            history and chats stay available.
           </p>
           <div className="cloud-actions">
             <button
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  await cloud.action(
-                    project,
-                    stopping === "project" ? "disconnect" : "stop_automatic",
+                  await perform(
+                    stopping === "project" ? "delete_cloud" : "stop_automatic",
                   );
                   dirty.current = false;
                   setStopping(null);
                   setNotice(
                     stopping === "project"
-                      ? "Cloud syncing stopped."
+                      ? "Project vector store and uploaded Files deleted and verified. Cloud sync is off."
                       : "Automatic syncing stopped. Use Sync Now when you want to sync manually.",
                   );
                 })
@@ -513,9 +576,14 @@ export function CloudPanel({ project }: { project: string }) {
       )}
       {plan && (
         <Modal title="Confirm OpenAI cloud indexing" close={cancelChanges}>
+          <OperationStatus
+            busy={busy}
+            message="Saving and checking cloud configuration…"
+          />
           {error && (
             <p role="alert">
-              <strong>Configuration was not saved.</strong> {error}
+              <strong>Cloud configuration could not be confirmed.</strong>{" "}
+              {error}
             </p>
           )}
           <p>
@@ -566,11 +634,12 @@ export function CloudPanel({ project }: { project: string }) {
                     token: plan.token,
                     consent: true,
                   });
+                  verifyCloudDraft(await load(), draft);
                   dirty.current = false;
                   setPlan(null);
                   if (afterReview && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
-                    await cloud.action(project, afterReview);
+                    await perform(afterReview);
                     setNotice("Cloud configuration saved. Sync requested.");
                     return;
                   }
@@ -599,6 +668,51 @@ export function CloudPanel({ project }: { project: string }) {
             Changes to an already-started index queue only the changes shown
             above.
           </p>
+        </Modal>
+      )}
+      {transition && (
+        <Modal
+          title={
+            transition === "pause" ? "Pause cloud sync?" : "Resume cloud sync?"
+          }
+          close={cancelChanges}
+        >
+          <p>
+            {transition === "pause"
+              ? "Pause new uploads and AI requests. Local history and saved chats remain available; an already-sent request may finish."
+              : "Resume cloud syncing for the saved document selection and allow AI questions when the current versions are indexed. API charges may apply."}
+          </p>
+          {error && <p role="alert">{error}</p>}
+          <OperationStatus
+            busy={busy}
+            message="Saving and checking cloud status…"
+          />
+          <div className="cloud-actions">
+            <button
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() =>
+                void run(async () => {
+                  await perform(transition);
+                  setNotice(
+                    transition === "pause"
+                      ? "Cloud sync paused — confirmed."
+                      : "Cloud sync resumed — confirmed. Indexing may still be in progress.",
+                  );
+                  setTransition(null);
+                })
+              }
+            >
+              {busy
+                ? "Saving…"
+                : transition === "pause"
+                  ? "Pause cloud sync"
+                  : "Resume cloud sync"}
+            </button>
+            <button disabled={busy} onClick={cancelChanges}>
+              Cancel
+            </button>
+          </div>
         </Modal>
       )}
       {index && view && (
@@ -787,7 +901,7 @@ export function CloudPanel({ project }: { project: string }) {
             <>
               <p>
                 {destruction.action === "delete_index"
-                  ? "Delete this entire project vector store and its associations? Underlying uploaded Files remain for separate cleanup."
+                  ? "Permanently delete this project's entire OpenAI vector store bucket AND its uploaded Files, including older versions? New uploads stop first. Local files, snapshots and chats are kept. Success waits for remote verification. Turning sync on again creates a fresh bucket and re-uploads selected versions."
                   : "Permanently delete this uploaded File from OpenAI? This may affect other resources that use it."}
               </p>
               <label>
@@ -800,6 +914,10 @@ export function CloudPanel({ project }: { project: string }) {
               </label>
             </>
           )}
+          <OperationStatus
+            busy={busy}
+            message="Deleting cloud data and verifying removal…"
+          />
           {destruction.action === "purge_file" && (
             <label className="cloud-check">
               <input
@@ -836,6 +954,12 @@ export function CloudPanel({ project }: { project: string }) {
                       noOtherReferences: attestation,
                     },
                   );
+                  if (destruction.action === "delete_index") {
+                    verifyCloudDeleted(await load());
+                    setNotice(
+                      "Project vector store and uploaded Files deleted and verified. Cloud sync is off.",
+                    );
+                  }
                   setDestruction(null);
                 })
               }

@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Archive, BookOpen, Check, Eye, RefreshCw } from "lucide-react";
 import type { Project, TrackingView, PendingMatch, Family } from "../types";
 import { registry } from "../services/registry";
 import { date } from "../format";
 import { Modal } from "./Modal";
 import { DocumentHistory } from "./DocumentHistory";
+import { beginOperation } from "../operations";
+import { OperationStatus } from "./OperationStatus";
 function MatchDecision({
   review,
   families,
@@ -65,8 +67,22 @@ export function TrackingPanel({
   changed: () => Promise<void>;
 }) {
   const [view, setView] = useState<TrackingView | null>(null);
+  const [stateKnown, setStateKnown] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [confirmation, setConfirmation] = useState<{
+    enabled: boolean;
+    archive: boolean;
+    kind: "tracking" | "archival";
+  } | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const [initialize, setInitialize] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [archive, setArchive] = useState(false);
@@ -78,10 +94,16 @@ export function TrackingPanel({
     registry
       .tracking(project.id)
       .then((v) => {
-        if (active) setView(v);
+        if (active) {
+          setView(v);
+          setStateKnown(true);
+        }
       })
       .catch((e) => {
-        if (active) setError(String(e));
+        if (active) {
+          setError(String(e));
+          setStateKnown(false);
+        }
       });
     return () => {
       active = false;
@@ -93,17 +115,48 @@ export function TrackingPanel({
     project.archiveEnabled,
     project.trackingRevision,
   ]);
-  async function mutate(work: () => Promise<unknown>) {
+  async function mutate(
+    work: () => Promise<unknown>,
+    expected?: { enabled: boolean; archive: boolean },
+    done?: () => void,
+  ) {
+    const release = beginOperation(`tracking:${project.id}`);
+    if (!release) return;
     setBusy(true);
     setError("");
+    setNotice("");
+    if (expected) setStateKnown(false);
     try {
       await work();
-      setView(await registry.tracking(project.id));
+      const next = await registry.tracking(project.id);
+      if (alive.current) {
+        setView(next);
+        setStateKnown(true);
+      }
+      if (
+        expected &&
+        (next.enabled !== expected.enabled ||
+          next.archiveEnabled !== expected.archive)
+      )
+        throw new Error(
+          "The backend did not confirm the requested tracking settings. Refresh documents and try again.",
+        );
       await changed();
+      if (alive.current) {
+        done?.();
+        if (expected)
+          setNotice(
+            "Tracking settings saved and confirmed." +
+              (next.error
+                ? ` Some document operations need attention: ${next.error}`
+                : ""),
+          );
+      }
     } catch (e) {
-      setError(String(e));
+      if (alive.current) setError(String(e));
     } finally {
-      setBusy(false);
+      release();
+      if (alive.current) setBusy(false);
     }
   }
   const eligible =
@@ -138,6 +191,17 @@ export function TrackingPanel({
           {error}
         </p>
       )}
+      <OperationStatus
+        busy={busy}
+        message="Applying and checking tracking settings…"
+        success={notice}
+      />
+      {view && !stateKnown && !busy && (
+        <p role="status" className="tracking-note">
+          Tracking status could not be verified. Use Scan for changes to reload
+          it before changing settings.
+        </p>
+      )}
       {view === null ? (
         <p className="padded">Loading tracking settings…</p>
       ) : (
@@ -151,25 +215,16 @@ export function TrackingPanel({
               </p>
             </div>
             <button
-              disabled={busy}
+              disabled={busy || !!confirmation || initialize || !stateKnown}
+              aria-busy={busy}
               className={view.enabled ? "" : "primary"}
               onClick={() => {
-                if (view.enabled)
-                  void mutate(() =>
-                    registry.configureTracking(
-                      project.id,
-                      false,
-                      view.archiveEnabled,
-                    ),
-                  );
-                else if (view.initialized)
-                  void mutate(() =>
-                    registry.configureTracking(
-                      project.id,
-                      true,
-                      view.archiveEnabled,
-                    ),
-                  );
+                if (view.enabled || view.initialized)
+                  setConfirmation({
+                    enabled: !view.enabled,
+                    archive: view.archiveEnabled,
+                    kind: "tracking",
+                  });
                 else {
                   setSelected(eligible.map((s) => s.id));
                   setArchive(false);
@@ -191,15 +246,19 @@ export function TrackingPanel({
             <input
               type="checkbox"
               checked={view.archiveEnabled}
-              disabled={busy || !view.enabled}
+              disabled={
+                busy ||
+                !!confirmation ||
+                initialize ||
+                !view.enabled ||
+                !stateKnown
+              }
               onChange={(e) =>
-                void mutate(() =>
-                  registry.configureTracking(
-                    project.id,
-                    view.enabled,
-                    e.target.checked,
-                  ),
-                )
+                setConfirmation({
+                  enabled: view.enabled,
+                  archive: e.target.checked,
+                  kind: "archival",
+                })
               }
             />
             <span>
@@ -506,15 +565,17 @@ export function TrackingPanel({
               disabled={busy}
               className="primary"
               onClick={() =>
-                void mutate(async () => {
-                  await registry.configureTracking(
-                    project.id,
-                    true,
-                    archive,
-                    selected,
-                  );
-                  setInitialize(false);
-                })
+                void mutate(
+                  () =>
+                    registry.configureTracking(
+                      project.id,
+                      true,
+                      archive,
+                      selected,
+                    ),
+                  { enabled: true, archive },
+                  () => setInitialize(false),
+                )
               }
             >
               {busy
@@ -525,7 +586,83 @@ export function TrackingPanel({
         </Modal>
       )}
       {family && (
-        <DocumentHistory family={family} close={() => setHistory(null)} />
+        <DocumentHistory
+          family={family}
+          project={project.id}
+          close={() => setHistory(null)}
+        />
+      )}
+      {confirmation && (
+        <Modal
+          title={
+            confirmation.kind === "archival"
+              ? confirmation.archive
+                ? "Enable automatic archival?"
+                : "Turn off automatic archival?"
+              : confirmation.enabled
+                ? "Resume document tracking?"
+                : "Turn off document tracking?"
+          }
+          close={() => {
+            if (!busy) {
+              setConfirmation(null);
+              setError("");
+            }
+          }}
+        >
+          <p>
+            {confirmation.kind === "archival"
+              ? confirmation.archive
+                ? "Future replacements can move older sources into Old Context Files after verification. In-place edits archive a copy of the previous version. Your current document stays available."
+                : "Stop creating archives or moving replaced source files. Version tracking and existing archives are kept."
+              : confirmation.enabled
+                ? "Resume watching this folder and capture changes made while tracking was off. Existing version history is kept."
+                : "Stop capturing new document versions. Existing history, saved chats and documents are kept. Cloud sync will not receive uncaptured edits."}
+          </p>
+          {error && <p role="alert">{error}</p>}
+          <OperationStatus
+            busy={busy}
+            message="Saving and checking the backend state…"
+          />
+          <div className="toolbar-actions">
+            <button
+              className="primary"
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() =>
+                void mutate(
+                  () =>
+                    registry.configureTracking(
+                      project.id,
+                      confirmation.enabled,
+                      confirmation.archive,
+                    ),
+                  confirmation,
+                  () => setConfirmation(null),
+                )
+              }
+            >
+              {busy
+                ? "Saving…"
+                : confirmation.kind === "archival"
+                  ? confirmation.archive
+                    ? "Enable archival"
+                    : "Turn off archival"
+                  : confirmation.enabled
+                    ? "Resume tracking"
+                    : "Turn off tracking"}
+            </button>
+            <button
+              disabled={busy}
+              onClick={() => {
+                setConfirmation(null);
+                setError("");
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </Modal>
       )}
     </section>
   );

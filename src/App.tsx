@@ -18,6 +18,7 @@ import { Projects } from "./components/Projects";
 import { Dashboard } from "./components/Dashboard";
 import { SettingsView } from "./components/Settings";
 import { ProjectDetails } from "./components/ProjectDetails";
+import { RemoveProject } from "./components/RemoveProject";
 import { Modal } from "./components/Modal";
 import { version } from "../package.json";
 type Page = "dashboard" | "projects" | "settings";
@@ -152,7 +153,7 @@ export default function App() {
         <div className="sidebar-footer">
           <ShieldCheck size={17} />
           <span>
-            Local by design<small>Your files stay on your computer.</small>
+            Local by design<small>Local history, optional cloud AI.</small>
           </span>
         </div>
       </aside>
@@ -211,7 +212,7 @@ export default function App() {
                   : page === "settings"
                     ? "Make ContextDock feel at home."
                     : project
-                      ? "Discover files and track independent document histories."
+                      ? "Track document history and ask about your synced files."
                       : "Existing folders. Independent documents. One place to find them."}
               </p>
             </div>
@@ -332,9 +333,23 @@ export default function App() {
           }}
         />
       )}
-      {editing && project && (
+      {editing === "remove" && project && (
+        <RemoveProject
+          project={project}
+          close={() => setEditing(null)}
+          removed={async () => {
+            await load();
+            setSelected(null);
+            setEditing(null);
+            setNotice(
+              "Project removed. Local files and captured history retained.",
+            );
+          }}
+        />
+      )}
+      {editing === "rename" && project && (
         <Modal
-          title={editing === "rename" ? "Rename project" : "Remove project?"}
+          title="Rename project"
           close={() => {
             if (!busy) setEditing(null);
           }}
@@ -343,37 +358,22 @@ export default function App() {
             onSubmit={(e) => {
               e.preventDefault();
               void run(async () => {
-                if (editing === "rename")
-                  await registry.rename(project.id, name);
-                else {
-                  await registry.remove(project.id);
-                  setSelected(null);
-                }
+                await registry.rename(project.id, name);
                 setEditing(null);
               });
             }}
           >
-            {editing === "rename" ? (
-              <label>
-                Project name
-                <input
-                  autoFocus
-                  required
-                  maxLength={120}
-                  value={name}
-                  disabled={busy}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              </label>
-            ) : (
-              <p>
-                Remove <strong>{project.name}</strong> and its saved metadata
-                from ContextDock? Your folder and all its files will remain on
-                your computer. Captured history and snapshots are retained in
-                application storage; registering the same folder restores them
-                with tracking off.
-              </p>
-            )}
+            <label>
+              Project name
+              <input
+                autoFocus
+                required
+                maxLength={120}
+                value={name}
+                disabled={busy}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
             {error && (
               <p role="alert" className="error">
                 {error}
@@ -387,15 +387,8 @@ export default function App() {
               >
                 Cancel
               </button>
-              <button
-                disabled={busy || (editing === "rename" && !name.trim())}
-                className={editing === "remove" ? "danger" : "primary"}
-              >
-                {busy
-                  ? "Saving…"
-                  : editing === "rename"
-                    ? "Save name"
-                    : "Remove registration"}
+              <button disabled={busy || !name.trim()} className="primary">
+                {busy ? "Saving…" : "Save name"}
               </button>
             </div>
           </form>

@@ -11,6 +11,7 @@ export function DocumentHistory({
 }: {
   family: Family;
   close: () => void;
+  project?: string;
 }) {
   const [versions, setVersions] = useState<Version[] | null>(null);
   const [error, setError] = useState("");

@@ -1,7 +1,14 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
-import { cloud, type CloudView, type Plan } from "../cloud";
+import { cloud, type CloudView, type Plan, type Draft } from "../cloud";
 import { CloudPanel } from "./CloudPanel";
 import { OpenAIConnection } from "./OpenAIConnection";
 vi.mock("../cloud", async (importOriginal) => ({
@@ -23,6 +30,28 @@ const changePlan: Plan = {
   removals: 0,
   storeName: "ContextDock - Test",
 };
+async function confirmedAction(
+  _project: string | null,
+  action: string,
+  payload: unknown = {},
+) {
+  if (action === "preview") return changePlan as never;
+  if (action === "apply") {
+    const draft = (payload as { draft: Draft }).draft;
+    view.enabled = Number(draft.enabled);
+    view.auto_sync = Number(draft.automatic);
+    view.mode = draft.mode;
+    view.soft_limit = draft.softLimit;
+    view.families.forEach((f) => {
+      f.selected = Number(draft.documents.includes(f.id));
+    });
+  }
+  if (["start", "sync", "resume"].includes(action)) {
+    view.paused = 0;
+    if (action === "start") view.started = 1;
+  }
+  return undefined as never;
+}
 beforeEach(() => {
   vi.clearAllMocks();
   view = {
@@ -148,7 +177,7 @@ it("reviews the upload limit once editing finishes, keeps errors visible, and ca
     within(modal).getByRole("button", { name: "Confirm cloud configuration" }),
   );
   expect(await within(modal).findByRole("alert")).toHaveTextContent(
-    "Configuration was not saved",
+    "configuration could not be confirmed",
   );
   expect(cloud.action).toHaveBeenCalledTimes(2);
   await user.click(within(modal).getByRole("button", { name: "Cancel" }));
@@ -170,7 +199,7 @@ it("opens review immediately when a saved document selection changes", async () 
   expect(screen.getByLabelText(/Master Context/)).toBeChecked();
   expect(cloud.action).toHaveBeenCalledTimes(1);
 });
-it("asks to stop immediately without a key and persists the stopped checkbox only on confirmation", async () => {
+it("asks to delete cloud data immediately and persists Off only after verified cleanup", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
   view.started = 1;
@@ -179,6 +208,11 @@ it("asks to stop immediately without a key and persists the stopped checkbox onl
   vi.mocked(cloud.action).mockImplementation(async () => {
     view.enabled = 0;
     view.paused = 1;
+    view.store_id = null;
+    view.store_state = "none";
+    view.status = "cloud_deleted";
+    view.jobs = [];
+    view.retainedFiles = 0;
     return undefined as never;
   });
   render(<CloudPanel project="p1" />);
@@ -195,7 +229,11 @@ it("asks to stop immediately without a key and persists the stopped checkbox onl
   modal = screen.getByRole("dialog");
   await user.click(within(modal).getByRole("button", { name: "Stop syncing" }));
   await waitFor(() => expect(enable).not.toBeChecked());
-  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "disconnect");
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith(
+    "p1",
+    "delete_cloud",
+    expect.objectContaining({ confirm: true }),
+  );
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Sync Now" })).toBeDisabled();
 });
@@ -212,7 +250,7 @@ it("keeps the stop dialog open on failure and leaves the saved checkbox enabled"
   const modal = screen.getByRole("dialog");
   await user.click(within(modal).getByRole("button", { name: "Stop syncing" }));
   expect(await within(modal).findByRole("alert")).toHaveTextContent(
-    "Could not stop syncing",
+    "Could not confirm syncing stopped",
   );
   expect(enable).toBeChecked();
   await user.click(within(modal).getByRole("button", { name: "Close dialog" }));
@@ -246,10 +284,7 @@ it("confirms stopping automatic sync separately and reflects its saved paused st
   expect(
     screen.getByRole("button", { name: "Resume cloud sync" }),
   ).toBeEnabled();
-  vi.mocked(cloud.action)
-    .mockReset()
-    .mockResolvedValueOnce(changePlan as never)
-    .mockResolvedValue(undefined);
+  vi.mocked(cloud.action).mockReset().mockImplementation(confirmedAction);
   await user.click(automatic);
   modal = await screen.findByRole("dialog");
   await user.click(within(modal).getByRole("checkbox"));
@@ -263,15 +298,50 @@ it("confirms stopping automatic sync separately and reflects its saved paused st
     "sync",
   ]);
 });
+it("requires confirmation and backend readback for pause and resume", async () => {
+  view.enabled = 1;
+  view.started = 1;
+  view.paused = 0;
+  const user = userEvent.setup();
+  vi.mocked(cloud.action).mockImplementation(async (_p, action) => {
+    if (action === "pause") view.paused = 1;
+    if (action === "resume") view.paused = 0;
+    return undefined as never;
+  });
+  render(<CloudPanel project="p1" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Pause cloud sync" }),
+  );
+  let modal = screen.getByRole("dialog", { name: "Pause cloud sync?" });
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Pause cloud sync" }));
+  modal = screen.getByRole("dialog");
+  await user.click(
+    within(modal).getByRole("button", { name: "Pause cloud sync" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("paused — confirmed");
+  await user.click(screen.getByRole("button", { name: "Resume cloud sync" }));
+  modal = screen.getByRole("dialog", { name: "Resume cloud sync?" });
+  await user.click(
+    within(modal).getByRole("button", { name: "Resume cloud sync" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("resumed — confirmed");
+});
 it("reviews re-enabling an existing stopped project and resumes only after consent", async () => {
   const user = userEvent.setup();
   view.enabled = 0;
   view.started = 1;
   view.store_state = "linked";
   view.families[0].selected = 1;
-  vi.mocked(cloud.action)
-    .mockResolvedValueOnce(changePlan as never)
-    .mockResolvedValue(undefined);
+  vi.mocked(cloud.action).mockImplementation(confirmedAction);
   render(<CloudPanel project="p1" />);
   await user.click(
     await screen.findByLabelText("Enable cloud indexing for this project"),
@@ -365,6 +435,13 @@ it("rejects stale responses after project panel unmount", async () => {
 });
 it("clears the uncontrolled password field immediately and does not put a key into browser storage", async () => {
   const user = userEvent.setup();
+  vi.mocked(cloud.connection).mockResolvedValue({
+    saved: true,
+    status: "connected",
+    tested_at: null,
+    error: null,
+    usage: [],
+  });
   const local = vi.spyOn(Storage.prototype, "setItem");
   render(<OpenAIConnection />);
   const input = screen.getByLabelText("API key");
@@ -380,6 +457,82 @@ it("clears the uncontrolled password field immediately and does not put a key in
   );
   local.mockRestore();
 });
+it("confirms global disconnect, blocks duplicate clicks, and verifies key removal", async () => {
+  const user = userEvent.setup();
+  let connection = {
+    saved: true,
+    status: "connected",
+    tested_at: null,
+    error: null,
+    usage: [],
+  };
+  vi.mocked(cloud.connection).mockImplementation(async () =>
+    structuredClone(connection),
+  );
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    await pending;
+    connection = { ...connection, saved: false, status: "disconnected" };
+    return undefined as never;
+  });
+  render(<OpenAIConnection />);
+  const disconnect = await screen.findByRole("button", {
+    name: "Disconnect OpenAI",
+  });
+  await waitFor(() => expect(disconnect).toBeEnabled());
+  await user.click(disconnect);
+  let modal = screen.getByRole("dialog");
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(disconnect);
+  modal = screen.getByRole("dialog");
+  const confirm = within(modal).getByRole("button", {
+    name: "Disconnect OpenAI",
+  });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(cloud.action).toHaveBeenCalledTimes(1);
+  expect(confirm).toBeDisabled();
+  expect(within(modal).getByRole("status")).toHaveTextContent(
+    "verifying key removal",
+  );
+  await act(async () => finish());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "OpenAI disconnected — confirmed",
+  );
+});
+it("keeps disconnect errors visible when the key is still saved", async () => {
+  vi.mocked(cloud.connection).mockResolvedValue({
+    saved: true,
+    status: "connected",
+    tested_at: null,
+    error: null,
+    usage: [],
+  });
+  const user = userEvent.setup();
+  render(<OpenAIConnection />);
+  const disconnect = await screen.findByRole("button", {
+    name: "Disconnect OpenAI",
+  });
+  await waitFor(() => expect(disconnect).toBeEnabled());
+  await user.click(disconnect);
+  const modal = screen.getByRole("dialog");
+  await user.click(
+    within(modal).getByRole("button", { name: "Disconnect OpenAI" }),
+  );
+  expect(await within(modal).findByRole("alert")).toHaveTextContent(
+    "backend did not confirm",
+  );
+  expect(modal).toBeInTheDocument();
+});
 it("shows remote deletion confirmation without issuing deletion when cancelled", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
@@ -387,7 +540,7 @@ it("shows remote deletion confirmation without issuing deletion when cancelled",
   view.store_state = "linked";
   render(<CloudPanel project="p1" />);
   await user.click(
-    await screen.findByRole("button", { name: "Delete project cloud index" }),
+    await screen.findByRole("button", { name: "Delete project cloud data" }),
   );
   const modal = screen.getByRole("dialog");
   expect(
@@ -404,7 +557,7 @@ it("confirms index deletion with its displayed name while sending the target ID 
   view.store_name = "ContextDock - Project Ω";
   render(<CloudPanel project="p1" />);
   await user.click(
-    await screen.findByRole("button", { name: "Delete project cloud index" }),
+    await screen.findByRole("button", { name: "Delete project cloud data" }),
   );
   const modal = screen.getByRole("dialog");
   const input = within(modal).getByLabelText(

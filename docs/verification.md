@@ -1,3 +1,88 @@
+# Verification — ContextDock 0.5.4 cloud erasure and project removal
+
+October 20: **131 native tests** and **63 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production assets and Windows x64 NSIS packaging pass. The unsigned installer is `src-tauri/target/release/bundle/nsis/ContextDock_0.5.4_x64-setup.exe`, **4,268,411 bytes**. Application identity and schema 005 are unchanged. The agent did not install it or perform authenticated/destructive acceptance against user cloud data.
+
+Eight new native regressions verify actual mocked bucket+File deletion, fresh upload after re-enable, false deletion acknowledgements retaining IDs, lost upload/delete responses and explicit retry, shared references, hash/ownership/key-scope/confirmation refusals, native retain/delete registration choice, failed local completion rollback and global key-disconnect rejection before vault access. Five new UI regressions cover the visible removal dialog's default deletion/explicit retention, duplicate click guard through cleanup/readback, failed cleanup blocking registration removal, retry after cleanup succeeds but local removal fails, and cleanup-needed status rather than false Off. Existing streaming/context/history suites pass.
+
+Cleanup uses only synthetic resource inventories and disposable SQLite/source fixtures. No API key, user upload, real provider bucket or saved local chat was changed by agent tests. Local tests verify the intended DELETE calls, acknowledgement/absence handling and persistence; installed live-account deletion remains user acceptance. The updated manual test guide covers disposable cloud cleanup, cancellation, interruption/restart, re-enable and explicit retention. Earlier verification sections are historical behavior for their named versions.
+
+---
+
+# Verification — ContextDock 0.5.3 streamed chat
+
+October 20: **123 Rust tests** and **58 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production build and Windows x64 NSIS packaging pass. New native tests cover progressive decoded JSON text, escaped quotes/newlines/Unicode, CRLF SSE frames, completion usage, interrupted/failed/incomplete/malformed/oversized streams and split credential suppression. Chat provenance tests verify original source filenames. UI tests cover provisional text followed by the completed reply, ignored late callbacks, filename-only sources, Enter on the first chat, Shift+Enter and IME composition.
+
+Installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.3_x64-setup.exe`, **4,257,822 bytes**, unsigned and not installed by the agent. Tests use synthetic streams, mocked IPC/APIs and disposable local databases; no real API key, authenticated request or user upload was used. A fresh mocked browser preview was blocked by the browser client before it opened; 0.5.3 browser appearance/native account acceptance is not claimed. The corrected switch dimensions follow from isolating its 42×24 sizing from the later generic 18×18 checkbox rule. Use the updated manual chat guide for installed acceptance. Application identity and schema 005 are unchanged.
+
+---
+
+# Verification — ContextDock 0.5.2 major control safeguards
+
+October 20: **120 Rust tests** and **56 frontend tests** pass. TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. Three new native regressions inject database triggers that silently ignore/reverse settings writes: cloud disconnect, cloud configuration and tracking now report verification errors instead of false success; configuration failure rolls back its transaction. Nine new frontend regressions cover double-click suppression through backend readback, unknown/read-failure states, mismatch errors, confirmation/cancellation for tracking/archival/pause/resume/global disconnect and idempotent shared operation locks. Existing cloud-chat/history suites remain passing.
+
+Major settings show a spinner while pending and a success check only after saved-state confirmation. Acknowledged requests with unchanged state remain errors; backend read failures do not unlock project questions using a stale On value. Global key save/test calls now begin inside the same synchronous operation lock instead of dispatching a save before the lock. Native key disconnect verifies removal, but automated tests never read/delete an actual saved key. All backend failure injection uses disposable databases; frontend key/storage tests use synthetic values and mocked IPC. No authenticated API, installer execution, production app-state change, release or merge was performed by the agent.
+
+The basic current-document Q&A/local-chat feature is implemented; the redesigned AI tool interface, historical-version chat selection, streaming, export and storage controls remain outside this pass. Queuing a sync operation is separately reported from completed remote indexing. See manual-testing-chat.md for current installed acceptance.
+
+Production build and unsigned Windows x64 NSIS packaging pass. Updated installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.2_x64-setup.exe`, **4,234,035 bytes**. Application identity and schema 005 are unchanged from 0.5.1. The installer was not run by the agent.
+
+---
+
+# Verification — ContextDock 0.5.1 simple cloud chat
+
+October 20: **117 Rust tests** and **47 frontend tests** pass, including nine new native chat tests and six new interaction tests. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied and production build pass. Chat tests use scripted vector-search/Responses results and disposable SQLite/files; no actual key, user document upload or paid API call was used. The application identity/data location remains unchanged, and schema 4→5 migration preserves old snapshots, cloud mapping and approved baseline rows.
+
+Native coverage verifies current-version cloud retrieval, source IDs, explicit one-model-call behavior, follow-up context, independent conversations, restart persistence, local cascade deletion without cloud/source changes, off/paused/unsynced/wrong-key/project isolation guards, disable between retrieval and inference, foreign-source rejection, empty retrieval without inference, uncertain timeout/restart without replay and credential-like question rejection. Frontend coverage verifies one enable confirmation followed by automatic Start, cancel/disable behavior, offline chat reading/deletion, multiple saved chats after remount, waiting for latest indexed versions and errors unlocking controls without paid retries. Existing tracking/diff/cloud/baseline suites still pass.
+
+A disposable browser preview of the built assets with mocked IPC was used to inspect dark-theme spacing, collapsed project/advanced controls, question submission, source-backed answer display and Cloud sync off retaining readable chats while disabling the composer. Preview actions use synthetic data only; this is not a live native/API acceptance claim. See manual-testing-chat.md for the installed-app acceptance sequence.
+
+The unsigned Windows x64 NSIS installer built successfully at `src-tauri/target/release/bundle/nsis/ContextDock_0.5.1_x64-setup.exe`, **4,231,778 bytes**. The agent did not install it, close the user's app, modify real app data or run authenticated acceptance requests. No merge, release tag or updater was created.
+
+---
+
+# Verification — ContextDock 0.5.0
+
+## October 20 alignment citation follow-up
+
+User acceptance reached OpenAI and returned numeric usage, but the alignment result failed literal quotation validation. The rejected provider text was intentionally not retained, so its exact mismatched quotation cannot be reconstructed. A local regression reproduces a baseline-formatting failure: decoded multi-line text with quotes/backslashes cannot be cited literally against the original JSON storage string. Prompt version 2 now supplies labeled decoded baseline fields and explicitly limits quotations to the named evidence text. ASCII whitespace-only differences are mapped back to exact source substrings before saving; altered words, punctuation, case, spliced passages and foreign references remain rejected. New diagnostics identify the summary/finding citation and evidence region without storing rejected output. No automatic retry or live API request was made, and approved baseline records remain unchanged.
+
+Three added scripted regressions cover decoded baseline provenance, Unicode/CRLF/spacing restoration with a single request, and strict rejection of changed/noncontiguous quotations. The complete Rust suite now passes **108 tests**; **41 frontend tests**, TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. The production build and unsigned Windows NSIS rebuild pass; the updated local 0.5.0 installer is **4,207,707 bytes**. It was not installed or used for a live API request by the agent. The original implementation checks below record the initial Milestone 5 build.
+
+Milestone 5 was implemented on Windows with the existing Node/MSVC Rust toolchain. All new request tests use scripted Responses output, disposable SQLite/source/snapshot fixtures and synthetic credentials. No real key was read, no authenticated OpenAI call was made, and no installer was run against user data. The application identifier remains com.contextdock.desktop; version manifests/locks are 0.5.0.
+
+| Check | Result |
+| --- | --- |
+| Rust tests, binary targets, doctests | **105 passed**: 87 prior regressions + 18 focused AI tests; no failures |
+| Frontend tests | **41 passed in 6 files**: 35 prior + 6 intelligence interaction tests |
+| TypeScript, ESLint | Passed |
+| rustfmt, all-target Clippy with -D warnings | Passed |
+| Production frontend build | Passed; about 307 kB uncompressed JS |
+| Windows x64 NSIS | Built ContextDock_0.5.0_x64-setup.exe, 4,208,701 bytes (about 4.01 MiB), unsigned |
+| npm audit --omit=dev | Zero reported production vulnerabilities |
+| Transactional migration | Schema 3→4 fixture retains stable project/version identity, verified snapshots and cloud mapping/settings; existing schema 1/2/future-schema regressions pass |
+| Security audit | Redacted current-source/history checks and credential/HTTP/UI/CI/installer review documented in security-audit-0.5.0.md |
+| Live API / user's vault / installed upgrade / GUI acceptance | Not performed by agent; explicit user acceptance remains in manual-testing-milestone-5.md |
+
+## Coverage and practical boundaries
+
+Native coverage includes approved baseline creation, immutable supersession, exact/reversed/nonconsecutive pair identity, verified extraction and factual block anchors, complete ordered intermediate timeline evidence, explicit cross-family selection/project isolation, malformed citation/schema/refusal/truncation rejection, prompt-injection/tool/storage boundaries, cache reuse without another call, invalidation after model/limits/baseline changes, paid consent, no inference on capture/view/approval, local review decisions, conservative input/output bounds, rate limits, ambiguous timeout, cancellation of unsent work and startup recovery without paid replay. Existing cloud, credential, source tracking/archival, Word extraction, comparison and navigation suites remain passing.
+
+The six new frontend regressions verify exact selected version pairs survive preview, checked paid consent precedes generation, cached opening sends no Generate action, manually approved baselines make no model call, cancel sends no inference, errors unlock controls without retry, and old unmounted-project replies are ignored. These are component tests; no elaborate native GUI automation was added and no claim of visual acceptance at every scale is made.
+
+Analysis is always one explicitly approved POST /v1/responses with strict JSON Schema, store:false, background:false, no tools and no automatic retry. Cloud indexing is independent. Deterministic local evidence is used for every workflow; remote retrieval augmentation and multi-stage inference are intentionally not implemented. Larger scopes fail locally with a narrower-scope option. Default model is pinned GPT-5.4 Mini; a pinned GPT-5.4 option is supported. Limits: 12 timeline captures, 2–6 distinct consistency families, up to six alignment versions, 65,536 conservative serialized input units and 8,192 max output tokens. Existing extraction/diff limits still apply.
+
+Quotes/IDs/ranges validate provenance, not semantic correctness. Reports are interpretations with uncertainties and review decisions, never rewritten source history. DOCX body-only exclusions remain disclosed. Baseline starting text is extracted locally and explicitly edited/approved; no AI baseline proposal is required or silently generated. Cached reports and baselines are plaintext local application data, not an encrypted content vault. The latest 100 request-history entries are listed; no storage purge, streaming output or multi-stage scheduler is added. An already-sent request may finish and incur charges after cancellation; a valid arriving report is saved. Restart uncertainty requires a new reviewed plan, never automatic replay.
+
+Input token figures are heuristic, with conservative byte-based budget units; price estimates use the saved model/standard-rate assumptions and output maximum. Actual returned numeric token usage is retained when available. Estimates are not official account totals or guaranteed dollar caps. Credential access remains native Windows Credential Manager; the model never receives authorization as evidence. The focused audit cannot inspect private Discord messages or prove the user's real key has never been exposed.
+
+The complete [14-test Windows guide](manual-testing-milestone-5.md) supplies exact v1/v2/v3 and technical-document sample contents, capture sequence, baseline/approval/version-pair/timeline/consistency/cache/cost/offline/failure/security/regression checks, expected API request counts, safe recovery and explicit cleanup. [Architecture](architecture.md) records models, pricing sources, schemas and lifecycle. [Security review](security-audit-0.5.0.md) records audit scope and limitations.
+
+GitHub's retained Windows workflow builds a downloadable ContextDock-Windows-x64-setup artifact (30-day retention) for the intended commit. Local results do not imply a completed remote run; inspect the PR's current commit status. No public release/tag, updater, installation or automatic merge was performed. Local installer: src-tauri/target/release/bundle/nsis/ContextDock_0.5.0_x64-setup.exe.
+
+---
+
+The following verification records describe earlier milestones as historical evidence.
+
 # Verification — ContextDock 0.4.0
 
 Milestone 4 checks ran on Windows 11 on October 19, 2026, using the existing Node 24/MSVC Rust toolchain. Cloud tests use a fully in-memory scripted provider, temporary SQLite databases/source roots/snapshot stores and synthetic nonfunctional key strings. They never read/save a real Windows credential or contact the authenticated OpenAI API. Public official API documentation was consulted. User project folders, real application data, credentials and installed executables were not modified by testing or installer execution.
