@@ -27,7 +27,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 2 {
+        if version > 3 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -38,7 +38,16 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/002_tracking.sql"))
                 .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 2).map_err(error)?;
+        if version < 3 {
+            tx.execute_batch(include_str!("../migrations/003_cloud_indexing.sql"))
+                .map_err(error)?;
+            tx.execute(
+                "INSERT INTO cloud_installation(id) VALUES(?1)",
+                [uuid::Uuid::new_v4().to_string()],
+            )
+            .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 3).map_err(error)?;
         tx.commit().map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;

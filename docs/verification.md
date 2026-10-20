@@ -1,4 +1,62 @@
-# Verification — ContextDock 0.3.0
+# Verification — ContextDock 0.4.0
+
+Milestone 4 checks ran on Windows 11 on October 19, 2026, using the existing Node 24/MSVC Rust toolchain. Cloud tests use a fully in-memory scripted provider, temporary SQLite databases/source roots/snapshot stores and synthetic nonfunctional key strings. They never read/save a real Windows credential or contact the authenticated OpenAI API. Public official API documentation was consulted. User project folders, real application data, credentials and installed executables were not modified by testing or installer execution.
+
+| Check | Milestone 4 result |
+| --- | --- |
+| TypeScript / ESLint | Passed |
+| Frontend tests | Passed: 35 in 5 files (16 existing + 19 cloud UI) |
+| Rust tests / binary targets / doctests | Passed: 87 Rust tests (37 existing + 50 cloud cases); no failures |
+| rustfmt / all-target Clippy with warnings denied | Passed |
+| Production Vite bundle | Passed through the NSIS build |
+| npm audit | Zero reported vulnerabilities |
+| Windows x64 NSIS | Built unsigned `ContextDock_0.4.0_x64-setup.exe`, approximately 4 MiB |
+| Versions / identity | npm + npm lock, Cargo + Cargo lock, Tauri 0.4.0; `com.contextdock.desktop` and existing per-user paths retained |
+| Migration | Transactional schema 2→3 fixture preserves tracking/archival preferences and defaults cloud off; existing schema-1/capture/archival regressions pass |
+| Whitespace | `git diff --check` passed |
+| Live OpenAI / actual Credential Manager persistence / installed upgrade | **Not performed by the agent**; user acceptance required |
+
+## PR #4 initial-setup feedback
+
+User testing showed that saving a key without the separate Test connection step left configuration unapplied and Start Initial Sync disabled. A failed confirmation stayed open but looked like a refresh. Global vertical label styling also displaced the document checkboxes from their family names.
+
+Saving now explicitly performs a read-only key test through **Save and test key**. Project setup displays the connection status, ordered prerequisites, an explicit saved-key test/retry, selected-document count and Select all eligible documents. Empty initial selection or an untested key is blocked before consent opens, with native validation as well. Confirmation closes only after a successful save and refreshes enabled controls; failures explicitly say configuration was not saved. Test failure still refreshes saved-key state so retry remains usable. Checkbox labels now explicitly use horizontal flex layout with fixed-size controls.
+
+Four added frontend regressions cover an untested connection and in-project retry, empty selection through successful modal close/Start unlock, save success followed by test failure, and clear queued-change feedback for already-started indexes. Two native regressions cover rejecting empty initial selection while permitting deliberate deselection on a started project, and reporting an untested connection before consent without network calls. These are mocked tests; no real saved credential or authenticated cloud request was used by the agent.
+
+## Windows cloud worker snapshot root
+
+The native worker now canonicalizes its existing database path before deriving the snapshot root, matching Registry initialization. Windows ordinary paths and canonical verbatim paths previously compared unequal and produced “The registered root changed location or became a link.” before the first upload, despite a successfully created index. Snapshot root identity, directory/reparse guards, size limits and SHA-256 verification remain enforced.
+
+A Windows-only regression passes an ordinary database path through the production startup resolver, opens the worker connection and completes guarded snapshot upload/indexing against the scripted provider with exact-byte assertions. The full 87-test Rust suite and all-target Clippy pass. After installing this fix, use **Retry / Reconcile / Verify key** on the existing project to requeue the failed pre-upload job; no index deletion, project registration reset or key replacement is needed.
+
+## Full-history policy transition
+
+A focused regression now completes v1 indexing, replaces it with v2 under current-only policy, verifies v1 is removed, then confirms full history and verifies v1 reattaches using the same retained File ID without another byte upload. Local source archival is disabled throughout. This mocked transition passes; it does not establish the user's running app's saved policy or remote state. Saved project settings now act directly: unchecking indexing opens a short Stop syncing? dialog. Confirmation uses the local disconnect command without a key test, upload consent or worker-lock wait. Unchecking automatic sync likewise confirms a local stop, clears automatic/sync-request flags, cancels pending deletion work and pauses the worker. Existing per-request authorization guards block the next request; an in-flight request may finish. Policy/selection/enabling changes open their review automatically; confirming re-enabled indexing or automatic sync also resumes an already-started project; limit edits open review after blur/Enter. Cancel/Close/Escape restores the saved configuration. Initial setup still collects eligible documents before the first review and requires a separate initial Start.
+
+Seven focused frontend regressions cover immediate policy/selection review, cancel/close rollback, numeric editing and save failure, stop success/failure without a tested key, automatic-stop persistence, and reviewed re-enabling of an existing index. A native regression exercises both stop commands with queued replacement/deletion work and a disconnected key, restores key availability and verifies no further mock request/upload, no remote deletion and preserved local histories/tracking. All 87 Rust tests, 35 frontend tests, TypeScript, ESLint and all-target Clippy pass.
+
+## Cloud index deletion confirmation
+
+Project-index deletion now asks users to type the displayed cloud index name rather than DELETE plus an opaque vector-store ID. The UI sends the index ID separately. Native validation requires both the exact saved name and the unchanged nonempty index ID before credential access; ownership verification and ID-based deletion remain unchanged. Focused UI/native regressions cover a Unicode name, rejecting the old ID phrase, wrong names, stale IDs, renamed indexes and empty/missing identity. Uploaded-File purge retains its separate File-ID confirmation and reference attestation.
+
+## Milestone 4 coverage and boundaries
+
+The 50 cloud tests cover confirmed stop controls blocking queued work without credentials while retaining history and remote resources, Windows runtime database-path normalization before guarded snapshot uploads, local-only/paused no-request behavior, fingerprint isolation, plaintext input validation without echo, fresh and schema-2 migrations, project-scoped eligible selection, ignored/foreign family rejection, stale consent, no uploads before Start, idle index creation before Start, authorization rechecks before each individual request, bounded processing polls, missing/tampered snapshots, soft size limits, original snapshot bytes rather than live-source fallback, asynchronous processing completion, repeated-sync deduplication, current-only safe replacement, historical reattachment/current attributes, disabled/enabled automatic sync, historical current-pointer reuse, interrupted store adoption, no blind recreation on absent candidates, interrupted upload filename/size/hash recovery, mismatched remote bytes, foreign store/association refusal, Retry-After/backoff, terminal auth errors, deleted store/File recovery, missing associations, failed processing retry without reupload, explicit absent-operation reset that refuses existing copies, per-version removal/exclusion including explicit cleanup while sync is disconnected, store deletion retaining Files/local data, separately verified File purge, unregistration/disconnect retaining resources, ambiguity freezing existing selections, direct search/provenance, blocking retrieval until deselection cleanup settles, and not persisting query/excerpts. Scripted calls validate the provider-independent state machine, not a live OpenAI account's permissions, retention or ranking.
+
+The nineteen cloud frontend tests cover reviewed consent before apply with Start separate; unlocking controls after a failed action; late responses after unmount; immediate clearing of the uncontrolled password field without browser-storage writes; cancellation/typed confirmation for remote deletion; actionable configuration failures inside the consent dialog; explicitly confirmed association cleanup while sync remains paused/disconnected. All previous rendering/navigation/tracking/history/diff regressions pass. These are focused mocked component tests, not a broad native GUI harness or a claim of visual acceptance on every display scale.
+
+Production credentials use Win32 Credential Manager, and the Windows build validates the native bindings. Reading/writing a real user credential, actual account Test/upload/index/search/delete behavior, billing measurements and an upgrade over the user's real v0.3.0 installation remain **manual**. No developer key, environment key fallback, real user document upload, release tag, public GitHub Release, auto-update or PR merge is authorized/performed. The built installer was not run against the existing installation.
+
+The [14-test installed Windows guide](manual-testing-milestone-4.md) provides exact two-file Markdown contents, preparation, clicks, endpoints, expected UI/remote states, failure/retry instructions, offline/pause/resume, two-project isolation, safe revoked-key testing, separate association/store/File cleanup and an acceptance checklist. The implementation report also includes essential numbered testing steps directly.
+
+Limits: raw upload 16 MiB, text/expanded DOCX 4 MiB, conservative package/type screening, fixed provider origin, one cloud request at a time, 30-second individual HTTP timeout, bounded 100×100 listings and a 90-second between-request reconciliation budget. Large/inaccessible accounts fail closed rather than assuming complete remote absence. No provider-wide exactly-once or global external File-reference enumeration exists: ambiguous/no-match recovery and File purge require separate explicit user assertions after dashboard checks. Automatic detach/store deletion retains uploaded Files until explicit purge. Cleanup/dashboard/search/billing can be eventually consistent. No dollar spending cap or guaranteed free indexing is claimed.
+
+The existing Windows Actions workflow remains enabled for PR/main/codex branch pushes and uploads **ContextDock-Windows-x64-setup** with 30-day retention. Consult the intended commit's PR run for its live status; local pass results do not imply remote CI completion. Local installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.4.0_x64-setup.exe`. Download/upgrade instructions preserve the existing application identity and app-data directory. Prior milestone evidence follows as a historical record.
+
+---
+
+# Historical verification — ContextDock 0.3.0
 
 Milestone 3 local checks completed on Windows 11 on October 19, 2026, with Node.js 24.12.0, Rust 1.99.1 and the x86_64 MSVC toolchain on an ARM64 host. Tests use disposable temporary databases, source roots and snapshot stores. No registered user project, real database, archive or snapshot was modified by testing. The prior Milestone 2 record is retained below.
 
