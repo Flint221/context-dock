@@ -190,6 +190,55 @@ function connected() {
   view.families[0].cloudNumber = 1;
   view.indexed = 1;
 }
+it.each(["empty", "ineligible"])(
+  "preserves an %s saved selection instead of silently selecting all documents on re-enable",
+  async (kind) => {
+    view.selectionSaved = true;
+    view.status = "cloud_deleted";
+    if (kind === "ineligible")
+      view.families.push({
+        ...view.families[0],
+        id: "old-selection",
+        name: "Needs review",
+        selected: 1,
+        eligible: 0,
+      });
+    const user = userEvent.setup();
+    render(<ProjectCloud project="p1" />);
+    await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
+    expect(
+      await screen.findByText(
+        /saved document selection is empty or needs review/,
+      ),
+    ).toBeInTheDocument();
+    expect(cloud.action).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("switch", { name: "Cloud sync" }),
+    ).not.toBeChecked();
+  },
+);
+it("re-enables only the saved subset rather than newly eligible unrelated families", async () => {
+  view.selectionSaved = true;
+  view.status = "cloud_deleted";
+  view.families[0].selected = 1;
+  view.families.push({
+    ...view.families[0],
+    id: "not-selected",
+    name: "Unselected",
+    selected: 0,
+  });
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
+  await screen.findByRole("dialog");
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "preview", {
+    draft: expect.objectContaining({ documents: ["d1"] }),
+  });
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(vi.mocked(cloud.action).mock.calls).toHaveLength(1);
+});
 it("keeps cloud off until one confirmation, then starts sync and enables a simple question", async () => {
   const user = userEvent.setup();
   render(<ProjectCloud project="p1" />);

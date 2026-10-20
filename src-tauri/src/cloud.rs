@@ -74,11 +74,21 @@ pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
     rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])
 }
 pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<CloudVersion>> {
-    crate::folder_recovery::require_ready(db, id)?;
+    desired_selection(db, id, draft, true)
+}
+fn desired_selection(
+    db: &Connection,
+    id: &str,
+    draft: &CloudDraft,
+    check_sources: bool,
+) -> Result<Vec<CloudVersion>> {
+    if check_sources {
+        crate::folder_recovery::require_ready(db, id)?;
+    }
     let root: String = db
         .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
         .map_err(error)?;
-    for document in &draft.documents {
+    for document in draft.documents.iter().filter(|_| check_sources) {
         let source:Option<(String,String,Option<i64>)>=db.query_row("SELECT s.relative_path,s.status,s.hashed_size FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(error)?;
         if let Some((relative, status, hashed_size)) = source {
             if status != "available"
@@ -102,14 +112,15 @@ pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<Clou
     if draft.documents.iter().any(|d| {
         !families
             .iter()
-            .any(|f| s(f, "id") == d && n(f, "eligible") == 1)
+            .any(|f| s(f, "id") == d && (!check_sources || n(f, "eligible") == 1))
     }) {
         return Err(
             "Selection includes an ineligible or unrelated document. Resolve local tracking first."
                 .into(),
         );
     }
-    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {ELIGIBLE} AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=d.project_id AND e.version_id=v.id) ORDER BY d.id,v.number")).map_err(error)?;
+    let eligibility = if check_sources { ELIGIBLE } else { "1=1" };
+    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {eligibility} AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=d.project_id AND e.version_id=v.id) ORDER BY d.id,v.number")).map_err(error)?;
     let versions = q
         .query_map([id], |r| {
             Ok(CloudVersion {
@@ -144,10 +155,23 @@ pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
             .collect(),
     })
 }
+pub fn selection_reduction(db: &Connection, p: &Value, requested: &CloudDraft) -> Result<bool> {
+    let saved = draft(db, p)?;
+    Ok(requested.enabled == saved.enabled
+        && requested.automatic == saved.automatic
+        && requested.mode == saved.mode
+        && requested.soft_limit == saved.soft_limit
+        && requested.documents.len() < saved.documents.len()
+        && requested
+            .documents
+            .iter()
+            .all(|id| saved.documents.contains(id)))
+}
 pub fn preview(db: &Connection, id: &str, draft: &CloudDraft) -> Result<CloudPlan> {
     let p = project(db, id)?;
-    let versions = desired(db, id, draft)?;
-    if draft.enabled && n(&p, "started") == 0 && versions.is_empty() {
+    let reduction = selection_reduction(db, &p, draft)?;
+    let versions = desired_selection(db, id, draft, !reduction)?;
+    if draft.enabled && n(&p, "started") == 0 && versions.is_empty() && !reduction {
         return Err("Select at least one eligible document before enabling cloud indexing. No configuration was saved.".into());
     }
     let jobs = jobs(db, id)?;
@@ -187,8 +211,13 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
     if preview(&tx, id, draft)?.token != token {
         return Err("Local versions or cloud state changed. Review a fresh preview.".into());
     }
-    let bound:String=tx.query_row("SELECT COALESCE(scope,'') FROM cloud_connection WHERE singleton=1 AND status='connected'",[],|r|r.get(0)).map_err(|_|"Test the saved OpenAI key successfully before enabling cloud indexing.".to_string())?;
     let p = project(&tx, id)?;
+    let reduction = selection_reduction(&tx, &p, draft)?;
+    let bound: String = if reduction {
+        s(&p, "scope").into()
+    } else {
+        tx.query_row("SELECT COALESCE(scope,'') FROM cloud_connection WHERE singleton=1 AND status='connected'",[],|r|r.get(0)).map_err(|_|"Test the saved OpenAI key successfully before enabling cloud indexing.".to_string())?
+    };
     if n(&p, "delete_requested") == 1 {
         return Err(
             "Finish or disconnect the pending index deletion before changing cloud configuration."
@@ -207,7 +236,11 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         tx.execute("INSERT INTO cloud_documents VALUES(?1,?2)", params![id, d])
             .map_err(error)?;
     }
-    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string()]).map_err(error)?;
+    // Explicit document opt-outs are independent of uploads and source availability.
+    // Preserve uncertain uploads without a File ID so re-selection can recover them safely.
+    tx.execute("UPDATE cloud_jobs SET desired=0,phase=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'selection_remove' ELSE phase END,state=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'removing' ELSE state END,next_at=0,error=NULL WHERE project_id=?1 AND document_id NOT IN (SELECT document_id FROM cloud_documents WHERE project_id=?1)",[id]).map_err(error)?;
+    tx.execute("UPDATE cloud_jobs SET desired=1,phase='attach',state='uploaded',next_at=0,error=NULL WHERE project_id=?1 AND phase='selection_remove' AND document_id IN (SELECT document_id FROM cloud_documents WHERE project_id=?1) AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=?1 AND e.version_id=cloud_jobs.version_id)",[id]).map_err(error)?;
+    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN ?8 THEN sync_requested WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string(),reduction]).map_err(error)?;
     activity(
         &tx,
         id,
@@ -253,6 +286,30 @@ pub fn verify_flags(db: &Connection, id: &str, expected: &[(&str, i64)]) -> Resu
 pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
     rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
 }
+pub fn selection_removals(db: &Connection, id: &str) -> Result<Vec<Value>> {
+    rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 AND j.phase='selection_remove' AND j.state NOT IN ('removed','purged') AND j.desired=0 AND NOT EXISTS(SELECT 1 FROM cloud_documents c WHERE c.project_id=j.project_id AND c.document_id=j.document_id) ORDER BY j.id",&[&id])
+}
+/// Only the exact GET/DELETE routes needed to complete saved document opt-outs.
+pub fn selection_removal_request(
+    db: &Connection,
+    id: &str,
+    method: &str,
+    path: &str,
+) -> Result<bool> {
+    if !["GET", "DELETE"].contains(&method) {
+        return Ok(false);
+    }
+    let p = project(db, id)?;
+    let jobs = selection_removals(db, id)?;
+    if jobs.is_empty() || s(&p, "store_id").is_empty() {
+        return Ok(false);
+    }
+    let store = format!("/vector_stores/{}", s(&p, "store_id"));
+    Ok((method == "GET" && path == store)
+        || jobs.iter().any(|j| {
+            !s(j, "file_id").is_empty() && path == format!("{store}/files/{}", s(j, "file_id"))
+        }))
+}
 pub fn view(db: &Connection, id: &str) -> Result<Value> {
     let mut p = project(db, id)?;
     let connection = rows(
@@ -263,7 +320,15 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
     .pop()
     .ok_or("Connection state unavailable.")?;
     p["connectionStatus"] = connection["status"].clone();
-    if n(&p, "enabled") == 1 && s(&p, "store_state") != "deleted" {
+    if n(&p, "enabled") == 1
+        && s(&p, "store_state") != "deleted"
+        && ![
+            "cleanup_pending",
+            "cleanup_failed",
+            "selection_removal_failed",
+        ]
+        .contains(&s(&p, "status"))
+    {
         if s(&connection, "status") != "connected" {
             p["status"] = json!("key_disconnected");
             p["error"] = json!("Save/test the OpenAI key in Settings to resume cloud operations.");
@@ -276,6 +341,8 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
         }
     }
     let js = jobs(db, id)?;
+    p["selectionSaved"] = json!(!s(&p, "scope").is_empty());
+    p["selectionRemovalPending"] = json!(selection_removals(db, id)?.len());
     let local = desired(db, id, &draft(db, &p)?);
     p["localReady"] = json!(local.is_ok());
     p["localError"] = json!(local.err());
@@ -320,7 +387,7 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
     for v in wanted {
         let job = uuid::Uuid::new_v4().to_string();
         let ext = if v.kind == "word" { "docx" } else { "md" };
-        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,state=CASE WHEN state='removed' THEN CASE WHEN file_id IS NULL THEN 'pending' ELSE 'uploaded' END ELSE state END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
+        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,state=CASE WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
     }
     tx.commit().map_err(error)
 }
