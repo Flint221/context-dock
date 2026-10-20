@@ -384,6 +384,7 @@ export default function App() {
               Project name
               <input
                 autoFocus
+                data-autofocus
                 required
                 maxLength={120}
                 value={name}

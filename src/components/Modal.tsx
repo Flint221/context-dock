@@ -14,6 +14,7 @@ export function Modal({
     const d = ref.current!;
     const prior = document.activeElement as HTMLElement | null;
     d.showModal();
+    d.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     return () => {
       d.close();
       prior?.focus();
