@@ -359,8 +359,10 @@ export default function App() {
             readSequence.current += 1;
             setData(snapshot);
             setLoaded(true);
+            setPage("projects");
             setSelected(null);
             setEditing(null);
+            setError("");
             setNotice(
               "Project removed. Local files and captured history retained.",
             );

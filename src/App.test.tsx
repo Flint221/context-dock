@@ -335,6 +335,104 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   expect(registry.remove).toHaveBeenCalledWith("p1", false);
 });
 
+it("returns to All projects after removal and ignores an older read across later navigation", async () => {
+  const user = userEvent.setup();
+  const base = {
+    path: "C:\\Test",
+    createdAt: "",
+    status: "available",
+    lastScan: null,
+    scanError: null,
+    documentCount: 1,
+    latestModified: null,
+    trackingEnabled: false,
+    archiveEnabled: false,
+    trackingRevision: 0,
+    folderState: "ready" as const,
+  };
+  state.projects = [
+    { ...base, id: "p1", name: "Removed project" },
+    { ...base, id: "p2", name: "Remaining project", path: "C:\\Other" },
+  ];
+  state.documents = state.projects.map((p) => ({
+    id: `source-${p.id}`,
+    projectId: p.id,
+    documentId: `document-${p.id}`,
+    name: `${p.name}.md`,
+    relativePath: `${p.name}.md`,
+    absolutePath: `${p.path}\\${p.name}.md`,
+    kind: "markdown",
+    size: 20,
+    modifiedAt: null,
+    lastObserved: "",
+    status: "available",
+  }));
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (listener) => {
+    notify = listener;
+    return () => {};
+  });
+  vi.mocked(registry.remove).mockImplementation(async (id) => {
+    state.projects = state.projects.filter((p) => p.id !== id);
+    state.documents = state.documents.filter((d) => d.projectId !== id);
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Removed project C:/ }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Refresh documents" }),
+    ).toBeEnabled(),
+  );
+  const stale = structuredClone(state);
+  let finishOldRead: (snapshot: Snapshot) => void = () => {};
+  vi.mocked(registry.snapshot).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOldRead = resolve;
+      }),
+  );
+  await act(async () => notify());
+  await user.click(screen.getByRole("button", { name: "Remove project" }));
+  const dialog = screen.getByRole("dialog", { name: "Remove project?" });
+  const confirm = within(dialog).getByRole("button", {
+    name: "Remove project",
+  });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  expect(
+    await screen.findByRole("button", { name: /Remaining project C:/ }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /Removed project C:/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "All projects" }),
+  ).not.toBeInTheDocument();
+  await act(async () => finishOldRead(stale));
+  await user.click(screen.getByRole("button", { name: "Dashboard" }));
+  expect(
+    screen.queryByRole("button", { name: /Removed project/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Removed project.md")).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Registered projects").parentElement,
+  ).toHaveTextContent("1");
+  expect(
+    screen.getByText("Discovered documents").parentElement,
+  ).toHaveTextContent("1");
+  await user.click(screen.getByRole("button", { name: "Projects1" }));
+  expect(
+    screen.queryByRole("button", { name: /Removed project/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /Remaining project C:/ }),
+  ).toBeInTheDocument();
+  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", false);
+});
+
 it("keeps one live tracking panel through updates and removes it on navigation", async () => {
   const user = userEvent.setup();
   state.projects = [

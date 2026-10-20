@@ -1827,11 +1827,78 @@ fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local
     let api = Mock::default();
     f.enable();
     f.sync(&api);
+    let source_path = f.root.join("Master_Context.md");
+    let source_bytes = fs::read(&source_path).unwrap();
+    let snapshot_path = f.r.versions(&f.doc).unwrap()[0].snapshot_path.clone();
+    let snapshot_bytes = fs::read(&snapshot_path).unwrap();
+    let archive_path = f.root.join("Old Context Files").join("retained.md");
+    fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
+    fs::write(&archive_path, b"retained local archive").unwrap();
+    let chat = crate::chat::create(&f.r, &f.id).unwrap();
+    let chat_id = s(&chat, "id").to_string();
+    f.r.db.execute(
+        "INSERT INTO project_chat_turns(id,chat_id,question,answer,state,created_at) VALUES('retained-turn',?1,'Saved question','Saved answer','completed',?2)",
+        params![chat_id, crate::models::now()],
+    ).unwrap();
+    let doc_id = f.doc.clone();
+    let saved_versions = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM document_versions WHERE document_id=?1",
+        &[&doc_id],
+    )
+    .unwrap();
+    let saved_chat = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM project_chats WHERE id=?1",
+        &[&chat_id],
+    )
+    .unwrap();
+    let saved_turns = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM project_chat_turns WHERE chat_id=?1",
+        &[&chat_id],
+    )
+    .unwrap();
+    let assert_local_preserved = |r: &Registry| {
+        assert!(r.snapshot().unwrap().projects.is_empty());
+        assert!(r.snapshot().unwrap().documents.is_empty());
+        assert_eq!(fs::read(&source_path).unwrap(), source_bytes);
+        assert_eq!(fs::read(&snapshot_path).unwrap(), snapshot_bytes);
+        assert_eq!(fs::read(&archive_path).unwrap(), b"retained local archive");
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM document_versions WHERE document_id=?1",
+                &[&doc_id]
+            )
+            .unwrap(),
+            saved_versions
+        );
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM project_chats WHERE id=?1",
+                &[&chat_id]
+            )
+            .unwrap(),
+            saved_chat
+        );
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM project_chat_turns WHERE chat_id=?1",
+                &[&chat_id]
+            )
+            .unwrap(),
+            saved_turns
+        );
+    };
     assert!(f.r.remove_with_cloud_choice(&f.id, false).is_err());
     assert!(
         cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).is_err()
     );
     f.r.remove_with_cloud_choice(&f.id, true).unwrap();
+    assert_local_preserved(&f.r);
     assert!(f.r.snapshot().unwrap().projects.is_empty());
     assert!(api.0.borrow().store.is_some());
     assert_eq!(api.0.borrow().files.len(), 1);
@@ -1841,6 +1908,8 @@ fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local
     cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
     cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
     f.r.remove_with_cloud_choice(&f.id, false).unwrap();
+    assert_local_preserved(&f.r);
+    assert_local_preserved(&Registry::open(&f.r.store.join("test.db")).unwrap());
     assert!(api.0.borrow().store.is_none());
     assert!(f.root.join("Master_Context.md").exists());
     assert_eq!(
