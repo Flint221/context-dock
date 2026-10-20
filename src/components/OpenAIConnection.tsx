@@ -53,9 +53,10 @@ export function OpenAIConnection() {
         . Enter it only here; do not share it in chat.
       </p>
       <p>
-        Optional cloud indexing. Local discovery, snapshots and comparisons work
-        without an API key. Each project needs a separate selection and upload
-        consent.
+        Optional OpenAI features. Local tracking, comparisons, baselines and
+        saved reports work without an API key. Cloud indexing requires project
+        selection and consent. Project intelligence requires approval for each
+        paid analysis.
       </p>
       <p>
         Status: <strong>{connection?.status ?? "Loading"}</strong> · Key{" "}
@@ -72,7 +73,7 @@ export function OpenAIConnection() {
           void run(async () => {
             await request;
             await cloud.action(null, "test");
-          }, "Key saved and connection verified. Select documents in your project, review cloud changes, then Start Initial Sync.");
+          }, "Key saved and connection verified. Open Project intelligence for an on-demand analysis, or configure optional cloud indexing in your project.");
         }}
       >
         <label>

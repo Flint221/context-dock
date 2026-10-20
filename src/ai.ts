@@ -20,6 +20,7 @@ export interface Goals {
   principles: string;
 }
 export interface Source {
+  current?: boolean;
   document: string;
   version: string;
   number: number;
@@ -112,6 +113,7 @@ export interface Captured {
   current: number;
 }
 export interface IntelligenceView {
+  projectName?: string;
   baselines: Baseline[];
   versions: Captured[];
   reports: Pick<

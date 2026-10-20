@@ -42,7 +42,7 @@ pub fn source(r: &Registry, project_id: &str, id: &str) -> Result<(Source, Strin
     let v = &job.earlier;
     let current: bool =
         r.db.query_row(
-            "SELECT current_version_id=?2 FROM documents WHERE id=?1",
+            "SELECT COALESCE(current_version_id=?2,0) FROM documents WHERE id=?1",
             rusqlite::params![v.document_id, id],
             |v| v.get(0),
         )
@@ -125,8 +125,11 @@ pub fn approve(r: &mut Registry, p: &str, payload: &Value) -> Result<String> {
 }
 pub fn view(r: &Registry, p: &str) -> Result<Value> {
     project(r, p)?;
+    let name: String =
+        r.db.query_row("SELECT name FROM projects WHERE id=?1", [p], |v| v.get(0))
+            .map_err(error)?;
     Ok(
-        json!({"baselines":cloud::rows(&r.db,"SELECT b.*,b.id=c.baseline_id active FROM ai_baselines b LEFT JOIN ai_current_baseline c ON c.project_id=b.project_id WHERE b.project_id=?1 ORDER BY revision DESC",&[&p])?,
+        json!({"projectName":name,"baselines":cloud::rows(&r.db,"SELECT b.*,b.id=c.baseline_id active FROM ai_baselines b LEFT JOIN ai_current_baseline c ON c.project_id=b.project_id WHERE b.project_id=?1 ORDER BY revision DESC",&[&p])?,
     "versions":cloud::rows(&r.db,"SELECT v.id,v.document_id document,v.number,v.captured_at capturedAt,d.family_name name,d.current_version_id=v.id current FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 ORDER BY d.family_name,v.number",&[&p])?,
     "reports":cloud::rows(&r.db,"SELECT id,kind,state,created_at,completed_at,error FROM ai_reports WHERE project_id=?1 ORDER BY created_at DESC LIMIT 100",&[&p])?}),
     )

@@ -127,6 +127,7 @@ export function ProjectIntelligence({
   ];
   const versions = (view?.versions ?? []).filter((v) => v.document === family);
   const active = view?.baselines.find((b) => b.active);
+  const displayName = view?.projectName ?? name;
   function baselineEditor(b?: Baseline) {
     setTitle(b ? `${b.title} — revised` : "");
     setGoals(b ? (JSON.parse(b.content) as Goals) : empty);
@@ -197,8 +198,8 @@ export function ProjectIntelligence({
         Refresh intelligence · local only
       </button>
       <p>
-        {name} · AI interpretation is optional. Snapshots and local diffs remain
-        authoritative.
+        {displayName} · AI interpretation is optional. Snapshots and local diffs
+        remain authoritative.
       </p>
       {error && <p role="alert">{error}</p>}
       {notice && <p role="status">{notice}</p>}
@@ -528,14 +529,16 @@ export function ProjectIntelligence({
             >
               <h3>Review paid analysis · {preview.plan.request.kind}</h3>
               <p>
-                {name} · {preview.plan.request.model} · {preview.requests} model
-                request · No vector retrieval or new cloud file uploads.
+                {displayName} · {preview.plan.request.model} ·{" "}
+                {preview.requests} model request · No vector retrieval or new
+                cloud file uploads.
               </p>
               <ul>
                 {preview.plan.sources.map((v) => (
                   <li key={v.version}>
-                    {v.name} · v{v.number} · captured {date(v.capturedAt)} ·
-                    SHA-256 verified
+                    {v.name} · v{v.number} ·{" "}
+                    {v.current ? "current" : "historical"} · captured{" "}
+                    {date(v.capturedAt)} · SHA-256 verified
                   </li>
                 ))}
               </ul>
@@ -667,6 +670,9 @@ export function ProjectIntelligence({
                 automatically.
               </p>
               <p>{report.plan.scope}</p>
+              {report.plan.warnings.map((warning, i) => (
+                <p key={i}>{warning}</p>
+              ))}
               {report.error && <p role="alert">{report.error}</p>}
               <p>
                 Returned usage: {report.usage?.input_tokens ?? "Not returned"}{" "}
