@@ -1,9 +1,19 @@
 # ContextDock
 
-ContextDock 0.5.4 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.6.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
-## Ask project (0.5.4)
+## Moved or missing project folders (Milestone 6)
+
+Move or rename a project folder in Explorer, then open its existing ContextDock project and choose **Reassign folder**. Select the project folder at its new location, review the known/unchanged/changed/additional documents and exact missing paths, confirm the folder belongs to this project, then **Confirm reassignment**. The project ID, document histories, snapshots, saved chats, cloud mappings and tracking/archival preferences are retained. Reassignment changes the registration; it does not move files or combine registrations.
+
+Missing, inaccessible or replaced roots show **Folder lost — please reassign it**. This state persists across closing/reopening the app and stops project tracking and new cloud/AI work until explicit reassignment. Restoring the original location still requires selecting it through Reassign folder. Other projects, navigation and app shutdown remain available. Folder health is checked even with tracking off; a different directory occupying the old path is detected using its filesystem identity.
+
+Missing individual files remain listed with their original history. Restore them and **Refresh documents**. Selected missing/inaccessible files block syncing and new questions; saved chats remain readable once the folder is reassigned. After reassignment, opted-in tracking rechecks the new root; questions wait for local reconciliation and any changed versions to finish indexing. An already-sent network request may finish. Invalid/unreadable destinations, links/junctions, app-storage overlap, other current/retained project roots and stale reviews fail visibly. An empty or incorrect parent folder lists every known file as missing; review carefully before confirming.
+
+See the [Milestone 6 folder recovery walkthrough](docs/manual-testing-milestone-6.md). Schema 006 upgrades existing databases in place; do not downgrade to a pre-0.6.0 build afterward.
+
+## Ask project (0.6.0)
 
 Enter sends; Shift+Enter adds a new line. Sources show the original filename and capture number without passage previews. Follow-ups include up to six recent completed exchanges, bounded to 12,000 UTF-8 bytes; older messages stay saved locally.
 
@@ -35,7 +45,7 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.5.4_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 5; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run `ContextDock_0.6.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 6; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
 5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
@@ -129,8 +139,8 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.4_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 now presents simple cloud-backed questions and local chats; earlier analysis/baseline records are retained. Milestone 6 remains future production hardening: signing, storage management and automatic update delivery.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 now presents simple cloud-backed questions and local chats; earlier analysis/baseline records are retained. Milestone 6 begins with persistent folder recovery and safe reassignment. Signing, storage management and automatic update delivery remain future work.

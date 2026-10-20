@@ -22,6 +22,8 @@ Version 0.5.0 adds explicitly approved Responses requests for exact version comp
 
 ## Milestone 6 — Production hardening and updates
 
+Version 0.6.0 implements persistent folder-loss recovery, explicit reviewed folder reassignment, directory-identity checks, watcher rebinding and missing-source safeguards for local/cloud project work. Schema 006 retains project/history/chat/cloud identity; no source files move during reassignment. The native and frontend regressions plus the Milestone 6 manual guide cover restarts, partial moves, stale/invalid reviews, tracking-off roots and recovery. Signing, updates, migration backups, broader storage management and installed user acceptance remain future/incomplete work; this is the first hardening pass.
+
 The 0.5.1 simplification replaces main-page baseline setup with one Cloud sync switch and Ask project: version-filtered vector retrieval, one generated answer per Send, multiple persisted local chats and local-only deletion. Schema 005 preserves existing data. Advanced AI tools are deferred; baseline/report records from 0.5.0 remain stored. See manual-testing-chat.md for current acceptance steps.
 
 Version 0.5.2 adds confirmations, duplicate-click protection, loading/check indicators and native/readback verification for major settings. The simple cloud-chat feature is implemented. A redesigned AI tool interface, historical-version chat selection, chat export and storage/retention controls are outside this first pass; production hardening and user-run live account acceptance remain.
