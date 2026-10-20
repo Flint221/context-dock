@@ -341,3 +341,35 @@ it("keeps key-test recovery available when save succeeds but the automatic conne
   );
   expect(screen.getByLabelText("API key")).toHaveValue("");
 });
+it("explains queued configuration changes for an already started index without asking to restart initial sync", async () => {
+  const user = userEvent.setup();
+  view.enabled = 1;
+  view.started = 1;
+  view.families[0].selected = 1;
+  vi.mocked(cloud.action)
+    .mockResolvedValueOnce({
+      token: "change",
+      files: 1,
+      bytes: 100,
+      additions: 0,
+      removals: 0,
+      storeName: "Test",
+    } as never)
+    .mockResolvedValueOnce(undefined);
+  render(<CloudPanel project="p1" />);
+  await screen.findByLabelText(/Master Context/);
+  await user.click(
+    screen.getByRole("button", { name: "Review cloud changes" }),
+  );
+  const modal = screen.getByRole("dialog");
+  await user.click(within(modal).getByRole("checkbox"));
+  await user.click(
+    within(modal).getByRole("button", { name: "Confirm cloud configuration" }),
+  );
+  expect(
+    await screen.findByText(/Changes are queued; resume cloud sync/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Start Initial Sync" }),
+  ).toBeDisabled();
+});

@@ -75,6 +75,7 @@ export function CloudPanel({ project }: { project: string }) {
   async function run(action: () => Promise<unknown>) {
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await action();
       await load();
@@ -444,7 +445,9 @@ export function CloudPanel({ project }: { project: string }) {
                   setPlan(null);
                   setNotice(
                     draft.enabled
-                      ? "Cloud configuration saved. Click Start Initial Sync to begin uploading your selected documents."
+                      ? view?.started
+                        ? "Cloud configuration saved. Changes are queued; resume cloud sync if it is paused."
+                        : "Cloud configuration saved. Click Start Initial Sync to begin uploading your selected documents."
                       : "Cloud configuration saved.",
                   );
                 })
