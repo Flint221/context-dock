@@ -8,6 +8,8 @@ Association removal requires a positive deletion acknowledgement (or confirmed a
 
 Re-selection cancels pending family-removal intents and reconciles retained File IDs under the saved current/history policy in the same owned store. Existing per-version exclusions remain explicit. A previously uncertain upload without a File ID keeps its recovery phase through deselection and re-selection, so it is reconciled by owned filename/size/hash instead of posted again. Whole-project Off retains its verified cleanup protocol, deleting every accessible installation/project-owned old store and owned upload while preserving other projects' stores; On rebuilds from the saved local selection/snapshots. `selectionSaved` prevents the simple toggle from substituting all eligible documents when an existing selection is empty or ineligible. Cleanup/removal failure status survives cloud-view pause decoration.
 
+Late document-removal results compare the saved cloud revision and cleanup state before updating project status, preserving whole-project Off's stop intent while it waits for the HTTP gate. The main Cloud sync checkbox reflects persisted enablement, including a checked Paused state; unchecking consistently requests verified deletion rather than attempting to enable an already-paused project.
+
 See the [toggle audit](toggle-audit.md) for the complete control matrix and current acceptance cases. All new network regressions use the scripted provider and disposable documents, without reading real credentials or changing user cloud resources.
 
 # Architecture — persistent folder recovery (0.6.0 / Milestone 6)
