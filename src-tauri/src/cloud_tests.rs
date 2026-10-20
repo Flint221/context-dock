@@ -908,6 +908,57 @@ fn resumed_store_before_initial_start_becomes_idle_without_uploading() {
     assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
 }
 #[test]
+fn confirmed_stop_controls_block_queued_work_without_credentials_and_keep_history() {
+    for action in ["disconnect", "stop_automatic"] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        f.edit();
+        cloud::queue(&mut f.r.db, &f.id).unwrap();
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET auto_sync=1,sync_requested=1,delete_requested=1",
+                [],
+            )
+            .unwrap();
+        f.r.db
+            .execute("UPDATE cloud_connection SET status='disconnected'", [])
+            .unwrap();
+        let before = api.0.borrow().calls.len();
+        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), action, &json!({})).unwrap();
+        let project = cloud::project(&f.r.db, &f.id).unwrap();
+        assert_eq!(n(&project, "paused"), 1);
+        assert_eq!(n(&project, "delete_requested"), 0);
+        if action == "stop_automatic" {
+            assert_eq!(n(&project, "auto_sync"), 0);
+            assert_eq!(n(&project, "sync_requested"), 0);
+            assert_eq!(n(&project, "enabled"), 1);
+        } else {
+            assert_eq!(n(&project, "enabled"), 0);
+        }
+        // Restoring key availability cannot bypass the user's persisted stop.
+        f.r.db
+            .execute("UPDATE cloud_connection SET status='connected'", [])
+            .unwrap();
+        let guard = cloud_commands::ProjectApi::new(
+            &api,
+            &f.r.store.join("test.db"),
+            &f.id,
+            "bound",
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .unwrap();
+        assert!(guard.upload("blocked.md", b"not sent".to_vec()).is_err());
+        f.sync(&api);
+        assert_eq!(api.0.borrow().calls.len(), before);
+        assert_eq!(api.0.borrow().associations.len(), 1);
+        assert_eq!(api.0.borrow().files.len(), 1);
+        assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+        assert!(f.r.snapshot().unwrap().projects[0].tracking_enabled);
+    }
+}
+#[test]
 fn request_guard_stops_next_http_call_on_pause_disconnect_or_shutdown() {
     use std::sync::{
         atomic::{AtomicBool, Ordering},

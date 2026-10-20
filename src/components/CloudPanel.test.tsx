@@ -73,10 +73,11 @@ beforeEach(() => {
     usage: [],
   });
 });
-it("reviews unsaved history changes from Sync Now and only syncs after confirmation", async () => {
+it("opens policy review immediately and restores the saved policy on cancel or close", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
   view.started = 1;
+  view.paused = 0;
   view.families[0].selected = 1;
   vi.mocked(cloud.action).mockImplementation(async (_project, action) => {
     if (action === "preview") return changePlan as never;
@@ -85,27 +86,34 @@ it("reviews unsaved history changes from Sync Now and only syncs after confirmat
   });
   render(<CloudPanel project="p1" />);
   await screen.findByLabelText(/Master Context/);
+  for (const button of ["Cancel", "Close dialog"]) {
+    await user.selectOptions(
+      screen.getByLabelText("Version policy"),
+      "history",
+    );
+    const modal = await screen.findByRole("dialog");
+    expect(
+      within(modal).getByRole("button", { name: "Confirm and sync" }),
+    ).toBeDisabled();
+    await user.click(within(modal).getByRole("button", { name: button }));
+    expect(screen.getByLabelText("Version policy")).toHaveValue("current");
+  }
+  expect(vi.mocked(cloud.action).mock.calls.map((call) => call[1])).toEqual([
+    "preview",
+    "preview",
+  ]);
   await user.selectOptions(screen.getByLabelText("Version policy"), "history");
-  expect(screen.getByText(/Unsaved cloud changes/)).toBeInTheDocument();
-  expect(cloud.action).not.toHaveBeenCalled();
-  await user.click(screen.getByRole("button", { name: "Sync Now" }));
-  let modal = screen.getByRole("dialog");
-  expect(
-    within(modal).getByRole("button", { name: "Confirm and sync" }),
-  ).toBeDisabled();
-  expect(cloud.action).toHaveBeenCalledTimes(1);
-  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  expect(cloud.action).toHaveBeenCalledTimes(1);
-  await user.click(screen.getByRole("button", { name: "Sync Now" }));
-  modal = screen.getByRole("dialog");
+  const modal = await screen.findByRole("dialog");
   expect(within(modal).getByRole("checkbox")).not.toBeChecked();
   await user.click(within(modal).getByRole("checkbox"));
   await user.click(
     within(modal).getByRole("button", { name: "Confirm and sync" }),
   );
-  await waitFor(() => expect(cloud.action).toHaveBeenCalledTimes(4));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
   expect(vi.mocked(cloud.action).mock.calls.map((call) => call[1])).toEqual([
+    "preview",
     "preview",
     "preview",
     "apply",
@@ -116,16 +124,10 @@ it("reviews unsaved history changes from Sync Now and only syncs after confirmat
     "apply",
     expect.objectContaining({
       draft: expect.objectContaining({ mode: "history" }),
-      token: changePlan.token,
-      consent: true,
     }),
   );
-  await waitFor(() =>
-    expect(screen.queryByText(/Unsaved cloud changes/)).not.toBeInTheDocument(),
-  );
-  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });
-it("does not sync after an unsaved-change confirmation fails", async () => {
+it("reviews the upload limit once editing finishes, keeps errors visible, and cancels back to the saved limit", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
   view.started = 1;
@@ -134,74 +136,157 @@ it("does not sync after an unsaved-change confirmation fails", async () => {
     .mockRejectedValueOnce("Review a fresh preview");
   render(<CloudPanel project="p1" />);
   await screen.findByLabelText(/Master Context/);
-  await user.clear(screen.getByLabelText("Soft upload limit (MiB)"));
-  await user.type(screen.getByLabelText("Soft upload limit (MiB)"), "25");
-  await user.click(screen.getByRole("button", { name: "Sync Now" }));
-  const modal = screen.getByRole("dialog");
+  const input = screen.getByLabelText("Soft upload limit (MiB)");
+  await user.clear(input);
+  await user.type(input, "25");
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.keyboard("{Enter}");
+  const modal = await screen.findByRole("dialog");
+  expect(cloud.action).toHaveBeenCalledTimes(1);
   await user.click(within(modal).getByRole("checkbox"));
   await user.click(
-    within(modal).getByRole("button", { name: "Confirm and sync" }),
+    within(modal).getByRole("button", { name: "Confirm cloud configuration" }),
   );
   expect(await within(modal).findByRole("alert")).toHaveTextContent(
     "Configuration was not saved",
   );
   expect(cloud.action).toHaveBeenCalledTimes(2);
-  expect(screen.getByLabelText("Soft upload limit (MiB)")).toHaveValue(25);
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(input).toHaveValue(50);
 });
-it("reviews unsaved changes before Start Initial Sync and starts only after confirmation", async () => {
+it("opens review immediately when a saved document selection changes", async () => {
   const user = userEvent.setup();
   view.enabled = 1;
+  view.started = 1;
   view.families[0].selected = 1;
+  vi.mocked(cloud.action).mockResolvedValue(changePlan as never);
+  render(<CloudPanel project="p1" />);
+  await user.click(await screen.findByLabelText(/Master Context/));
+  const modal = await screen.findByRole("dialog");
+  expect(cloud.action).toHaveBeenCalledWith("p1", "preview", {
+    draft: expect.objectContaining({ documents: [] }),
+  });
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(screen.getByLabelText(/Master Context/)).toBeChecked();
+  expect(cloud.action).toHaveBeenCalledTimes(1);
+});
+it("asks to stop immediately without a key and persists the stopped checkbox only on confirmation", async () => {
+  const user = userEvent.setup();
+  view.enabled = 1;
+  view.started = 1;
+  view.connectionStatus = "error";
+  view.store_state = "linked";
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    view.enabled = 0;
+    view.paused = 1;
+    return undefined as never;
+  });
+  render(<CloudPanel project="p1" />);
+  const enable = await screen.findByLabelText(
+    "Enable cloud indexing for this project",
+  );
+  await user.click(enable);
+  let modal = screen.getByRole("dialog", { name: "Stop syncing?" });
+  expect(within(modal).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(enable).toBeChecked();
+  await user.click(enable);
+  modal = screen.getByRole("dialog");
+  await user.click(within(modal).getByRole("button", { name: "Stop syncing" }));
+  await waitFor(() => expect(enable).not.toBeChecked());
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "disconnect");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sync Now" })).toBeDisabled();
+});
+it("keeps the stop dialog open on failure and leaves the saved checkbox enabled", async () => {
+  const user = userEvent.setup();
+  view.enabled = 1;
+  view.started = 1;
+  vi.mocked(cloud.action).mockRejectedValueOnce("Database unavailable");
+  render(<CloudPanel project="p1" />);
+  const enable = await screen.findByLabelText(
+    "Enable cloud indexing for this project",
+  );
+  await user.click(enable);
+  const modal = screen.getByRole("dialog");
+  await user.click(within(modal).getByRole("button", { name: "Stop syncing" }));
+  expect(await within(modal).findByRole("alert")).toHaveTextContent(
+    "Could not stop syncing",
+  );
+  expect(enable).toBeChecked();
+  await user.click(within(modal).getByRole("button", { name: "Close dialog" }));
+  expect(enable).toBeChecked();
+});
+it("confirms stopping automatic sync separately and reflects its saved paused state", async () => {
+  const user = userEvent.setup();
+  view.enabled = 1;
+  view.started = 1;
+  view.auto_sync = 1;
+  view.paused = 0;
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    view.auto_sync = 0;
+    view.paused = 1;
+    return undefined as never;
+  });
+  render(<CloudPanel project="p1" />);
+  const automatic = await screen.findByLabelText(/Automatically sync newly/);
+  await user.click(automatic);
+  let modal = screen.getByRole("dialog", { name: "Stop automatic syncing?" });
+  await user.click(within(modal).getByRole("button", { name: "Cancel" }));
+  expect(automatic).toBeChecked();
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(automatic);
+  modal = screen.getByRole("dialog");
+  await user.click(
+    within(modal).getByRole("button", { name: "Stop automatic syncing" }),
+  );
+  await waitFor(() => expect(automatic).not.toBeChecked());
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "stop_automatic");
+  expect(
+    screen.getByRole("button", { name: "Resume cloud sync" }),
+  ).toBeEnabled();
   vi.mocked(cloud.action)
+    .mockReset()
     .mockResolvedValueOnce(changePlan as never)
     .mockResolvedValue(undefined);
-  render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
-  await user.selectOptions(screen.getByLabelText("Version policy"), "history");
-  await user.click(screen.getByRole("button", { name: "Start Initial Sync" }));
-  const modal = screen.getByRole("dialog");
-  expect(cloud.action).toHaveBeenCalledTimes(1);
-  expect(
-    within(modal).getByRole("button", {
-      name: "Confirm and start initial sync",
-    }),
-  ).toBeDisabled();
+  await user.click(automatic);
+  modal = await screen.findByRole("dialog");
   await user.click(within(modal).getByRole("checkbox"));
   await user.click(
-    within(modal).getByRole("button", {
-      name: "Confirm and start initial sync",
-    }),
+    within(modal).getByRole("button", { name: "Confirm and sync" }),
   );
   await waitFor(() => expect(cloud.action).toHaveBeenCalledTimes(3));
   expect(vi.mocked(cloud.action).mock.calls.map((call) => call[1])).toEqual([
     "preview",
     "apply",
-    "start",
+    "sync",
   ]);
 });
-it("reviews disabling cloud indexing from Sync Now without issuing a sync", async () => {
+it("reviews re-enabling an existing stopped project and resumes only after consent", async () => {
   const user = userEvent.setup();
-  view.enabled = 1;
+  view.enabled = 0;
   view.started = 1;
+  view.store_state = "linked";
+  view.families[0].selected = 1;
   vi.mocked(cloud.action)
     .mockResolvedValueOnce(changePlan as never)
-    .mockResolvedValueOnce(undefined);
+    .mockResolvedValue(undefined);
   render(<CloudPanel project="p1" />);
   await user.click(
     await screen.findByLabelText("Enable cloud indexing for this project"),
   );
-  await user.click(screen.getByRole("button", { name: "Sync Now" }));
-  const modal = screen.getByRole("dialog");
+  const modal = await screen.findByRole("dialog");
+  expect(cloud.action).toHaveBeenCalledTimes(1);
   await user.click(within(modal).getByRole("checkbox"));
   await user.click(
-    within(modal).getByRole("button", { name: "Confirm cloud configuration" }),
+    within(modal).getByRole("button", { name: "Confirm and sync" }),
   );
-  await waitFor(() =>
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
-  );
+  await waitFor(() => expect(cloud.action).toHaveBeenCalledTimes(3));
   expect(vi.mocked(cloud.action).mock.calls.map((call) => call[1])).toEqual([
     "preview",
     "apply",
+    "sync",
   ]);
 });
 it("requires a reviewed explicit selection and checked consent before apply; never starts initial uploads automatically", async () => {

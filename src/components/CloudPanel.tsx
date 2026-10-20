@@ -18,6 +18,15 @@ const initial: Draft = {
   documents: [],
   softLimit: 50 * 1024 * 1024,
 };
+function savedDraft(view: CloudView): Draft {
+  return {
+    enabled: !!view.enabled || view.store_state === "none",
+    automatic: !!view.auto_sync,
+    mode: view.mode,
+    documents: view.families.filter((f) => f.selected).map((f) => f.id),
+    softLimit: view.soft_limit,
+  };
+}
 export function CloudPanel({ project }: { project: string }) {
   const [view, setView] = useState<CloudView | null>(null);
   const [draft, setDraft] = useState<Draft>(initial);
@@ -27,6 +36,9 @@ export function CloudPanel({ project }: { project: string }) {
   const [plan, setPlan] = useState<Plan | null>(null);
   const [consent, setConsent] = useState(false);
   const [afterReview, setAfterReview] = useState<"start" | "sync" | null>(null);
+  const [stopping, setStopping] = useState<"project" | "automatic" | null>(
+    null,
+  );
   const [index, setIndex] = useState(false);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -43,14 +55,7 @@ export function CloudPanel({ project }: { project: string }) {
     const next = await cloud.view(project);
     if (!alive.current) return;
     setView(next);
-    if (!dirty.current)
-      setDraft({
-        enabled: !!next.enabled || next.store_state === "none",
-        automatic: !!next.auto_sync,
-        mode: next.mode,
-        documents: next.families.filter((f) => f.selected).map((f) => f.id),
-        softLimit: next.soft_limit,
-      });
+    if (!dirty.current) setDraft(savedDraft(next));
   }, [project]);
   useEffect(() => {
     alive.current = true;
@@ -87,11 +92,49 @@ export function CloudPanel({ project }: { project: string }) {
       if (alive.current) setBusy(false);
     }
   }
-  function edit(next: Partial<Draft>) {
+  function edit(next: Partial<Draft>, prompt = true) {
     setNotice("");
+    setError("");
+    if (next.enabled === false && view?.enabled) {
+      setStopping("project");
+      return;
+    }
+    if (next.automatic === false && view?.auto_sync && view.enabled) {
+      setStopping("automatic");
+      return;
+    }
+    const updated = { ...draft, ...next };
     dirty.current = true;
-    setDraft((d) => ({ ...d, ...next }));
+    setDraft(updated);
     setPlan(null);
+    if (
+      prompt &&
+      view &&
+      (view.enabled || view.started) &&
+      updated.enabled &&
+      connectionReady
+    ) {
+      review(
+        view.started &&
+          (!view.paused || next.enabled === true || next.automatic === true)
+          ? "sync"
+          : null,
+        updated,
+      );
+    }
+  }
+  function cancelChanges() {
+    if (busy) return;
+    dirty.current = false;
+    if (view) setDraft(savedDraft(view));
+    setPlan(null);
+    setAfterReview(null);
+    setStopping(null);
+    setError("");
+  }
+  function stopSync(kind: "project" | "automatic") {
+    setError("");
+    setStopping(kind);
   }
   const action = (name: string) => void run(() => cloud.action(project, name));
   function manage(action: string, job?: Job) {
@@ -111,9 +154,14 @@ export function CloudPanel({ project }: { project: string }) {
       view.families.some(
         (f) => !!f.selected !== draft.documents.includes(f.id),
       ));
-  function review(nextAction: "start" | "sync" | null = null) {
+  function review(
+    nextAction: "start" | "sync" | null = null,
+    selection = draft,
+  ) {
     void run(async () => {
-      const next = await cloud.action<Plan>(project, "preview", { draft });
+      const next = await cloud.action<Plan>(project, "preview", {
+        draft: selection,
+      });
       if (!alive.current) return;
       setAfterReview(nextAction);
       setConsent(false);
@@ -131,7 +179,7 @@ export function CloudPanel({ project }: { project: string }) {
           Refresh cloud status
         </button>
       </div>
-      {error && !plan && !index && !destruction && !recovery && (
+      {error && !plan && !stopping && !index && !destruction && !recovery && (
         <p role="alert">{error}</p>
       )}
       {busy && (
@@ -141,7 +189,7 @@ export function CloudPanel({ project }: { project: string }) {
       )}
       {view?.error && <p role="status">{view.error}</p>}
       {notice && <p role="status">{notice}</p>}
-      {view && !view.enabled && (
+      {view && !view.enabled && !view.started && (
         <div className="cloud-setup">
           <p>
             <strong>Finish cloud setup before initial upload.</strong> Checking
@@ -195,8 +243,8 @@ export function CloudPanel({ project }: { project: string }) {
             <legend>Project cloud selection</legend>
             {hasChanges && (
               <p role="status">
-                Unsaved cloud changes. Sync Now opens a review of these changes
-                before syncing. You can also use Review cloud changes below.
+                Unsaved cloud changes. Finish editing the upload limit to
+                review, or use Review cloud changes below.
               </p>
             )}
             <label className="cloud-check">
@@ -239,8 +287,24 @@ export function CloudPanel({ project }: { project: string }) {
                   max={512}
                   value={draft.softLimit / (1024 * 1024)}
                   onChange={(e) =>
-                    edit({ softLimit: Number(e.target.value) * 1024 * 1024 })
+                    edit(
+                      { softLimit: Number(e.target.value) * 1024 * 1024 },
+                      false,
+                    )
                   }
+                  onBlur={() => {
+                    if (
+                      hasChanges &&
+                      view.enabled &&
+                      connectionReady &&
+                      !plan &&
+                      !busy
+                    )
+                      review();
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
                 />
               </label>
             </div>
@@ -347,9 +411,9 @@ export function CloudPanel({ project }: { project: string }) {
             </button>
             <button
               disabled={busy || !view.enabled}
-              onClick={() => action("disconnect")}
+              onClick={() => stopSync("project")}
             >
-              Disconnect local cloud sync
+              Stop cloud syncing
             </button>
             <button
               disabled={busy}
@@ -398,13 +462,53 @@ export function CloudPanel({ project }: { project: string }) {
           </details>
         </>
       )}
-      {plan && (
+      {stopping && (
         <Modal
-          title="Confirm OpenAI cloud indexing"
-          close={() => {
-            if (!busy) setPlan(null);
-          }}
+          title={
+            stopping === "project" ? "Stop syncing?" : "Stop automatic syncing?"
+          }
+          close={cancelChanges}
         >
+          {error && <p role="alert">Could not stop syncing. {error}</p>}
+          <p>
+            {stopping === "project"
+              ? "Stop cloud syncing for this project."
+              : "Turn off automatic cloud sync and pause queued work. You can still use Sync Now for a manual sync."}{" "}
+            No further requests will start after this is saved. An in-flight
+            request may finish. Local tracking continues. Existing cloud files
+            and the index are kept.
+          </p>
+          <div className="cloud-actions">
+            <button
+              disabled={busy}
+              onClick={() =>
+                void run(async () => {
+                  await cloud.action(
+                    project,
+                    stopping === "project" ? "disconnect" : "stop_automatic",
+                  );
+                  dirty.current = false;
+                  setStopping(null);
+                  setNotice(
+                    stopping === "project"
+                      ? "Cloud syncing stopped."
+                      : "Automatic syncing stopped. Use Sync Now when you want to sync manually.",
+                  );
+                })
+              }
+            >
+              {stopping === "project"
+                ? "Stop syncing"
+                : "Stop automatic syncing"}
+            </button>
+            <button disabled={busy} onClick={cancelChanges}>
+              Cancel
+            </button>
+          </div>
+        </Modal>
+      )}
+      {plan && (
+        <Modal title="Confirm OpenAI cloud indexing" close={cancelChanges}>
           {error && (
             <p role="alert">
               <strong>Configuration was not saved.</strong> {error}
@@ -482,7 +586,7 @@ export function CloudPanel({ project }: { project: string }) {
                   : "Confirm and sync"
                 : "Confirm cloud configuration"}
             </button>
-            <button disabled={busy} onClick={() => setPlan(null)}>
+            <button disabled={busy} onClick={cancelChanges}>
               Cancel
             </button>
           </div>

@@ -110,15 +110,17 @@ All data is stored locally.
 
 **Prepare/files:** No edits. Record current association/File IDs.
 
-**Click:** Version policy → **Full captured history** → **Sync Now** → verify one addition (Master Context v1) → consent → **Confirm and sync**. Review cloud changes remains available for a separate save. After settling, inspect the same vector store. Optionally switch back to Current version only using another preview/confirmation; expect one removal, then return to Full history for Test 8.
+**Click:** Version policy → **Full captured history** → the review opens automatically → verify one addition (Master Context v1) → consent → **Confirm and sync**. Review cloud changes remains available for a separate save. After settling, inspect the same vector store. Optionally switch back to Current version only using another preview/confirmation; expect one removal, then return to Full history for Test 8.
 
-**Important:** Changing the dropdown alone does not save it or authorize historical uploads. An Unsaved cloud changes message appears; Sync Now opens the review popup for the draft, and Confirm and sync saves it before requesting sync. Cancel preserves the draft without applying it. When there are no unsaved changes, Sync Now uses the confirmed policy directly. Local tracking already keeps immutable historical snapshots in application storage even when source archival is off. Full history reads those snapshots, not copies in Old Context Files.
+**Important:** Changing a saved policy or document selection opens the review automatically. Confirm and sync saves the reviewed settings and requests sync; if paused, confirmation saves changes and retains the pause. Cancel, Close or Escape restores saved values without applying changes. Upload-limit edits open review on leaving the field or pressing Enter. Sync Now uses confirmed settings directly when there are no pending edits. Local tracking already keeps immutable historical snapshots in application storage even when source archival is off. Full history reads those snapshots, not copies in Old Context Files.
 
 **Operation/result:** Three completed associations: Master Context v1/v2 and Technical Documentation v1. A retained uploaded File can be reattached without uploading its bytes again. Each association has family/version/hash/current metadata; only the real current version is marked current. The dashboard name is not the identity boundary.
 
 **Failure/recovery:** Silent history uploads before confirmation, foreign families or duplicate mappings indicate failure. If a capture occurs while the confirmation is open, a stale-preview rejection is expected: Cancel and Review again. Reconcile discrepancies; local history is never changed by policy changes.
 
 ## 8. Pause cloud synchronization while local tracking continues
+
+**Direct toggle check:** Uncheck **Enable cloud indexing for this project**. Expect **Stop syncing?** immediately, with **Cancel** and **Stop syncing**; no upload-consent checkbox is required to stop. Cancel must leave indexing enabled. Repeat and confirm Stop: the checkbox becomes unchecked, sync controls disable, and future requests stop while existing cloud resources/local history remain. Recheck Enable, review and confirm to resume the existing index. Also uncheck **Automatically sync newly captured versions**: expect **Stop automatic syncing?**. Confirming clears automatic sync and pauses queued work; manual Sync Now remains available. Recheck automatic sync and confirm its review to resume automatically before continuing the steps below.
 
 **Prepare/files:** Click **Pause cloud sync** and wait for any already in-flight request to end. Record remote IDs/counts. Append `- Scan item barcodes` under Features in Master_Context_v1.md and save.
 

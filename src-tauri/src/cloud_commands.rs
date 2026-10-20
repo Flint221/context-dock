@@ -291,7 +291,9 @@ pub async fn cloud_action(
     let path = state.path.clone();
     let gate = state.gate.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let _guard = if ["pause", "disconnect", "disconnect_key"].contains(&action.as_str()) {
+        let _guard = if ["pause", "disconnect", "disconnect_key", "stop_automatic"]
+            .contains(&action.as_str())
+        {
             None
         } else {
             Some(gate.lock().map_err(|_| "Cloud worker unavailable.")?)
@@ -363,6 +365,10 @@ pub fn action_impl(
                 return Err("Explicit cloud upload and retention consent is required.".into());
             }
             cloud::apply(db, id, &draft, s(payload, "token"))?;
+            Ok(Value::Null)
+        }
+        "stop_automatic" => {
+            db.execute("UPDATE cloud_projects SET auto_sync=0,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
             Ok(Value::Null)
         }
         "pause" | "disconnect" => {
