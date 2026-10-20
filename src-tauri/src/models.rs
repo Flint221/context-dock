@@ -14,6 +14,7 @@ pub struct Project {
     pub tracking_enabled: bool,
     pub archive_enabled: bool,
     pub tracking_revision: i64,
+    pub folder_state: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

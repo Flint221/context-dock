@@ -22,6 +22,7 @@ impl Registry {
         let root = Path::new(&root_string);
         let (was_enabled, _, initialized) = self.tracking_flags(project)?;
         if enabled {
+            crate::folder_recovery::require_ready(&self.db, project)?;
             let canonical =
                 std::fs::canonicalize(root).map_err(|_| "The project folder is unavailable.")?;
             if canonical.starts_with(&self.store) || self.store.starts_with(&canonical) {
@@ -140,6 +141,9 @@ impl Registry {
         self.refresh(project)?;
         let (enabled, archive, _) = self.tracking_flags(project)?;
         if !enabled {
+            return Ok(false);
+        }
+        if crate::folder_recovery::require_ready(&self.db, project).is_err() {
             return Ok(false);
         }
         let root_string = self.path(project)?;
@@ -425,6 +429,7 @@ impl Registry {
         target: Option<String>,
     ) -> Result<()> {
         self.path(project)?;
+        crate::folder_recovery::require_ready(&self.db, project)?;
         let source = self.source(source_id)?;
         if source.project_id != project {
             return Err("Source is outside this project.".into());

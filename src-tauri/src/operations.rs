@@ -463,6 +463,7 @@ impl Registry {
         if !self.tracking_flags(project)?.0 {
             return Ok(vec![]);
         }
+        crate::folder_recovery::require_ready(&self.db, project)?;
         let mut q=self.db.prepare("SELECT id,kind,payload,state FROM operations WHERE project_id=?1 AND (state IN ('pending','finalized') OR (?2 AND state='blocked')) ORDER BY CASE kind WHEN 'capture' THEN 0 ELSE 1 END,created_at").map_err(error)?;
         let ops = q
             .query_map(params![project, retry_blocked], |r| {

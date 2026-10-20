@@ -6,7 +6,7 @@ use crate::{
     registry::{error, Result},
     storage,
 };
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
@@ -74,6 +74,22 @@ pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
     rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])
 }
 pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<CloudVersion>> {
+    crate::folder_recovery::require_ready(db, id)?;
+    let root: String = db
+        .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
+        .map_err(error)?;
+    for document in &draft.documents {
+        let source:Option<(String,String)>=db.query_row("SELECT s.relative_path,s.status FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?;
+        if let Some((relative, status)) = source {
+            if status != "available"
+                || storage::checked(Path::new(&root), &relative, false)
+                    .and_then(|p| storage::locked_read(&p.path, false))
+                    .is_err()
+            {
+                return Err("Selected project files are missing or inaccessible. Restore them and refresh documents before syncing or asking questions.".into());
+            }
+        }
+    }
     if !["current", "history"].contains(&draft.mode.as_str())
         || !(1..=512 * 1024 * 1024).contains(&draft.soft_limit)
     {

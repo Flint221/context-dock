@@ -128,9 +128,22 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
     let mut pending: HashMap<String, Pending> = HashMap::new();
     let mut retry_watch: HashMap<String, Instant> = HashMap::new();
     let mut next_sync = Instant::now();
+    let mut next_health = Instant::now();
+    let mut folder_revisions: HashMap<String, i64> = HashMap::new();
     while !stop.load(Ordering::Acquire) {
         if Instant::now() >= next_sync {
             if let Ok(mut r) = registry.try_lock() {
+                if Instant::now() >= next_health {
+                    let _ = r.check_folders();
+                    if let Ok(mut q) = r.db.prepare("SELECT id,folder_revision FROM projects WHERE removed_at IS NULL") {
+                        if let Ok(rows) = q.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?))) {
+                            for (id, revision) in rows.flatten() {
+                                if folder_revisions.insert(id.clone(),revision) != Some(revision) { changed(&id); }
+                            }
+                        }
+                    }
+                    next_health = Instant::now() + Duration::from_secs(2);
+                }
                 if let Ok(configs) = r.enabled_projects() {
                     let enabled: HashSet<_> = configs.iter().map(|(id, _)| id.clone()).collect();
                     watches.retain(|id, _| enabled.contains(id));
@@ -139,6 +152,11 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                     retry_watch.retain(|id, _| enabled.contains(id));
                     for (id, path) in configs {
                         let root = PathBuf::from(path);
+                        if roots.get(&id).is_some_and(|old| old != &root) {
+                            watches.remove(&id);
+                            pending.remove(&id);
+                            retry_watch.remove(&id);
+                        }
                         roots.insert(id.clone(), root.clone());
                         if watches.contains_key(&id) && r.db.execute("UPDATE projects SET watch_status='watching' WHERE id=?1 AND watch_status='starting'",[&id]).is_ok_and(|n|n>0) {changed(&id);}
                         if watches.contains_key(&id) && !root.is_dir() {

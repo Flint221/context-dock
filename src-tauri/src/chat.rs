@@ -55,6 +55,7 @@ pub fn get(r: &Registry, p: &str, id: &str) -> Result<Value> {
 }
 pub fn create(r: &Registry, p: &str) -> Result<Value> {
     ai::project(r, p)?;
+    crate::folder_recovery::require_ready(&r.db, p)?;
     let id = uuid::Uuid::new_v4().to_string();
     let now = models::now();
     r.db.execute(
@@ -75,6 +76,7 @@ pub fn delete(r: &Registry, p: &str, id: &str) -> Result<()> {
 }
 /// Called before every outbound request, including after a retrieval finishes.
 pub fn authorize(db: &Connection, p: &str, scope: &str) -> Result<String> {
+    crate::folder_recovery::require_ready(db, p)?;
     let project = cloud::project(db, p)?;
     let connected:i64=db.query_row("SELECT COUNT(*) FROM cloud_connection WHERE singleton=1 AND status='connected' AND scope=?1",[scope],|r|r.get(0)).map_err(error)?;
     if n(&project, "enabled") != 1

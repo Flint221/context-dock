@@ -37,7 +37,7 @@ impl Registry {
     pub fn enabled_projects(&self) -> Result<Vec<(String, String)>> {
         let mut q = self
             .db
-            .prepare("SELECT id,path FROM projects WHERE removed_at IS NULL AND tracking_enabled=1")
+            .prepare("SELECT id,path FROM projects WHERE removed_at IS NULL AND tracking_enabled=1 AND folder_state='ready'")
             .map_err(error)?;
         let rows = q
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
@@ -233,6 +233,7 @@ impl Registry {
     pub fn current_location(&self, document: &str) -> Result<String> {
         let(project,relative):(String,String)=self.db.query_row("SELECT d.project_id,s.relative_path FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1",[document],|r|Ok((r.get(0)?,r.get(1)?))).map_err(error)?;
         let root = self.path(&project)?;
+        crate::folder_recovery::require_ready(&self.db, &project)?;
         let checked = storage::checked(Path::new(&root), &relative, false)?;
         if !std::fs::metadata(&checked.path)
             .map_err(|e| e.to_string())?

@@ -39,6 +39,8 @@ struct Guard<'a> {
 }
 impl InferenceApi for Guard<'_> {
     fn respond(&self, body: Value) -> std::result::Result<Value, ApiError> {
+        crate::folder_recovery::require_ready(&self.db, &self.project)
+            .map_err(|e| ApiError::local(&e))?;
         if ai_inference::contains_credential(&body, self.credential) {
             return Err(ApiError::local("Selected evidence contains the saved API credential. Redact it in a newly captured version before analysis. No request was sent."));
         }

@@ -281,6 +281,9 @@ pub fn step(
     key_scope: &str,
 ) -> Result<()> {
     let p = cloud::project(db, id)?;
+    if n(&p, "delete_requested") != 1 {
+        crate::folder_recovery::require_ready(db, id)?;
+    }
     if n(&p, "enabled") != 1
         || s(&p, "scope") != key_scope
         || (n(&p, "paused") == 1 && n(&p, "delete_requested") != 1)

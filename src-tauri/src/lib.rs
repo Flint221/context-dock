@@ -23,6 +23,9 @@ mod comparison_models;
 #[cfg(test)]
 mod comparison_tests;
 mod extraction;
+mod folder_recovery;
+#[cfg(test)]
+mod folder_recovery_tests;
 mod matching;
 mod models;
 mod monitor;
@@ -79,6 +82,26 @@ async fn rename_project(
     name: String,
 ) -> Result<(), String> {
     work(state.inner().clone(), move |r| r.rename(&id, &name)).await
+}
+#[tauri::command]
+async fn preview_project_folder(
+    state: tauri::State<'_, Store>,
+    id: String,
+    path: String,
+) -> Result<folder_recovery::FolderPlan, String> {
+    work(state.inner().clone(), move |r| r.folder_plan(&id, &path)).await
+}
+#[tauri::command]
+async fn reassign_project_folder(
+    state: tauri::State<'_, Store>,
+    id: String,
+    path: String,
+    token: String,
+) -> Result<(), String> {
+    work(state.inner().clone(), move |r| {
+        r.reassign_folder(&id, &path, &token)
+    })
+    .await
 }
 #[tauri::command]
 async fn remove_project(
@@ -297,6 +320,8 @@ pub fn run() {
             snapshot,
             add_project,
             rename_project,
+            preview_project_folder,
+            reassign_project_folder,
             remove_project,
             refresh_project,
             set_theme,
