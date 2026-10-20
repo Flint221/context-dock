@@ -175,7 +175,12 @@ export function CurrentProcesses() {
           endpoints; they do not have TCP’s listening state.
         </p>
         <div className="toolbar-actions">
-          <button disabled={working || loading} onClick={() => void refresh()}>
+          <button
+            className="primary"
+            aria-busy={loading}
+            disabled={working || loading}
+            onClick={() => void refresh()}
+          >
             <RefreshCw size={16} />
             Refresh processes
           </button>

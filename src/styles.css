@@ -14,6 +14,11 @@
   --accent: #4469bc;
   --soft: #e9effb;
   --error: #ad3939;
+  --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --motion-fast: 160ms;
+  --motion-page: 420ms;
+  --shadow-soft: 0 3px 12px #233d6810, 0 1px 2px #233d6806;
+  --shadow-raised: 0 12px 28px #233d6814, 0 2px 6px #233d680a;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -28,6 +33,8 @@
   --error: #ffacac;
   color: var(--text);
   background: var(--bg);
+  --shadow-soft: 0 3px 12px #00000020, 0 1px 2px #00000018;
+  --shadow-raised: 0 12px 28px #00000030, 0 2px 6px #00000020;
 }
 * {
   box-sizing: border-box;
@@ -1734,4 +1741,438 @@ dialog:has(.comparison) {
 .process-startup-items ul {
   max-height: 300px;
   overflow: auto;
+}
+
+/* Motion is presentation only: it never schedules or delays an operation. */
+.app-shell {
+  background:
+    radial-gradient(
+      ellipse at 90% 0%,
+      color-mix(in srgb, var(--accent) 6%, transparent),
+      transparent 55%
+    ),
+    var(--bg);
+}
+aside {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--panel) 55%, var(--sidebar)),
+    var(--sidebar)
+  );
+}
+header {
+  background: color-mix(in srgb, var(--panel) 92%, var(--soft));
+}
+.page-heading h1 {
+  letter-spacing: -1px;
+}
+.page-heading > .primary {
+  flex-shrink: 0;
+}
+.panel {
+  box-shadow: var(--shadow-soft);
+}
+button {
+  min-height: 40px;
+  font-weight: 550;
+  position: relative;
+  transition:
+    transform var(--motion-fast) var(--motion-ease),
+    background-color var(--motion-fast) ease,
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+  -webkit-tap-highlight-color: transparent;
+}
+button.primary {
+  background: linear-gradient(135deg, #537bd2, #4168ba 65%, #3d60a9);
+  box-shadow:
+    0 3px 8px #4168ba26,
+    inset 0 1px 0 #ffffff26;
+  border-color: #4168ba;
+}
+button.primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #5f87dd, #466fc3 65%, #4168ba);
+  box-shadow:
+    0 6px 16px #4168ba35,
+    inset 0 1px 0 #ffffff30;
+}
+button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 9%, var(--panel));
+  border-color: color-mix(in srgb, var(--error) 50%, var(--border));
+}
+button > svg,
+.folder-icon {
+  transition:
+    transform 220ms var(--motion-ease),
+    color var(--motion-fast) ease;
+}
+button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+nav button {
+  min-height: 46px;
+  border-radius: 10px;
+}
+nav button.active {
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    0 2px 5px #233d6805;
+  border-color: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+nav button.active > svg {
+  color: var(--accent);
+}
+.brand-icon {
+  box-shadow:
+    0 5px 14px #4168ba25,
+    inset 0 1px 0 #ffffff35;
+}
+.project-card {
+  box-shadow: var(--shadow-soft);
+  border-radius: 13px;
+}
+.project-card h3 {
+  font-size: 17px;
+}
+.folder-icon {
+  border: 1px solid color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.stats section {
+  overflow: hidden;
+}
+.stats section::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 55%, transparent),
+    transparent
+  );
+}
+.stats section > svg {
+  color: var(--accent);
+}
+.stats strong {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+.refresh-row {
+  padding: 14px 18px;
+  gap: 14px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow-soft);
+}
+.refresh-row > .toolbar-actions {
+  margin-left: auto;
+}
+.toolbar-actions {
+  gap: 10px;
+}
+.process-endpoint button,
+.process-row-actions button {
+  min-height: 34px;
+  padding: 7px 10px;
+}
+.modal-heading button {
+  min-width: 36px;
+  min-height: 36px;
+}
+.actions {
+  flex-wrap: wrap;
+}
+.actions > .primary,
+.actions > .danger {
+  min-width: 120px;
+}
+.back {
+  min-height: 38px;
+}
+summary {
+  cursor: pointer;
+  min-height: 40px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  transition:
+    background-color var(--motion-fast) ease,
+    color var(--motion-fast) ease;
+}
+summary:hover {
+  color: var(--accent);
+  background: var(--soft);
+}
+summary:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+input,
+select,
+textarea {
+  transition:
+    border-color var(--motion-fast) ease,
+    box-shadow var(--motion-fast) ease,
+    background-color var(--motion-fast) ease;
+}
+input:not([type="checkbox"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.cloud-switch input::after {
+  transition: transform 240ms var(--motion-ease);
+}
+tbody tr {
+  transition: background-color var(--motion-fast) ease;
+}
+tbody tr:hover {
+  background: color-mix(in srgb, var(--soft) 45%, transparent);
+}
+.banner {
+  box-shadow: var(--shadow-soft);
+  animation: motion-reveal 240ms var(--motion-ease) backwards;
+}
+dialog[open] {
+  animation: modal-arrive 260ms var(--motion-ease) backwards;
+}
+dialog[open]::backdrop {
+  animation: backdrop-arrive 200ms ease backwards;
+}
+.page-scene > *,
+.page-scene .stats > *,
+.page-scene .project-grid > *,
+.page-scene .process-view > section {
+  animation: motion-reveal var(--motion-page) var(--motion-ease) backwards;
+}
+:where(
+    .page-scene,
+    .page-scene .stats,
+    .page-scene .project-grid,
+    .page-scene .process-view
+  )
+  > :nth-child(2) {
+  animation-delay: 45ms;
+}
+:where(
+    .page-scene,
+    .page-scene .stats,
+    .page-scene .project-grid,
+    .page-scene .process-view
+  )
+  > :nth-child(3) {
+  animation-delay: 90ms;
+}
+:where(
+    .page-scene,
+    .page-scene .stats,
+    .page-scene .project-grid,
+    .page-scene .process-view
+  )
+  > :nth-child(4) {
+  animation-delay: 135ms;
+}
+:where(
+    .page-scene,
+    .page-scene .stats,
+    .page-scene .project-grid,
+    .page-scene .process-view
+  )
+  > :nth-child(5) {
+  animation-delay: 180ms;
+}
+:where(
+    .page-scene,
+    .page-scene .stats,
+    .page-scene .project-grid,
+    .page-scene .process-view
+  )
+  > :nth-child(n + 6) {
+  animation-delay: 225ms;
+}
+.operation-feedback {
+  padding: 12px 14px;
+  margin: 14px 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--soft) 45%, var(--panel));
+  animation: motion-reveal 220ms var(--motion-ease) backwards;
+}
+.operation-feedback .operation-status {
+  margin: 0 0 9px;
+  font-size: 12px;
+  color: var(--text);
+}
+.operation-feedback[data-state="complete"] {
+  border-color: color-mix(in srgb, #4b9476 30%, var(--border));
+}
+.operation-feedback[data-state="complete"] .operation-status > svg {
+  color: #4b9476;
+}
+.operation-feedback[data-state="complete"] .progress-fill {
+  background: #4b9476;
+}
+.progress-meter {
+  margin: 16px 0;
+}
+.progress-meter-quiet {
+  margin: 0;
+}
+.progress-caption {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.progress-track {
+  height: 5px;
+  border-radius: 99px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--accent) 12%, var(--border));
+}
+.progress-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  transform-origin: left;
+  background: linear-gradient(90deg, #4168ba, #8ba8f2);
+  transition: transform 480ms var(--motion-ease);
+}
+.progress-track[data-indeterminate="true"] .progress-fill {
+  width: 40%;
+  animation: progress-travel 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+.cloud-index-progress {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  margin: 18px 0;
+}
+.cloud-index-progress .progress-meter {
+  margin: 0;
+}
+.cloud-index-progress > small {
+  display: block;
+  margin-top: 9px;
+}
+button[aria-busy="true"]::after {
+  content: "";
+  position: absolute;
+  height: 2px;
+  bottom: 2px;
+  left: 8%;
+  width: 84%;
+  border-radius: 99px;
+  background: currentColor;
+  animation: button-working 1.2s ease-in-out infinite alternate;
+}
+@media (hover: hover) and (pointer: fine) {
+  button:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+  button.project-card:hover:not(:disabled) {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-raised);
+  }
+  .project-card:hover:not(:disabled) .card-top > svg {
+    transform: translate(2px, -2px);
+  }
+  .project-card:hover:not(:disabled) .folder-icon {
+    transform: rotate(-4deg) scale(1.04);
+  }
+  nav button:hover:not(:disabled) {
+    transform: translateX(3px);
+  }
+  .recent > button:hover:not(:disabled) {
+    transform: none;
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  button:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
+}
+@keyframes motion-reveal {
+  from {
+    opacity: 0;
+    translate: 0 10px;
+  }
+}
+@keyframes modal-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+@keyframes backdrop-arrive {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes progress-travel {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(360%);
+  }
+}
+@keyframes button-working {
+  from {
+    opacity: 0.35;
+    transform: scaleX(0.25);
+  }
+  to {
+    opacity: 0.9;
+    transform: scaleX(1);
+  }
+}
+@media (max-width: 1000px) {
+  .page-heading {
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .page-heading > .primary {
+    min-height: 42px;
+  }
+  .refresh-row > .toolbar-actions {
+    flex: 1 1 100%;
+  }
+  .refresh-row > .toolbar-actions > .primary {
+    margin-left: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  button:hover:not(:disabled),
+  button:active:not(:disabled),
+  .project-card:hover:not(:disabled) .folder-icon,
+  .project-card:hover:not(:disabled) .card-top > svg {
+    transform: none;
+  }
+  .progress-track[data-indeterminate="true"] .progress-fill {
+    transform: translateX(75%);
+    background: repeating-linear-gradient(
+      120deg,
+      var(--accent) 0 6px,
+      color-mix(in srgb, var(--accent) 55%, var(--soft)) 6px 12px
+    );
+  }
 }

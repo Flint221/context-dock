@@ -94,13 +94,20 @@ export function ProjectDetails({
       )}
       <div className="refresh-row">
         <span className={`badge ${project.status}`}>{project.status}</span>
-        <button className="danger" disabled={busy} onClick={remove}>
-          <Trash2 size={16} /> Remove project
-        </button>
-        <button disabled={busy} onClick={refresh}>
-          <RefreshCw size={16} />
-          Refresh documents
-        </button>
+        <div className="toolbar-actions">
+          <button className="danger" disabled={busy} onClick={remove}>
+            <Trash2 size={16} /> Remove project
+          </button>
+          <button
+            className="primary"
+            disabled={busy}
+            aria-busy={busy}
+            onClick={refresh}
+          >
+            <RefreshCw size={16} />
+            Refresh documents
+          </button>
+        </div>
       </div>
       {!folderLost && (
         <ProjectCloud
