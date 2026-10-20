@@ -1,6 +1,17 @@
 # ContextDock
 
-ContextDock 0.4.0 is a lightweight, local-first Windows 11 application for project documentation. Register existing folders, discover Markdown and Word files, and opt in to independent version histories and safe archival. Compare preserved versions entirely offline. Optional OpenAI indexing requires your own API key, explicit project selection and upload consent.
+ContextDock 0.5.0 is a lightweight, local-first Windows 11 application for project documentation. Register existing folders, discover Markdown and Word files, and opt in to independent version histories and safe archival. Compare preserved versions entirely offline. Optional OpenAI indexing requires your own API key, explicit project selection and upload consent.
+
+
+## Project intelligence (0.5.0)
+
+Open a project → **Project intelligence**. Approve a manual or snapshot-based baseline locally, preserving every revision. Select exact captured versions for Analyze Changes, Goal Alignment, Evolution Timeline or Project Consistency. Version comparison also offers **Analyze These Changes with AI** without replacing the selected pair.
+
+Preview the complete local evidence, baseline, model, input/output limits, request count and price assumptions before explicitly approving **Generate Analysis · paid API**. There are no automatic AI calls on capture, launch, baseline changes, diff viewing or cloud indexing. Cloud indexing is optional: analysis sends the explicitly approved verified text directly to Responses and does not silently upload Files or enable cloud sync. Baseline creation and source-text extraction are free local operations.
+
+Reports save structured interpretations, validated source quotations, factual-comparison links, usage, exact historical baseline and locally recorded review decisions. Saved reports and baselines work offline; exact cache reuse has no model cost. Timelines include every intermediate capture in a bounded range, preserving reversals. All findings remain interpretations, not authoritative history or objective quality scores.
+
+Default model: pinned GPT-5.4 Mini, with pinned GPT-5.4 as a higher-cost option. One model request per approved plan; no tools, hidden multi-stage calls or automatic paid retries. Input limits refuse excessive evidence rather than silently omitting it. Responses use `store:false`; provider processing/retention rules still apply. See the [14-test Windows walkthrough](docs/manual-testing-milestone-5.md) and [redacted security review](docs/security-audit-0.5.0.md).
 
 ## Implemented through Milestone 4
 
@@ -20,7 +31,7 @@ ContextDock 0.4.0 is a lightweight, local-first Windows 11 application for proje
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.4.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally to schema 3 with cloud off; tracking/archival preferences and snapshots survive. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run `ContextDock_0.5.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 4; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
 5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
@@ -112,8 +123,8 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.4.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestones 5–6 remain future work: on-demand AI interpretation/baselines, signing and automatic update delivery.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 adds on-demand interpretation and approved baselines. Milestone 6 remains future production hardening: signing, storage management and automatic update delivery.

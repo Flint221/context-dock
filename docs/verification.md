@@ -1,3 +1,40 @@
+# Verification — ContextDock 0.5.0
+
+Milestone 5 was implemented on Windows with the existing Node/MSVC Rust toolchain. All new request tests use scripted Responses output, disposable SQLite/source/snapshot fixtures and synthetic credentials. No real key was read, no authenticated OpenAI call was made, and no installer was run against user data. The application identifier remains com.contextdock.desktop; version manifests/locks are 0.5.0.
+
+| Check | Result |
+| --- | --- |
+| Rust tests, binary targets, doctests | **104 passed**: 87 prior regressions + 17 focused AI tests; no failures |
+| Frontend tests | **41 passed in 6 files**: 35 prior + 6 intelligence interaction tests |
+| TypeScript, ESLint | Passed |
+| rustfmt, all-target Clippy with -D warnings | Passed |
+| Production frontend build | Passed; about 307 kB uncompressed JS |
+| Windows x64 NSIS | Built ContextDock_0.5.0_x64-setup.exe, 4,198,171 bytes (about 4.00 MiB), unsigned |
+| npm audit --omit=dev | Zero reported production vulnerabilities |
+| Transactional migration | Schema 3→4 fixture retains stable project/version identity, verified snapshots and cloud mapping/settings; existing schema 1/2/future-schema regressions pass |
+| Security audit | Redacted current-source/history checks and credential/HTTP/UI/CI/installer review documented in security-audit-0.5.0.md |
+| Live API / user's vault / installed upgrade / GUI acceptance | Not performed by agent; explicit user acceptance remains in manual-testing-milestone-5.md |
+
+## Coverage and practical boundaries
+
+Native coverage includes approved baseline creation, immutable supersession, exact/reversed/nonconsecutive pair identity, verified extraction and factual block anchors, complete ordered intermediate timeline evidence, explicit cross-family selection/project isolation, malformed citation/schema/refusal/truncation rejection, prompt-injection/tool/storage boundaries, cache reuse without another call, invalidation after model/limits/baseline changes, paid consent, no inference on capture/view/approval, local review decisions, conservative input/output bounds, rate limits, ambiguous timeout, cancellation of unsent work and startup recovery without paid replay. Existing cloud, credential, source tracking/archival, Word extraction, comparison and navigation suites remain passing.
+
+The six new frontend regressions verify exact selected version pairs survive preview, checked paid consent precedes generation, cached opening sends no Generate action, manually approved baselines make no model call, cancel sends no inference, errors unlock controls without retry, and old unmounted-project replies are ignored. These are component tests; no elaborate native GUI automation was added and no claim of visual acceptance at every scale is made.
+
+Analysis is always one explicitly approved POST /v1/responses with strict JSON Schema, store:false, background:false, no tools and no automatic retry. Cloud indexing is independent. Deterministic local evidence is used for every workflow; remote retrieval augmentation and multi-stage inference are intentionally not implemented. Larger scopes fail locally with a narrower-scope option. Default model is pinned GPT-5.4 Mini; a pinned GPT-5.4 option is supported. Limits: 12 timeline captures, 2–6 distinct consistency families, up to six alignment versions, 65,536 conservative serialized input units and 8,192 max output tokens. Existing extraction/diff limits still apply.
+
+Quotes/IDs/ranges validate provenance, not semantic correctness. Reports are interpretations with uncertainties and review decisions, never rewritten source history. DOCX body-only exclusions remain disclosed. Baseline starting text is extracted locally and explicitly edited/approved; no AI baseline proposal is required or silently generated. Cached reports and baselines are plaintext local application data, not an encrypted content vault. The latest 100 request-history entries are listed; no storage purge, streaming output or multi-stage scheduler is added. An already-sent request may finish and incur charges after cancellation; a valid arriving report is saved. Restart uncertainty requires a new reviewed plan, never automatic replay.
+
+Input token figures are heuristic, with conservative byte-based budget units; price estimates use the saved model/standard-rate assumptions and output maximum. Actual returned numeric token usage is retained when available. Estimates are not official account totals or guaranteed dollar caps. Credential access remains native Windows Credential Manager; the model never receives authorization as evidence. The focused audit cannot inspect private Discord messages or prove the user's real key has never been exposed.
+
+The complete [14-test Windows guide](manual-testing-milestone-5.md) supplies exact v1/v2/v3 and technical-document sample contents, capture sequence, baseline/approval/version-pair/timeline/consistency/cache/cost/offline/failure/security/regression checks, expected API request counts, safe recovery and explicit cleanup. [Architecture](architecture.md) records models, pricing sources, schemas and lifecycle. [Security review](security-audit-0.5.0.md) records audit scope and limitations.
+
+GitHub's retained Windows workflow builds a downloadable ContextDock-Windows-x64-setup artifact (30-day retention) for the intended commit. Local results do not imply a completed remote run; inspect the PR's current commit status. No public release/tag, updater, installation or automatic merge was performed. Local installer: src-tauri/target/release/bundle/nsis/ContextDock_0.5.0_x64-setup.exe.
+
+---
+
+The following verification records describe earlier milestones as historical evidence.
+
 # Verification — ContextDock 0.4.0
 
 Milestone 4 checks ran on Windows 11 on October 19, 2026, using the existing Node 24/MSVC Rust toolchain. Cloud tests use a fully in-memory scripted provider, temporary SQLite databases/source roots/snapshot stores and synthetic nonfunctional key strings. They never read/save a real Windows credential or contact the authenticated OpenAI API. Public official API documentation was consulted. User project folders, real application data, credentials and installed executables were not modified by testing or installer execution.

@@ -14,11 +14,11 @@ SHA-256-verified Markdown and bounded DOCX body extraction; exact Myers diffs fo
 
 ## Implemented: Milestone 4 — Optional OpenAI indexing
 
-Windows Credential Manager; transactional schema 003; explicit per-project selection/preview/retention consent; one owned vector store per project; verified original snapshot uploads; current-only/full-history sync; durable queue, processing polling, bounded retries and uncertain-operation reconciliation; direct retrieval tests with provenance; separate association/store/File cleanup and measured usage. Local tracking, archival and diffs remain independent and available offline. Version 0.4.0 retains application identity and per-user installer/data paths. Live authorized OpenAI testing and installed upgrade acceptance are user-run tasks in the 14-test guide; no AI interpretation is implemented.
+Windows Credential Manager; transactional schema 003; explicit per-project selection/preview/retention consent; one owned vector store per project; verified original snapshot uploads; current-only/full-history sync; durable queue, processing polling, bounded retries and uncertain-operation reconciliation; direct retrieval tests with provenance; separate association/store/File cleanup and measured usage. Local tracking, archival and diffs remain independent and available offline. Version 0.4.0 retains application identity and per-user installer/data paths. Live authorized OpenAI testing and installed upgrade acceptance are user-run tasks in the Milestone 4 guide; AI interpretation is added separately in Milestone 5.
 
-## Milestone 5 — On-demand AI analysis
+## Implemented: Milestone 5 — On-demand AI analysis, baselines and evolution
 
-Add user-triggered comparisons, document/version-specific baselines, cached analysis and goal-drift assessment with provenance, uncertainty and cost controls. Generated interpretation must remain distinguishable from local evidence.
+Version 0.5.0 adds explicitly approved Responses requests for exact version comparison, baseline alignment, ordered evolution and cross-document consistency. Immutable approved baseline revisions, snapshot/diff evidence, validated quotations, local report/decision persistence, exact cache reuse, usage/price previews, bounded one-request plans and restart/cancellation uncertainty are implemented. Schema 004 preserves the existing system. All 104 Rust tests and 41 frontend tests pass with TypeScript, ESLint, rustfmt, Clippy and local NSIS packaging. The mandatory Milestone 5 guide covers live user acceptance and upgrade checks; authenticated model testing and installed upgrade were not performed by the agent. Interpretation remains separate from authoritative local evidence.
 
 ## Milestone 6 — Production hardening and updates
 
