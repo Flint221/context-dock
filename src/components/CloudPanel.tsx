@@ -572,7 +572,7 @@ export function CloudPanel({
           <p>
             {stopping === "project"
               ? "Turn off Cloud sync and permanently delete this project's vector store and uploaded Files. Re-enabling creates a fresh bucket and re-uploads selected versions. Completion is verified before success."
-              : "Turn off automatic cloud sync and pause queued work. You can still use Sync Now for a manual sync."}{" "}
+              : "Turn off automatic uploads and pause queued upload work. You can still use Sync Now for a manual sync. Already-confirmed document opt-out removals can finish while uploads stay paused."}{" "}
             {stopping === "automatic"
               ? "Cloud files and the index are kept. "
               : ""}
@@ -721,7 +721,7 @@ export function CloudPanel({
         >
           <p>
             {transition === "pause"
-              ? "Pause new uploads and AI requests. Local history and saved chats remain available; an already-sent request may finish."
+              ? "Pause new uploads and AI requests. Already-confirmed document opt-out removals can finish. Local history and saved chats remain available; an already-sent request may finish."
               : "Resume cloud syncing for the saved document selection and allow AI questions when the current versions are indexed. API charges may apply."}
           </p>
           {error && <p role="alert">{error}</p>}
@@ -816,8 +816,10 @@ export function CloudPanel({
           )}
           <h3>Known cloud versions</h3>
           <p>
-            Removed associations are excluded from future automatic sync. Files
-            are separate retained resources. Failed/uncertain rows require
+            Individually removed versions stay excluded from automatic sync.
+            Families unchecked in Project cloud selection can be selected again
+            to restore their index entries. Uploaded Files remain separate
+            resources until project cleanup. Failed/uncertain rows require
             reconciliation.
           </p>
           {view.jobs.map((job) => (
