@@ -1585,3 +1585,144 @@ dialog:has(.comparison) {
   overflow-wrap: anywhere;
   margin: 6px 0;
 }
+
+.process-view {
+  display: grid;
+  gap: 20px;
+}
+.process-overview,
+.process-list,
+.process-results,
+.process-startup {
+  padding: 22px;
+  min-width: 0;
+}
+.process-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 22px;
+}
+.process-stats > span {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+}
+.process-stats strong {
+  font-size: 1.4rem;
+}
+.process-overview > p,
+.process-startup > p {
+  margin: 16px 0;
+  color: var(--muted);
+}
+.process-overview > small {
+  display: block;
+  margin-top: 14px;
+  color: var(--muted);
+}
+.process-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: end;
+}
+.process-filters label {
+  display: grid;
+  gap: 6px;
+  flex: 1 1 140px;
+  font-size: 0.85rem;
+}
+.process-filters label:first-child {
+  flex: 2 1 220px;
+}
+.process-filters input,
+.process-filters select {
+  width: 100%;
+  min-width: 0;
+}
+.process-bulk {
+  margin-top: 18px;
+}
+.process-help {
+  color: var(--muted);
+  margin: 14px 0;
+  font-size: 0.85rem;
+}
+.process-table {
+  width: 100%;
+  min-width: 680px;
+}
+.process-table td {
+  vertical-align: top;
+}
+.process-table td:nth-child(2) {
+  max-width: 300px;
+  min-width: 180px;
+}
+.process-table small,
+.process-path,
+.process-review small,
+.process-startup-items small {
+  display: block;
+  overflow-wrap: anywhere;
+  margin-top: 5px;
+  color: var(--muted);
+}
+.process-path {
+  font-size: 0.8rem;
+}
+.process-protection {
+  max-width: 280px;
+}
+.process-endpoint {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.process-endpoint code {
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+.process-endpoint > div,
+.process-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.process-endpoint button,
+.process-row-actions button {
+  font-size: 0.8rem;
+  padding: 6px 8px;
+}
+.process-row-actions {
+  flex-direction: column;
+  align-items: start;
+}
+.process-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.process-pagination > span {
+  margin-right: auto;
+  color: var(--muted);
+}
+.process-review {
+  max-height: 38vh;
+  overflow: auto;
+  padding-left: 22px;
+}
+.process-review li,
+.process-startup-items li {
+  margin: 12px 0;
+}
+.process-startup-items {
+  margin-top: 18px;
+}
+.process-startup-items ul {
+  max-height: 300px;
+  overflow: auto;
+}

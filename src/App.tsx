@@ -2,6 +2,7 @@ import { displayPath } from "./format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
+  Activity,
   Check,
   Folder,
   FolderOpen,
@@ -20,8 +21,9 @@ import { SettingsView } from "./components/Settings";
 import { ProjectDetails } from "./components/ProjectDetails";
 import { RemoveProject } from "./components/RemoveProject";
 import { Modal } from "./components/Modal";
+import { CurrentProcesses } from "./components/CurrentProcesses";
 import { version } from "../package.json";
-type Page = "dashboard" | "projects" | "settings";
+type Page = "dashboard" | "projects" | "processes" | "settings";
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const [data, setData] = useState<Snapshot>({
@@ -121,6 +123,7 @@ export default function App() {
             [
               { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
               { id: "projects", label: "Projects", Icon: Folder },
+              { id: "processes", label: "Current processes", Icon: Activity },
               { id: "settings", label: "Settings", Icon: Settings },
             ] as const
           ).map(({ id, label, Icon }) => (
@@ -156,7 +159,9 @@ export default function App() {
               ? "Dashboard"
               : page === "settings"
                 ? "Settings"
-                : "Projects"}
+                : page === "processes"
+                  ? "Current processes"
+                  : "Projects"}
             {project && page === "projects" && (
               <>
                 {" "}
@@ -195,19 +200,23 @@ export default function App() {
                   ? "Workspace overview"
                   : page === "settings"
                     ? "Settings"
-                    : project?.name || "Projects"}
+                    : page === "processes"
+                      ? "Current processes"
+                      : project?.name || "Projects"}
               </h1>
               <p>
                 {page === "dashboard"
                   ? "A clear view of your projects and the documents behind them."
                   : page === "settings"
                     ? "Make ContextDock feel at home."
-                    : project
-                      ? "Track document history and ask about your synced files."
-                      : "Existing folders. Independent documents. One place to find them."}
+                    : page === "processes"
+                      ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
+                      : project
+                        ? "Track document history and ask about your synced files."
+                        : "Existing folders. Independent documents. One place to find them."}
               </p>
             </div>
-            {page !== "settings" && (
+            {(page === "dashboard" || page === "projects") && (
               <button
                 className="primary"
                 disabled={busy || !loaded}
@@ -217,7 +226,9 @@ export default function App() {
               </button>
             )}
           </div>
-          {!loaded ? (
+          {page === "processes" ? (
+            <CurrentProcesses />
+          ) : !loaded ? (
             <section className="panel empty">
               <h2>
                 {error
