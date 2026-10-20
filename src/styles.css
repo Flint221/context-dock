@@ -1813,6 +1813,7 @@ button:active:not(:disabled) {
 nav button {
   min-height: 46px;
   border-radius: 10px;
+  text-align: left;
 }
 nav button.active {
   box-shadow:
@@ -2139,6 +2140,13 @@ button[aria-busy="true"]::after {
   }
 }
 @media (max-width: 1000px) {
+  .brand small {
+    font-size: 8px;
+    letter-spacing: 0.8px;
+  }
+  .stats span {
+    min-height: 36px;
+  }
   .page-heading {
     flex-wrap: wrap;
     gap: 16px;

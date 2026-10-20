@@ -3,6 +3,12 @@
 ContextDock 0.6.3 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
+## Motion and feedback (0.6.3)
+
+Pages reveal from top to bottom with short, capped stagger delays. Buttons respond to hover/press, project cards lift gently, dialogs ease into view, and the sidebar clearly marks the active page. Primary Refresh/Sync actions are easier to find, regular buttons have at least 40-pixel targets, and compact process controls remain at least 34 pixels tall. Light and dark themes share the same visual hierarchy.
+
+Actions show animated progress tracks; unknown durations stay indeterminate. Cloud indexing uses actual indexed/pending/failed counts rather than a timer, so failures do not count as completion. Page navigation returns to the top, while ordinary registry/cloud updates preserve controls and do not replay page transitions. Optional automatic process refresh is quiet to avoid repeatedly shifting the list. Motion follows the operating system's reduced-motion preference, retaining static progress, visible focus and all actions. No animation library, new background timer, preference or schema migration was added. See the [motion walkthrough](docs/manual-testing-motion.md).
+
 ## Current processes (0.6.2)
 
 Open **Current processes** above Settings to inspect Windows TCP listeners and UDP bound endpoints across IPv4/IPv6 and all interfaces. Search names, PIDs, paths or ports, filter protocol/interface, or switch to **User apps and listeners** to include eligible apps without listening ports. Each row shows the executable, PID, parent PID, start time and endpoints. **Preview** opens local TCP listeners in the default browser; **Use HTTPS for previews** switches the scheme. Not every TCP listener is a website. Copy endpoints or process details for troubleshooting.
