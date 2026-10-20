@@ -159,8 +159,14 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     }
     Ok(false)
 }
+pub(crate) fn runtime_database_path(path: PathBuf) -> std::io::Result<PathBuf> {
+    // Match Registry::store before deriving the guarded snapshot root. On Windows,
+    // canonicalization adds the verbatim prefix even when the folder never moved.
+    std::fs::canonicalize(path)
+}
 impl CloudRuntime {
     pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
+        let path = runtime_database_path(path)?;
         if let Ok(db) = cloud::connect(&path) {
             let _=db.execute("UPDATE cloud_projects SET reconcile_requested=1 WHERE enabled=1 AND paused=0 AND started=1",[]);
         }

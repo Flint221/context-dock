@@ -216,6 +216,31 @@ impl Fixture {
     }
 }
 #[test]
+#[cfg(windows)]
+fn cloud_runtime_normalizes_windows_database_path_before_guarded_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let ordinary_path = PathBuf::from(crate::scanner::explorer_path(
+        f.r.store.join("test.db").to_str().unwrap(),
+    ));
+    assert!(!ordinary_path.to_str().unwrap().starts_with(r"\\?\"));
+    let path = cloud_commands::runtime_database_path(ordinary_path).unwrap();
+    let root = path.parent().unwrap();
+    assert_eq!(root, f.r.store);
+    let mut db = cloud::connect(&path).unwrap();
+    let api = Mock::default();
+    for _ in 0..7 {
+        cloud_sync::step(&mut db, root, &f.id, &api, "bound").unwrap();
+    }
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    let remote = api.0.borrow();
+    assert_eq!(remote.files.len(), 1);
+    assert_eq!(
+        remote.files[0].1,
+        fs::read(f.root.join("Master_Context.md")).unwrap()
+    );
+}
+#[test]
 fn migration_defaults_cloud_off_and_preserves_local_preferences() {
     let f = Fixture::new();
     let p = cloud::project(&f.r.db, &f.id).unwrap();
