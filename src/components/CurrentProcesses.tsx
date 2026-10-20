@@ -570,7 +570,7 @@ export function CurrentProcesses() {
             before stopping.
           </p>
           {error && <p role="alert">{error}</p>}
-          <div className="modal-actions">
+          <div className="actions">
             <button disabled={working} onClick={() => setReview(null)}>
               Cancel
             </button>

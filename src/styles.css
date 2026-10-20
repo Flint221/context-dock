@@ -1655,6 +1655,7 @@ dialog:has(.comparison) {
 }
 .process-table td {
   vertical-align: top;
+  white-space: normal;
 }
 .process-table td:nth-child(2) {
   max-width: 300px;
@@ -1671,6 +1672,14 @@ dialog:has(.comparison) {
 }
 .process-path {
   font-size: 0.8rem;
+}
+.process-table td small {
+  margin-left: 0;
+}
+.process-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
 }
 .process-protection {
   max-width: 280px;
