@@ -1,3 +1,11 @@
+# Verification — ContextDock 0.5.3 streamed chat
+
+October 20: **123 Rust tests** and **58 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production build and Windows x64 NSIS packaging pass. New native tests cover progressive decoded JSON text, escaped quotes/newlines/Unicode, CRLF SSE frames, completion usage, interrupted/failed/incomplete/malformed/oversized streams and split credential suppression. Chat provenance tests verify original source filenames. UI tests cover provisional text followed by the completed reply, ignored late callbacks, filename-only sources, Enter on the first chat, Shift+Enter and IME composition.
+
+Installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.3_x64-setup.exe`, **4,257,822 bytes**, unsigned and not installed by the agent. Tests use synthetic streams, mocked IPC/APIs and disposable local databases; no real API key, authenticated request or user upload was used. A fresh mocked browser preview was blocked by the browser client before it opened; 0.5.3 browser appearance/native account acceptance is not claimed. The corrected switch dimensions follow from isolating its 42×24 sizing from the later generic 18×18 checkbox rule. Use the updated manual chat guide for installed acceptance. Application identity and schema 005 are unchanged.
+
+---
+
 # Verification — ContextDock 0.5.2 major control safeguards
 
 October 20: **120 Rust tests** and **56 frontend tests** pass. TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. Three new native regressions inject database triggers that silently ignore/reverse settings writes: cloud disconnect, cloud configuration and tracking now report verification errors instead of false success; configuration failure rolls back its transaction. Nine new frontend regressions cover double-click suppression through backend readback, unknown/read-failure states, mismatch errors, confirmation/cancellation for tracking/archival/pause/resume/global disconnect and idempotent shared operation locks. Existing cloud-chat/history suites remain passing.

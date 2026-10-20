@@ -6,6 +6,7 @@ mod ai_models;
 mod ai_tests;
 mod chat;
 mod chat_commands;
+mod chat_stream;
 #[cfg(test)]
 mod chat_tests;
 mod cloud;

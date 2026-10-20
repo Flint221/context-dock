@@ -41,6 +41,20 @@ impl OpenAi {
     pub fn for_analysis(key: &str) -> Result<Self, String> {
         Self::with_timeout(key, 90)
     }
+    pub fn stream_answer(
+        &self,
+        mut body: Value,
+        preview: &mut dyn FnMut(&str),
+    ) -> Result<Value, ApiError> {
+        body["stream"] = json!(true);
+        let response = self.open(
+            self.client
+                .post("https://api.openai.com/v1/responses")
+                .json(&body),
+            true,
+        )?;
+        crate::chat_stream::read(response, preview)
+    }
     fn with_timeout(key: &str, seconds: u64) -> Result<Self, String> {
         let mut authorization = HeaderValue::from_str(&format!("Bearer {key}"))
             .map_err(|_| "Invalid credential.".to_string())?;
@@ -59,12 +73,11 @@ impl OpenAi {
             deadline: std::time::Instant::now() + std::time::Duration::from_secs(90),
         })
     }
-    fn send(
+    fn open(
         &self,
         request: reqwest::blocking::RequestBuilder,
         mutation: bool,
-        max: u64,
-    ) -> Result<Vec<u8>, ApiError> {
+    ) -> Result<reqwest::blocking::Response, ApiError> {
         if std::time::Instant::now() > self.deadline {
             return Err(ApiError::local("Cloud reconciliation reached its time limit. No further requests were sent. Retry to continue safely."));
         }
@@ -102,6 +115,15 @@ impl OpenAi {
                 delay,
             });
         }
+        Ok(response)
+    }
+    fn send(
+        &self,
+        request: reqwest::blocking::RequestBuilder,
+        mutation: bool,
+        max: u64,
+    ) -> Result<Vec<u8>, ApiError> {
+        let response = self.open(request, mutation)?;
         let mut bytes = Vec::new();
         response
             .take(max + 1)

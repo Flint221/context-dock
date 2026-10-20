@@ -1,6 +1,6 @@
-# ContextDock 0.5.2 — simple cloud chat acceptance
+# ContextDock 0.5.3 — simple cloud chat acceptance
 
-Use a disposable project with a tracked Markdown document containing `React frontend` and `SQLite database`. Existing projects/history remain available. Install 0.5.2 with the app closed. Schema 4→5 retains snapshots, archives, cloud mappings/settings and old baselines/reports; do not downgrade to 0.5.0 after migration.
+Use a disposable project with a tracked Markdown document containing `React frontend` and `SQLite database`. Existing projects/history remain available. Install 0.5.3 with the app closed. Schema 4→5 retains snapshots, archives, cloud mappings/settings and old baselines/reports; do not downgrade to 0.5.0 after migration.
 
 1. Save and test your own key in Settings. Open the disposable project. With Cloud sync off, confirm history/diffs still work and Ask project explains why Send is unavailable. No baseline form should appear. Folder actions are under Project folder and options.
 2. Turn on Cloud sync. Review the named documents and disclosure, then Cancel: the switch must stay off and no initial upload should begin. Turn it on again and confirm Enable Cloud sync and AI. One confirmation saves selection, enables automatic version sync and starts initial sync. No separate Start button is needed.
@@ -17,3 +17,12 @@ Chat uses up to five provenance-checked search passages, recent completed turns 
 ## Major toggle acceptance
 
 For project Cloud sync, advanced automatic sync/pause/resume, tracking/archival and Settings → Disconnect OpenAI: open the confirmation and Cancel first. The saved state must remain unchanged. Confirm next and rapidly double-click: one operation should run, the spinner should remain through backend verification and the controls should unlock afterward. Success shows a checkmark only after readback; sync request confirmation must not claim that indexing is complete. A failed status read must show an error/unknown state and offer status refresh instead of allowing questions from stale state. Disconnect OpenAI removes the key only after confirmation and keeps local/cloud documents; do not use it unless you are ready to re-enter your own key. No test requires sharing the key with the coding agent.
+
+## Streaming and keyboard acceptance (0.5.3)
+
+- Confirm Cloud sync is a full-width pill with its thumb inside the track in both states, light/dark themes and Windows scaling.
+- With the current files indexed, type a first question and press Enter. Exactly one question is sent. Shift+Enter inserts a newline; IME composition Enter does not submit.
+- After retrieval, the answer appears progressively. Controls stay guarded until final validation/save. Open Sources: only filenames and captured versions appear, without passage previews.
+- Ask a follow-up such as “And which frontend?” in the same chat. Up to six recent completed exchanges (12 KB maximum) provide context. Start a new chat to reset this context; older history is still saved.
+- Interrupt connectivity during generation. Partial text must disappear, a failed/uncertain turn must remain, and no paid automatic retry must occur. A subsequent explicit Send is a separate request.
+- Restart and check that only completed answers and their source metadata appear as finished replies. Existing saved sources without filename metadata fall back to their document family name.

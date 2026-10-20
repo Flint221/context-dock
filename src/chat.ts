@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import type { Hit } from "./cloud";
 export interface ChatSummary {
   id: string;
@@ -19,6 +19,14 @@ export interface Chat extends ChatSummary {
   turns: ChatTurn[];
 }
 export const chat = {
-  action: <T = void>(project: string, action: string, payload: unknown = {}) =>
-    invoke<T>("chat_action", { project, action, payload }),
+  action: <T = void>(
+    project: string,
+    action: string,
+    payload: unknown = {},
+    onPreview?: (text: string) => void,
+  ) => {
+    const preview = new Channel<string>();
+    preview.onmessage = onPreview ?? (() => {});
+    return invoke<T>("chat_action", { project, action, payload, preview });
+  },
 };

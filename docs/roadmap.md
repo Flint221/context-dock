@@ -22,8 +22,10 @@ Version 0.5.0 adds explicitly approved Responses requests for exact version comp
 
 ## Milestone 6 — Production hardening and updates
 
-The 0.5.1 simplification replaces main-page baseline setup with one Cloud sync switch and Ask project: version-filtered vector retrieval, one generated answer per Send, multiple persisted local chats and local-only deletion. Schema 005 preserves existing data. Advanced AI tools and streaming are deferred; baseline/report records from 0.5.0 remain stored. See manual-testing-chat.md for current acceptance steps.
+The 0.5.1 simplification replaces main-page baseline setup with one Cloud sync switch and Ask project: version-filtered vector retrieval, one generated answer per Send, multiple persisted local chats and local-only deletion. Schema 005 preserves existing data. Advanced AI tools are deferred; baseline/report records from 0.5.0 remain stored. See manual-testing-chat.md for current acceptance steps.
 
-Version 0.5.2 adds confirmations, duplicate-click protection, loading/check indicators and native/readback verification for major settings. The simple cloud-chat feature is implemented. A redesigned AI tool interface, historical-version chat selection, streaming, chat export and storage/retention controls are outside this first pass; production hardening and user-run live account acceptance remain.
+Version 0.5.2 adds confirmations, duplicate-click protection, loading/check indicators and native/readback verification for major settings. The simple cloud-chat feature is implemented. A redesigned AI tool interface, historical-version chat selection, chat export and storage/retention controls are outside this first pass; production hardening and user-run live account acceptance remain.
 
 Signed installers and signed update delivery; clean-machine/upgrade/uninstall coverage; migration backups and diagnostics; accessibility/scale review; cancellation and streaming pagination; storage usage and explicitly authorized retention management; broader filesystem compatibility; architecture-specific installers and offline prerequisite packaging. No automatic destructive retention or update agent is implemented now.
+
+Version 0.5.3 adds live Responses streaming, filename-only source labels, a correctly sized Cloud sync switch, and Enter/Shift+Enter chat shortcuts. Existing bounded six-exchange context remains enabled. Historical version selection, export, retention controls and a redesigned advanced AI tool interface remain future work.

@@ -20,6 +20,8 @@ export function ProjectChat({
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [sending, setSending] = useState("");
+  const [preview, setPreview] = useState("");
+  const sendingNow = useRef(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [deleting, setDeleting] = useState(false);
@@ -55,7 +57,7 @@ export function ProjectChat({
   useEffect(() => {
     if (messages.current)
       messages.current.scrollTop = messages.current.scrollHeight;
-  }, [current, busy]);
+  }, [current, busy, preview]);
   async function open(id: string) {
     const token = ++request.current;
     setError("");
@@ -70,8 +72,11 @@ export function ProjectChat({
     }
   }
   async function send() {
-    if (busy || !enabled || !ready || !question.trim()) return;
+    if (sendingNow.current || busy || !enabled || !ready || !question.trim())
+      return;
+    sendingNow.current = true;
     setBusy(true);
+    setPreview("");
     setError("");
     const text = question.trim();
     setSending(text);
@@ -82,10 +87,23 @@ export function ProjectChat({
         id = created.id;
         if (alive.current) setCurrent(created);
       }
-      const saved = await chat.action<Chat>(project, "send", {
-        id,
-        question: text,
-      });
+      let accepting = true;
+      let saved: Chat;
+      try {
+        saved = await chat.action<Chat>(
+          project,
+          "send",
+          {
+            id,
+            question: text,
+          },
+          (answer) => {
+            if (alive.current && accepting) setPreview(answer);
+          },
+        );
+      } finally {
+        accepting = false;
+      }
       if (alive.current) {
         setCurrent(saved);
         setQuestion("");
@@ -101,7 +119,9 @@ export function ProjectChat({
         }
       }
     } finally {
+      sendingNow.current = false;
       if (alive.current) {
+        setPreview("");
         setBusy(false);
         setSending("");
         void list().catch(() => {});
@@ -214,10 +234,10 @@ export function ProjectChat({
                           key={`${source.citation}:${source.versionId}`}
                         >
                           <strong>
-                            [{source.citation}] {source.familyName} · v
+                            [{source.citation}]{" "}
+                            {source.sourceName ?? source.familyName} · v
                             {source.number}
                           </strong>
-                          <p>{source.excerpt}</p>
                         </div>
                       ))}
                     </details>
@@ -232,9 +252,13 @@ export function ProjectChat({
                   <strong>You</strong>
                   <p>{sending}</p>
                 </div>
-                <p role="status">
-                  Searching your documents and writing an answer…
-                </p>
+                <div className="chat-answer" aria-busy="true">
+                  <strong>ContextDock</strong>
+                  <p role="status">
+                    {preview ? "Writing answer…" : "Searching your documents…"}
+                  </p>
+                  {preview && <p>{preview}</p>}
+                </div>
               </>
             )}
           </div>
@@ -258,11 +282,22 @@ export function ProjectChat({
               disabled={busy || !enabled || !ready}
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (
+                  e.key === "Enter" &&
+                  !e.shiftKey &&
+                  !e.nativeEvent.isComposing
+                ) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
             />
             <div className="chat-send-row">
               <small>
                 Send uses OpenAI and may incur API charges. Answers use
-                retrieved passages; check their sources.
+                retrieved passages and up to six recent exchanges in this chat;
+                check their sources. Enter to send; Shift+Enter for a new line.
               </small>
               <button
                 className="primary"

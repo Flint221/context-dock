@@ -232,7 +232,7 @@ pub fn verify_flags(db: &Connection, id: &str, expected: &[(&str, i64)]) -> Resu
     Ok(())
 }
 pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    rows(db,"SELECT j.*,v.number,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
+    rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
 }
 pub fn view(db: &Connection, id: &str) -> Result<Value> {
     let mut p = project(db, id)?;

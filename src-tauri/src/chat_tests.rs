@@ -133,6 +133,7 @@ fn chat_uses_current_vector_results_and_preserves_multiple_local_conversations()
     assert_eq!(saved["turns"][0]["state"], "completed");
     assert_eq!(saved["turns"][0]["sources"][0]["familyName"], "Master");
     assert_eq!(saved["turns"][0]["sources"][0]["number"], 1);
+    assert_eq!(saved["turns"][0]["sources"][0]["sourceName"], "Master.md");
     let calls = api.calls.borrow();
     assert_eq!(calls.len(), 3);
     let body = calls.last().unwrap().1.as_ref().unwrap();

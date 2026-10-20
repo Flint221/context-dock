@@ -563,7 +563,7 @@ fn search_impl(
             .chars()
             .take(8000)
             .collect::<String>();
-        let source = json!({"fileId":job["file_id"],"familyName":job["familyName"],"number":job["number"],"versionId":job["version_id"],"score":hit["score"]});
+        let source = json!({"fileId":job["file_id"],"familyName":job["familyName"],"sourceName":job["sourceName"],"number":job["number"],"versionId":job["version_id"],"score":hit["score"]});
         provenance.push(source.clone());
         let mut result = source;
         result["excerpt"] = json!(excerpt);

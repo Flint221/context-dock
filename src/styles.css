@@ -1550,3 +1550,10 @@ dialog:has(.comparison) {
   border-left: 3px solid var(--accent);
   padding: 0.75rem 1rem;
 }
+
+/* Keep the switch independent of the general 18px checkbox rule. */
+.cloud-check.cloud-switch { align-items: center; margin: 0; }
+.cloud-check.cloud-switch input {
+  width: 42px; height: 24px; flex: 0 0 42px;
+  padding: 0; margin: 0; appearance: none;
+}

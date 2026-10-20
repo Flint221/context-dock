@@ -10,6 +10,7 @@ use serde_json::Value;
 struct CredentialApi<'a> {
     api: OpenAi,
     key: &'a str,
+    preview: Option<tauri::ipc::Channel<String>>,
 }
 impl CloudApi for CredentialApi<'_> {
     fn request(
@@ -24,7 +25,19 @@ impl CloudApi for CredentialApi<'_> {
         {
             return Err(ApiError::local("The question or retrieved text contains the saved API key. Remove it before sending. No request was sent."));
         }
-        let response = self.api.request(method, path, body)?;
+        let response = if method == "POST" && path == "/responses" {
+            self.api.stream_answer(
+                body.ok_or_else(|| ApiError::local("Missing answer request."))?,
+                &mut |text| {
+                    if let Some(channel) = &self.preview {
+                        let safe = crate::chat_stream::safe_preview(text, self.key);
+                        let _ = channel.send(safe);
+                    }
+                },
+            )?
+        } else {
+            self.api.request(method, path, body)?
+        };
         if ai_inference::contains_credential(&response, self.key) {
             return Err(ApiError::local(
                 "The response contained credential-like text and was not saved.",
@@ -45,6 +58,7 @@ pub async fn chat_action(
     project: String,
     action: String,
     payload: Value,
+    preview: tauri::ipc::Channel<String>,
 ) -> Result<Value> {
     let path = state.path.clone();
     let gate = state.gate.clone();
@@ -82,6 +96,7 @@ pub async fn chat_action(
                 let api = CredentialApi {
                     api: OpenAi::for_analysis(&key)?,
                     key: &key,
+                    preview: Some(preview),
                 };
                 chat::ask(
                     &r,

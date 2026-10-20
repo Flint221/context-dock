@@ -30,6 +30,7 @@ export interface Job {
   version_id: string;
   file_id: string | null;
   familyName: string;
+  sourceName?: string;
   number: number;
   state: string;
   error: string | null;
@@ -78,6 +79,7 @@ export interface Connection {
 export interface Hit {
   fileId: string;
   familyName: string;
+  sourceName?: string;
   number: number;
   versionId: string;
   score: number | null;

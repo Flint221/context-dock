@@ -36,6 +36,7 @@ const saved: Chat = {
           citation: 1,
           fileId: "file1",
           familyName: "Master Context",
+          sourceName: "Master_Context.md",
           versionId: "v1",
           number: 1,
           score: 0.9,
@@ -186,10 +187,15 @@ it("keeps cloud off until one confirmation, then starts sync and enables a simpl
   );
   await user.click(screen.getByRole("button", { name: "Send" }));
   expect(await screen.findByText("SQLite [1].")).toBeInTheDocument();
-  expect(chat.action).toHaveBeenCalledWith("p1", "send", {
-    id: "c1",
-    question: "Which database?",
-  });
+  expect(chat.action).toHaveBeenCalledWith(
+    "p1",
+    "send",
+    {
+      id: "c1",
+      question: "Which database?",
+    },
+    expect.any(Function),
+  );
 });
 it("cancel restores the actual switch and turning off blocks new questions", async () => {
   connected();
@@ -409,4 +415,61 @@ it("shows verification read failures instead of claiming the toggle completed", 
   expect(
     screen.queryByText(/Cloud sync is off — confirmed/),
   ).not.toBeInTheDocument();
+});
+
+it("streams provisional text, then replaces it with the saved answer and filename-only sources", async () => {
+  connected();
+  chats = [structuredClone(saved)];
+  let finish!: (value: Chat) => void;
+  let emit!: (text: string) => void;
+  const previous = vi.mocked(chat.action).getMockImplementation()!;
+  vi.mocked(chat.action).mockImplementation(
+    (project, action, payload, preview) => {
+      if (action === "send") {
+        emit = preview!;
+        return new Promise<Chat>((resolve) => {
+          finish = resolve;
+        }) as never;
+      }
+      return previous(project, action, payload, preview);
+    },
+  );
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  await screen.findByText("SQLite [1].");
+  await user.type(
+    screen.getByRole("textbox", { name: "Your question" }),
+    "And the frontend?",
+  );
+  await user.click(screen.getByRole("button", { name: "Send" }));
+  await act(async () => emit("It uses Re"));
+  expect(screen.getByText("It uses Re")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Answering…" })).toBeDisabled();
+  expect(screen.queryByText("SQLite database")).not.toBeInTheDocument();
+  expect(screen.getByText(/Master_Context.md/)).toBeInTheDocument();
+  await act(async () => finish(structuredClone(saved)));
+  expect(screen.queryByText("It uses Re")).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeEnabled();
+  await act(async () => emit("late callback"));
+  expect(screen.queryByText("late callback")).not.toBeInTheDocument();
+});
+
+it("Enter sends a new chat, Shift+Enter adds a line, and composition Enter does not send", async () => {
+  connected();
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  const input = screen.getByRole("textbox", { name: "Your question" });
+  await waitFor(() => expect(input).toBeEnabled());
+  await user.type(input, "First line");
+  await user.keyboard("{Shift>}{Enter}{/Shift}");
+  expect(input).toHaveValue("First line\n");
+  fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+  expect(
+    vi.mocked(chat.action).mock.calls.filter((c) => c[1] === "send"),
+  ).toHaveLength(0);
+  await user.keyboard("{Enter}");
+  await screen.findByText("SQLite [1].");
+  expect(
+    vi.mocked(chat.action).mock.calls.filter((c) => c[1] === "send"),
+  ).toHaveLength(1);
 });
