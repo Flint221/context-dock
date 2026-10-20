@@ -1,6 +1,6 @@
 # ContextDock
 
-ContextDock 0.6.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.6.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
 ## Moved or missing project folders (Milestone 6)
@@ -13,7 +13,15 @@ Missing individual files remain listed with their original history. Restore them
 
 See the [Milestone 6 folder recovery walkthrough](docs/manual-testing-milestone-6.md). Schema 006 upgrades existing databases in place; do not downgrade to a pre-0.6.0 build afterward.
 
-## Ask project (0.6.0)
+## Changing your cloud selection (0.6.1)
+
+Unchecking a document family under **Advanced cloud settings** reviews and saves an explicit opt-out. All its indexed captures are removed from this project's store before unrelated uploads, including while uploads remain paused. Each removal checks ownership, the deletion receipt and remote absence; failures retain identifiers and show **Retry document removals**. New questions stay blocked until removals are verified. Pure deselection can be saved even if sources or the tested key are temporarily unavailable; actual cleanup still needs the authorized original account/key.
+
+Selecting the family again restores the captures allowed by the saved current/full-history policy in the same project store, reusing retained uploads. A previously removed individual version keeps its separate explicit exclusion. Turning **Cloud sync off** deletes all stores and uploads owned by this installation/project, including older owned stores. Re-enabling creates a fresh owned store and uploads the saved selection. An empty or ineligible saved selection requires review; the app does not silently select other documents.
+
+**Pause** and **automatic sync off** stop new upload work and retain cloud data; previously confirmed document removals may finish. Local tracking and archival have their own controls and retain captured history when stopped. See the [complete toggle/reversal audit and acceptance checks](docs/toggle-audit.md).
+
+## Ask project (0.6.1)
 
 Enter sends; Shift+Enter adds a new line. Sources show the original filename and capture number without passage previews. Follow-ups include up to six recent completed exchanges, bounded to 12,000 UTF-8 bytes; older messages stay saved locally.
 
@@ -45,7 +53,7 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.6.0_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 6; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run `ContextDock_0.6.1_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 6; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
 5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
@@ -139,7 +147,7 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.0_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.1_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
