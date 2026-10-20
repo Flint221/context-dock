@@ -444,6 +444,54 @@ fn history_policy_round_trip_detaches_and_restores_original_captures_without_dup
 }
 
 #[test]
+fn cloud_off_stop_intent_survives_an_in_flight_document_removal_failure() {
+    struct BeginCleanup {
+        db: rusqlite::Connection,
+        id: String,
+        payload: Value,
+    }
+    impl CloudApi for BeginCleanup {
+        fn request(&self, _: &str, _: &str, _: Option<Value>) -> Result<Value, ApiError> {
+            cloud_cleanup::begin(&self.db, &self.id, &self.payload).unwrap();
+            Err(ApiError::local(
+                "Ordinary request stopped for full cleanup.",
+            ))
+        }
+        fn upload(&self, _: &str, _: Vec<u8>) -> Result<Value, ApiError> {
+            panic!("Cleanup must not upload");
+        }
+        fn content(&self, _: &str) -> Result<Vec<u8>, ApiError> {
+            panic!("No content request is expected");
+        }
+    }
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let mut none = f.draft();
+    none.documents.clear();
+    f.apply(none);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let interrupt = BeginCleanup {
+        db: cloud::connect(&f.r.store.join("test.db")).unwrap(),
+        id: f.id.clone(),
+        payload: json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]}),
+    };
+    cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &interrupt, "bound").unwrap();
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "cleanup_pending"
+    );
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "cloud_deleted"
+    );
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+}
+
+#[test]
 fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
 ) {
     use std::sync::{atomic::AtomicBool, Arc};

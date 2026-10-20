@@ -306,6 +306,17 @@ pub fn step(
                 Err(e) if e.missing=>execute(db,"UPDATE cloud_jobs SET state='removed',association_status=NULL,remote_current=NULL,error=NULL,next_at=0 WHERE id=?1",&[&s(job,"id")]),
                 Err(e)=>Err(e),
             };
+            // Whole-project Off persists its stop intent before waiting for the
+            // HTTP gate. A late opt-out result must not overwrite that decision.
+            let Ok(current) = cloud::project(db, id) else {
+                return Ok(());
+            };
+            if n(&current, "enabled") != 1
+                || n(&current, "revision") != n(&p, "revision")
+                || ["cleanup_pending", "cleanup_failed"].contains(&s(&current, "status"))
+            {
+                return Ok(());
+            }
             match result {
                 Ok(()) => {
                     db.execute("UPDATE cloud_projects SET status=CASE WHEN paused=1 THEN 'paused' ELSE 'queued' END,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",[id]).map_err(error)?;
