@@ -190,6 +190,33 @@ function connected() {
   view.families[0].cloudNumber = 1;
   view.indexed = 1;
 }
+it("keeps a paused cloud project checked so unchecking always means verified cloud deletion", async () => {
+  connected();
+  view.paused = 1;
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(screen.getByText("Paused · Cloud data retained")).toBeInTheDocument();
+  await user.click(toggle);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(toggle).toBeChecked();
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(toggle);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off Cloud sync",
+    }),
+  );
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith(
+    "p1",
+    "delete_cloud",
+    expect.objectContaining({ confirm: true, storeId: "vs_test" }),
+  );
+});
 it.each(["empty", "ineligible"])(
   "preserves an %s saved selection instead of silently selecting all documents on re-enable",
   async (kind) => {

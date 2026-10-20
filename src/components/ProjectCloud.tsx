@@ -157,7 +157,7 @@ export function ProjectCloud({ project }: { project: string }) {
               type="checkbox"
               role="switch"
               aria-label="Cloud sync"
-              checked={enabled}
+              checked={!!view?.enabled}
               disabled={
                 busy ||
                 advancedBusy ||
