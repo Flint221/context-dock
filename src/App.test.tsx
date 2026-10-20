@@ -36,13 +36,11 @@ it("preserves page controls during status updates and resets the scene and scrol
     notify = cb;
     return () => {};
   });
-  const inventory = vi
-    .spyOn(processes, "inventory")
-    .mockResolvedValue({
-      processes: [],
-      warnings: [],
-      scannedAt: "2026-10-20T12:00:00Z",
-    });
+  const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
+    processes: [],
+    warnings: [],
+    scannedAt: "2026-10-20T12:00:00Z",
+  });
   const user = userEvent.setup();
   render(<App />);
   await user.click(screen.getByRole("button", { name: "Current processes" }));
@@ -284,7 +282,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.6.2 · Milestone 6")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.6.3 · Milestone 6")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();

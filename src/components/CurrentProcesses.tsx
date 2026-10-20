@@ -44,10 +44,10 @@ export function CurrentProcesses() {
   const active = useRef(false);
   const reading = useRef(false);
   const acting = useRef(false);
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (quiet = false) => {
     if (reading.current) return;
     reading.current = true;
-    setLoading(true);
+    if (!quiet) setLoading(true);
     try {
       const next = await processes.inventory();
       if (!active.current) return;
@@ -78,7 +78,7 @@ export function CurrentProcesses() {
     if (!autoRefresh || review) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible" && !acting.current)
-        void refresh();
+        void refresh(true);
     }, 5000);
     return () => window.clearInterval(timer);
   }, [autoRefresh, review, refresh]);
