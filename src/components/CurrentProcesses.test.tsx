@@ -68,7 +68,7 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 async function ready() {
   const view = render(<CurrentProcesses />);
-  await screen.findByText("node.exe");
+  await screen.findAllByText("node.exe");
   return view;
 }
 

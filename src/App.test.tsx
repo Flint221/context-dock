@@ -5,6 +5,7 @@ import App from "./App";
 import { cloud } from "./cloud";
 import { registry } from "./services/registry";
 import type { Snapshot } from "./types";
+import { processes } from "./services/processes";
 vi.mock("./services/registry", () => ({
   registry: {
     snapshot: vi.fn(),
@@ -29,6 +30,34 @@ vi.mock("./cloud", async (original) => ({
   },
 }));
 let state: Snapshot;
+it("places Current processes above Settings and opens it independently of project registrations", async () => {
+  const inventory = vi
+    .spyOn(processes, "inventory")
+    .mockResolvedValue({
+      processes: [],
+      warnings: [],
+      scannedAt: "2026-10-20T12:00:00Z",
+    });
+  const user = userEvent.setup();
+  render(<App />);
+  const nav = screen.getByRole("navigation", { name: "Main navigation" });
+  const buttons = within(nav).getAllByRole("button");
+  expect(buttons[2]).toHaveTextContent("Current processes");
+  expect(buttons[3]).toHaveTextContent("Settings");
+  await user.click(buttons[2]);
+  expect(
+    await screen.findByRole("button", { name: "Refresh processes" }),
+  ).toBeInTheDocument();
+  await waitFor(() => expect(inventory).toHaveBeenCalled());
+  expect(
+    screen.queryByRole("button", { name: "Add project" }),
+  ).not.toBeInTheDocument();
+  await user.click(buttons[3]);
+  expect(
+    screen.queryByRole("button", { name: "Refresh processes" }),
+  ).not.toBeInTheDocument();
+  inventory.mockRestore();
+});
 it("does not let an older registry read dismiss a newer folder-loss state", async () => {
   const p = {
     id: "p1",
