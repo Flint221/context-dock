@@ -30,6 +30,7 @@ mod matching;
 mod models;
 mod monitor;
 mod operations;
+mod processes;
 mod registry;
 mod scanner;
 mod storage;
@@ -333,7 +334,12 @@ pub fn run() {
             compare_versions,
             open_version_location,
             open_current_location,
-            retry_operations
+            retry_operations,
+            processes::process_inventory,
+            processes::stop_processes,
+            processes::preview_process,
+            processes::process_startup_items,
+            processes::open_startup_settings
         ])
         .run(tauri::generate_context!())
         .expect("ContextDock could not start");
