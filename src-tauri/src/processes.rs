@@ -759,6 +759,25 @@ mod platform {
                 rows.iter().find(|p| p.th32ProcessID == pid).unwrap(),
                 &HashSet::new(),
             );
+            let mut session = 0;
+            assert_ne!(
+                unsafe { ProcessIdToSessionId(std::process::id(), &mut session) },
+                0
+            );
+            if session == 0 {
+                // Service-hosted test runners must retain the production session-zero refusal.
+                assert!(!p.can_stop);
+                assert!(stop_one(
+                    &Target {
+                        pid,
+                        started: p.started
+                    },
+                    &rows,
+                    &HashSet::new()
+                )
+                .is_err());
+                return;
+            }
             assert!(p.can_stop);
             assert!(stop_one(
                 &Target {
