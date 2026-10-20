@@ -14,6 +14,11 @@
   --accent: #4469bc;
   --soft: #e9effb;
   --error: #ad3939;
+  --error-soft: #fcebea;
+  --success: #216c43;
+  --success-soft: #e7f4ec;
+  --warning: #855608;
+  --warning-soft: #fff3d6;
   --motion-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --motion-fast: 160ms;
   --motion-page: 420ms;
@@ -31,6 +36,11 @@
   --accent: #9ab7fb;
   --soft: #29354d;
   --error: #ffacac;
+  --error-soft: #41282e;
+  --success: #8cddb0;
+  --success-soft: #203b30;
+  --warning: #f0cc80;
+  --warning-soft: #3d3320;
   color: var(--text);
   background: var(--bg);
   --shadow-soft: 0 3px 12px #00000020, 0 1px 2px #00000018;
@@ -137,8 +147,8 @@ select:focus-visible {
   transition: transform 0.12s;
 }
 .cloud-switch input:checked {
-  background: #4168ba;
-  border-color: #4168ba;
+  background: #287849;
+  border-color: #287849;
 }
 .cloud-switch input:checked::after {
   transform: translateX(18px);
@@ -328,6 +338,8 @@ button.primary:hover:not(:disabled) {
 }
 button.danger {
   color: var(--error);
+  border-color: color-mix(in srgb, var(--error) 35%, var(--border));
+  background: var(--error-soft);
 }
 h1,
 h2,
@@ -483,7 +495,7 @@ header {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #4b9476;
+  background: var(--success);
 }
 .content {
   padding: 34px;
@@ -616,14 +628,24 @@ header {
   color: var(--muted);
   text-transform: capitalize;
 }
-.badge.available {
-  background: var(--soft);
-  color: var(--accent);
+.badge.available,
+.badge.watching {
+  background: var(--success-soft);
+  color: var(--success);
 }
 .badge.missing,
 .badge.unavailable,
-.badge.partial {
+.badge.error,
+.badge.needs_folder {
+  background: var(--error-soft);
   color: var(--error);
+}
+.badge.partial,
+.badge.warning,
+.badge.paused,
+.badge.starting {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 .recent {
   overflow: hidden;
@@ -732,9 +754,19 @@ header {
 .banner button {
   margin-left: auto;
 }
-.error,
-.warning {
+.error {
   color: var(--error);
+}
+.warning {
+  color: var(--warning);
+}
+.banner.error {
+  background: var(--error-soft);
+  border-color: color-mix(in srgb, var(--error) 40%, var(--border));
+}
+.banner.warning {
+  background: var(--warning-soft);
+  border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
 }
 .progress {
   color: var(--accent);
@@ -2149,13 +2181,14 @@ dialog[open]::backdrop {
   color: var(--text);
 }
 .operation-feedback[data-state="complete"] {
-  border-color: color-mix(in srgb, #4b9476 30%, var(--border));
+  background: var(--success-soft);
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
 }
 .operation-feedback[data-state="complete"] .operation-status > svg {
-  color: #4b9476;
+  color: var(--success);
 }
 .operation-feedback[data-state="complete"] .progress-fill {
-  background: #4b9476;
+  background: var(--success);
 }
 .progress-meter {
   margin: 16px 0;
