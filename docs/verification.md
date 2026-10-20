@@ -9,7 +9,7 @@ Milestone 5 was implemented on Windows with the existing Node/MSVC Rust toolchai
 | TypeScript, ESLint | Passed |
 | rustfmt, all-target Clippy with -D warnings | Passed |
 | Production frontend build | Passed; about 307 kB uncompressed JS |
-| Windows x64 NSIS | Built ContextDock_0.5.0_x64-setup.exe, 4,198,171 bytes (about 4.00 MiB), unsigned |
+| Windows x64 NSIS | Built ContextDock_0.5.0_x64-setup.exe, 4,208,701 bytes (about 4.01 MiB), unsigned |
 | npm audit --omit=dev | Zero reported production vulnerabilities |
 | Transactional migration | Schema 3→4 fixture retains stable project/version identity, verified snapshots and cloud mapping/settings; existing schema 1/2/future-schema regressions pass |
 | Security audit | Redacted current-source/history checks and credential/HTTP/UI/CI/installer review documented in security-audit-0.5.0.md |
