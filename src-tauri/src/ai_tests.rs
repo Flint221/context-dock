@@ -361,6 +361,99 @@ fn oversize_evidence_and_invalid_model_output_budget_stop_before_request() {
     assert!(ai::plan(&f.r, &f.p, &req).is_err());
 }
 #[test]
+fn baseline_citations_use_decoded_fields_without_changing_approved_content() {
+    let mut f = Fixture::new();
+    let purpose = "Keep \"inventory\" on C:\\device.\nStay offline.";
+    let baseline = ai::approve(&mut f.r, &f.p, &json!({
+        "approve":true,"title":"Original offline MVP",
+        "content":{"purpose":purpose,"goals":"Add items","requirements":"Local data",
+        "nonGoals":"Cloud; accounts","constraints":"Offline","deliverables":"MVP","principles":"React; SQLite"}
+    })).unwrap();
+    let request = Request {
+        kind: "alignment".into(),
+        versions: f.ids(),
+        baseline: Some(baseline.clone()),
+        model: ai::MINI.into(),
+        input_budget: 32768,
+        output_tokens: 4096,
+    };
+    let p = ai::plan(&f.r, &f.p, &request).unwrap();
+    assert_eq!(p.prompt_version, 2);
+    let e = p
+        .evidence
+        .iter()
+        .find(|e| e.version == baseline && e.text.contains(purpose))
+        .unwrap();
+    assert!(e.text.contains("## Project purpose\n"));
+    let mut v = response(&p);
+    let mut report: Value =
+        serde_json::from_str(v["output"][0]["content"][0]["text"].as_str().unwrap()).unwrap();
+    report["summaryRefs"] = json!([{"evidenceId":e.id,"quote":purpose}]);
+    report["findings"][0]["refs"] = report["summaryRefs"].clone();
+    v["output"][0]["content"][0]["text"] = json!(report.to_string());
+    let api = Mock::default();
+    *api.response.borrow_mut() = Some(v);
+    let saved = run(&f, &request, &api);
+    assert_eq!(saved["state"], "completed");
+    assert_eq!(saved["result"]["summaryRefs"][0]["quote"], purpose);
+    let approved = ai::baseline(&f.r, &f.p, &baseline).unwrap();
+    let fields: Value = serde_json::from_str(s(&approved, "content")).unwrap();
+    assert_eq!(fields["purpose"], purpose);
+    assert_eq!(api.bodies.borrow().len(), 1);
+}
+#[test]
+fn whitespace_only_citation_changes_restore_exact_unicode_source_without_retry() {
+    let mut f = Fixture::new();
+    f.edit("# Café Ω\r\nKeep inventory local.\r\nNo cloud.\r\n");
+    let baseline = f.approve(None, None);
+    let request = Request {
+        kind: "alignment".into(),
+        versions: vec![f.ids().last().unwrap().clone()],
+        baseline: Some(baseline),
+        model: ai::MINI.into(),
+        input_budget: 32768,
+        output_tokens: 4096,
+    };
+    let p = ai::plan(&f.r, &f.p, &request).unwrap();
+    let mut v = response(&p);
+    let mut report: Value =
+        serde_json::from_str(v["output"][0]["content"][0]["text"].as_str().unwrap()).unwrap();
+    report["summaryRefs"][0]["quote"] = json!("# Café Ω  Keep\tinventory local.");
+    report["findings"][0]["refs"] = report["summaryRefs"].clone();
+    v["output"][0]["content"][0]["text"] = json!(report.to_string());
+    let api = Mock::default();
+    *api.response.borrow_mut() = Some(v);
+    let saved = run(&f, &request, &api);
+    let exact = "# Café Ω\nKeep inventory local.";
+    assert_eq!(saved["result"]["summaryRefs"][0]["quote"], exact);
+    assert_eq!(saved["result"]["findings"][0]["refs"][0]["quote"], exact);
+    assert!(p.evidence[0].text.contains(exact));
+    assert_eq!(api.bodies.borrow().len(), 1);
+}
+#[test]
+fn citation_matching_rejects_changed_words_punctuation_case_and_spliced_passages() {
+    let mut f = Fixture::new();
+    let req = f.pair();
+    let p = ai::plan(&f.r, &f.p, &req).unwrap();
+    for quote in [
+        "Online inventory.",
+        "offline inventory.",
+        "Offline inventory!",
+        "# Goal No cloud.",
+        "Offlineinventory.",
+    ] {
+        let mut v = response(&p);
+        let mut report: Value =
+            serde_json::from_str(v["output"][0]["content"][0]["text"].as_str().unwrap()).unwrap();
+        report["summaryRefs"][0]["quote"] = json!(quote);
+        v["output"][0]["content"][0]["text"] = json!(report.to_string());
+        let error = ai_inference::parse(&p, &v).unwrap_err();
+        assert!(error.contains("summary citation 1, e1"));
+        assert!(error.contains("No automatic retry"));
+        assert!(!error.contains(quote));
+    }
+}
+#[test]
 fn unsupported_quotes_refs_schema_refusals_and_truncation_never_become_completed_reports() {
     for invalid in [
         "quote",

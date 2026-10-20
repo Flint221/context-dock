@@ -256,7 +256,25 @@ pub fn plan(r: &Registry, p: &str, request: &Request) -> Result<Plan> {
             b["source"] =
                 serde_json::to_value(verified.0).map_err(|_| "Invalid baseline source.")?;
         }
-        chunks(&mut evidence, s(b, "id"), s(b, "content"));
+        // Cite decoded field text, not JSON escape sequences from its storage format.
+        let goals: Goals = serde_json::from_str(s(b, "content"))
+            .map_err(|_| "Saved baseline fields are invalid.")?;
+        let text = [
+            ("Project purpose", goals.purpose),
+            ("Original goals", goals.goals),
+            ("Primary requirements", goals.requirements),
+            ("Non-goals / excluded scope", goals.non_goals),
+            ("Major constraints", goals.constraints),
+            ("Expected deliverables", goals.deliverables),
+            ("Architectural principles", goals.principles),
+        ]
+        .into_iter()
+        .map(|(label, value)| format!("## {label}\n{value}"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+        chunks(&mut evidence, s(b, "id"), &text);
     }
     if ["compare", "timeline"].contains(&request.kind.as_str()) {
         for pair in data.windows(2) {
@@ -299,7 +317,7 @@ pub fn plan(r: &Registry, p: &str, request: &Request) -> Result<Plan> {
         transitions,
         warnings,
         scope: scope.into(),
-        prompt_version: 1,
+        prompt_version: 2,
         schema_version: 1,
         input_units: 0,
         estimated_tokens: 0,

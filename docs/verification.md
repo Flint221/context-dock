@@ -1,5 +1,11 @@
 # Verification — ContextDock 0.5.0
 
+## October 20 alignment citation follow-up
+
+User acceptance reached OpenAI and returned numeric usage, but the alignment result failed literal quotation validation. The rejected provider text was intentionally not retained, so its exact mismatched quotation cannot be reconstructed. A local regression reproduces a baseline-formatting failure: decoded multi-line text with quotes/backslashes cannot be cited literally against the original JSON storage string. Prompt version 2 now supplies labeled decoded baseline fields and explicitly limits quotations to the named evidence text. ASCII whitespace-only differences are mapped back to exact source substrings before saving; altered words, punctuation, case, spliced passages and foreign references remain rejected. New diagnostics identify the summary/finding citation and evidence region without storing rejected output. No automatic retry or live API request was made, and approved baseline records remain unchanged.
+
+Three added scripted regressions cover decoded baseline provenance, Unicode/CRLF/spacing restoration with a single request, and strict rejection of changed/noncontiguous quotations. The complete Rust suite now passes **108 tests**; **41 frontend tests**, TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. The production build and unsigned Windows NSIS rebuild pass; the updated local 0.5.0 installer is **4,207,707 bytes**. It was not installed or used for a live API request by the agent. The original implementation checks below record the initial Milestone 5 build.
+
 Milestone 5 was implemented on Windows with the existing Node/MSVC Rust toolchain. All new request tests use scripted Responses output, disposable SQLite/source/snapshot fixtures and synthetic credentials. No real key was read, no authenticated OpenAI call was made, and no installer was run against user data. The application identifier remains com.contextdock.desktop; version manifests/locks are 0.5.0.
 
 | Check | Result |
