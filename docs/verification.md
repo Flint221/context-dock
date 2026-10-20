@@ -1,3 +1,17 @@
+# Verification — ContextDock 0.6.0 folder recovery (Milestone 6)
+
+October 20: **142 native tests** and **73 frontend tests** pass. TypeScript, ESLint (no warnings), rustfmt, all-target Clippy with warnings denied, production assets and Windows x64 NSIS packaging pass. Versions/lockfiles are 0.6.0; the application identifier and per-user store remain unchanged. Schema 006 upgrades existing databases in place.
+
+The unsigned installer is `src-tauri/target/release/bundle/nsis/ContextDock_0.6.0_x64-setup.exe`, **4,289,246 bytes**. SHA-256: `BF9CCB72420F3EC11797C26C5C5362B6EBE2E068D4289A8EF71D56CECE167350`. It was built locally and was not installed or run against the user's application data. Windows Actions now also runs on pushes to `milestone-6`; local results do not assert that a remote run has finished.
+
+Eleven added native regressions cover the saved loss latch through restart/returning roots, replacement directory identity, metadata-only relocation with retained histories/chats/cloud IDs/preferences, partial/all-missing sources, stale review and ignored-write rollback, invalid/overlapping/retained/app-storage destinations, actual Windows junction refusal, root guards blocking new work, schema-5 migration, missing selected source refusal without provider calls, stale cloud request wrappers, and actual native watcher rebinding/capture plus tracking-off loss detection. Existing migration fixtures were adjusted to represent their genuine older schemas; the prior implicit reconnect expectation now requires explicit reassignment. All previous capture/archive/comparison/cloud/chat regressions pass.
+
+Ten added frontend regressions cover a persistent reminder with blocked work panels and usable navigation, missing/inaccessible source warnings, reviewed confirmation and project identity, picker/review cancellation, duplicate click protection through readback, verification retry without reapplying, invalid/stale reviews, obsolete picker replies, all-missing/205-path pagination, saved-chat reading while missing selected files block questions, and obsolete registry reads not hiding newer folder-loss state. These are component/IPC-mock checks, not installed GUI acceptance at every scale/theme.
+
+Tests use disposable sources, snapshots and databases, synthetic scope values and mocked provider responses. No real API key was read, no authenticated provider request was made, and no registered user folder/database was modified. Reassignment does not perform automatic filesystem search, source movement, data deletion or cloud recreation. An already-dispatched request may finish; explicit cleanup remains separately available. Installed upgrade, Explorer interaction, real account behavior, removable/network volumes and visual/Word acceptance remain the user-run steps in [Milestone 6 acceptance](manual-testing-milestone-6.md).
+
+---
+
 # Verification — ContextDock 0.5.4 cloud erasure and project removal
 
 October 20: **131 native tests** and **63 frontend tests** pass. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production assets and Windows x64 NSIS packaging pass. The unsigned installer is `src-tauri/target/release/bundle/nsis/ContextDock_0.5.4_x64-setup.exe`, **4,268,411 bytes**. Application identity and schema 005 are unchanged. The agent did not install it or perform authenticated/destructive acceptance against user cloud data.
