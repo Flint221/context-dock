@@ -12,6 +12,7 @@ import {
 import type { Project, Document } from "../types";
 import { date, displayPath } from "../format";
 import { Documents } from "./Documents";
+import { ProjectFolder } from "./ProjectFolder";
 export function ProjectDetails({
   changed,
   project,
@@ -35,11 +36,22 @@ export function ProjectDetails({
   remove: () => void;
   refresh: () => void;
 }) {
+  const folderLost =
+    project.folderState === "needs_reassignment" ||
+    project.status === "unavailable";
+  const missing = documents.filter((d) => d.status === "missing");
+  const inaccessible = documents.filter((d) => d.status === "unavailable");
   return (
     <>
       <button className="back" disabled={busy} onClick={back}>
         <ArrowLeft size={16} /> All projects
       </button>
+      <ProjectFolder
+        key={`folder:${project.id}`}
+        project={project}
+        busy={busy}
+        changed={changed}
+      />
       <details className="project-options">
         <summary>Project folder and options</summary>
         <section className="panel project-toolbar">
@@ -64,10 +76,20 @@ export function ProjectDetails({
           </div>
         </section>
       </details>
-      {project.scanError && (
+      {project.scanError && !folderLost && (
         <div className="banner warning">
           <AlertTriangle size={18} />
           <span>{project.scanError}</span>
+        </div>
+      )}
+      {!folderLost && (missing.length > 0 || inaccessible.length > 0) && (
+        <div role="status" className="banner warning">
+          <AlertTriangle size={18} />
+          <span>
+            {missing.length} files missing · {inaccessible.length} files
+            inaccessible. Check the document statuses below, restore the files
+            or fix access, then refresh documents. Saved history is retained.
+          </span>
         </div>
       )}
       <div className="refresh-row">
@@ -80,12 +102,19 @@ export function ProjectDetails({
           Refresh documents
         </button>
       </div>
-      <ProjectCloud key={`cloud:${project.id}`} project={project.id} />
-      <TrackingPanel
-        key={`tracking:${project.id}`}
-        project={project}
-        changed={changed}
-      />
+      {!folderLost && (
+        <ProjectCloud
+          key={`cloud:${project.id}:${project.path}`}
+          project={project.id}
+        />
+      )}
+      {!folderLost && (
+        <TrackingPanel
+          key={`tracking:${project.id}`}
+          project={project}
+          changed={changed}
+        />
+      )}
       <Documents key={`documents:${project.id}`} documents={documents} />
     </>
   );

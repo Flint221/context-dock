@@ -294,6 +294,9 @@ pub fn step(
         return Ok(());
     }
     let result = (|| -> ApiResult<()> {
+        if n(&p, "delete_requested") != 1 {
+            cloud::desired(db, id, &cloud::draft(db, &p).map_err(local)?).map_err(local)?;
+        }
         if s(&p, "store_id").is_empty() {
             return create_store(db, &p, api);
         }
@@ -498,6 +501,7 @@ fn search_impl(
     bound: &str,
     current_only: bool,
 ) -> Result<Value> {
+    crate::folder_recovery::require_ready(db, id)?;
     let p = cloud::project(db, id)?;
     if n(&p, "enabled") != 1 || n(&p, "paused") == 1 || s(&p, "scope") != bound {
         return Err("Enable/resume this project and verify the saved key first.".into());

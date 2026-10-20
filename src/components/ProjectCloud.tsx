@@ -84,6 +84,7 @@ export function ProjectCloud({ project }: { project: string }) {
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
   const ready =
     enabled &&
+    view?.localReady !== false &&
     view?.connectionStatus === "connected" &&
     !!view.store_id &&
     view.failed === 0 &&
@@ -92,13 +93,15 @@ export function ProjectCloud({ project }: { project: string }) {
     selected.every((f) => f.currentNumber === f.cloudNumber);
   const reason = !view
     ? "Loading cloud status…"
-    : view.connectionStatus !== "connected"
-      ? "Save and test your OpenAI key in Settings to connect."
-      : view.error
-        ? view.error
-        : selected.length === 0
-          ? "Enable version tracking and select documents for cloud sync."
-          : "Your documents are syncing. Questions unlock when the current versions are ready.";
+    : view.localError
+      ? view.localError
+      : view.connectionStatus !== "connected"
+        ? "Save and test your OpenAI key in Settings to connect."
+        : view.error
+          ? view.error
+          : selected.length === 0
+            ? "Enable version tracking and select documents for cloud sync."
+            : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;
     void run(async () => {

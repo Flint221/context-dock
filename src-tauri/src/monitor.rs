@@ -135,10 +135,21 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
             if let Ok(mut r) = registry.try_lock() {
                 if Instant::now() >= next_health {
                     let _ = r.check_folders();
-                    if let Ok(mut q) = r.db.prepare("SELECT id,folder_revision FROM projects WHERE removed_at IS NULL") {
-                        if let Ok(rows) = q.query_map([],|row|Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?))) {
+                    if let Ok(mut q) = r
+                        .db
+                        .prepare("SELECT id,folder_revision FROM projects WHERE removed_at IS NULL")
+                    {
+                        if let Ok(rows) = q.query_map([], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                        }) {
                             for (id, revision) in rows.flatten() {
-                                if folder_revisions.insert(id.clone(),revision) != Some(revision) { changed(&id); }
+                                if folder_revisions.insert(id.clone(), revision) != Some(revision) {
+                                    watches.remove(&id);
+                                    roots.remove(&id);
+                                    pending.remove(&id);
+                                    retry_watch.remove(&id);
+                                    changed(&id);
+                                }
                             }
                         }
                     }

@@ -38,6 +38,8 @@ export interface Job {
   rawBytes: number;
 }
 export interface CloudView {
+  localReady?: boolean;
+  localError?: string | null;
   connectionStatus: string;
   enabled: number;
   paused: number;

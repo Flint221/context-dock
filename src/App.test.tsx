@@ -29,6 +29,54 @@ vi.mock("./cloud", async (original) => ({
   },
 }));
 let state: Snapshot;
+it("does not let an older registry read dismiss a newer folder-loss state", async () => {
+  const p = {
+    id: "p1",
+    name: "Relocated project",
+    path: "C:\\Old",
+    createdAt: "",
+    status: "available",
+    lastScan: null,
+    scanError: null,
+    documentCount: 0,
+    latestModified: null,
+    trackingEnabled: false,
+    archiveEnabled: false,
+    trackingRevision: 0,
+    folderState: "ready" as const,
+  };
+  state = { projects: [p], documents: [], theme: "system" };
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
+    notify = cb;
+    return () => {};
+  });
+  let finish: (value: Snapshot) => void = () => {};
+  vi.mocked(registry.snapshot).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<App />);
+  await waitFor(() => expect(registry.subscribe).toHaveBeenCalled());
+  state = {
+    ...state,
+    projects: [
+      { ...p, status: "unavailable", folderState: "needs_reassignment" },
+    ],
+  };
+  await act(async () => notify());
+  expect(
+    await screen.findByText("Folders needing attention", { selector: "h2" }),
+  ).toBeInTheDocument();
+  await act(async () =>
+    finish({ projects: [p], documents: [], theme: "system" }),
+  );
+  expect(
+    screen.getByText("Folders needing attention", { selector: "h2" }),
+  ).toBeInTheDocument();
+});
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cloud.subscribe).mockResolvedValue(() => {});
@@ -99,6 +147,7 @@ it("registers a real picker selection and opens its discovered documents", async
       trackingEnabled: false,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     });
     state.documents.push({
       id: "d1",
@@ -171,7 +220,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.5.4 · Milestone 5")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.6.0 · Milestone 6")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -189,6 +238,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
       trackingEnabled: false,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     },
   ];
   vi.mocked(registry.rename).mockImplementation(async (_id, name) => {
@@ -236,6 +286,7 @@ it("keeps one live tracking panel through updates and removes it on navigation",
       trackingEnabled: true,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     },
   ];
   let notify: () => void = () => {};

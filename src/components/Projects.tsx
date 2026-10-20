@@ -31,7 +31,11 @@ export function Projects({
           </p>
           <div className="card-bottom">
             <span>{p.documentCount} documents</span>
-            <span className={`badge ${p.status}`}>{p.status}</span>
+            <span className={`badge ${p.status}`}>
+              {p.folderState === "needs_reassignment"
+                ? "Folder lost · Reassign"
+                : p.status}
+            </span>
           </div>
           <small>Latest file: {date(p.latestModified)}</small>
         </button>

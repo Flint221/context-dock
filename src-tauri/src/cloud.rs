@@ -79,14 +79,17 @@ pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<Clou
         .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
         .map_err(error)?;
     for document in &draft.documents {
-        let source:Option<(String,String)>=db.query_row("SELECT s.relative_path,s.status FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?;
-        if let Some((relative, status)) = source {
+        let source:Option<(String,String,Option<i64>)>=db.query_row("SELECT s.relative_path,s.status,s.hashed_size FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(error)?;
+        if let Some((relative, status, hashed_size)) = source {
             if status != "available"
                 || storage::checked(Path::new(&root), &relative, false)
                     .and_then(|p| storage::locked_read(&p.path, false))
                     .is_err()
             {
                 return Err("Selected project files are missing or inaccessible. Restore them and refresh documents before syncing or asking questions.".into());
+            }
+            if hashed_size.is_none() {
+                return Err("Recheck the reassigned folder's documents before syncing or asking questions. Use Refresh documents to capture any changed files.".into());
             }
         }
     }
@@ -273,6 +276,9 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
         }
     }
     let js = jobs(db, id)?;
+    let local = desired(db, id, &draft(db, &p)?);
+    p["localReady"] = json!(local.is_ok());
+    p["localError"] = json!(local.err());
     p["families"] = json!(families(db, id)?);
     p["activity"]=json!(rows(db,"SELECT kind,message,created_at FROM cloud_activity WHERE project_id=?1 ORDER BY id DESC LIMIT 30",&[&id])?);
     p["indexed"] = json!(js.iter().filter(|j| s(j, "state") == "indexed").count());

@@ -273,3 +273,87 @@ fn junction_reassignment_is_refused() {
     assert!(f.r.folder_plan(&f.id, link.to_str().unwrap()).is_err());
     fs::remove_dir(link).unwrap();
 }
+
+#[cfg(windows)]
+#[test]
+fn watcher_rebinds_to_moved_root_and_tracking_off_projects_also_report_loss() {
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::{Duration, Instant},
+    };
+    fn wait_for(mut predicate: impl FnMut() -> bool) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !predicate() {
+            assert!(
+                Instant::now() < deadline,
+                "Folder recovery monitor timed out"
+            );
+            thread::sleep(Duration::from_millis(100));
+        }
+    }
+    let f = Fixture::new(true);
+    let did =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.name == "Notes.md")
+            .unwrap()
+            .document_id
+            .clone();
+    let id = f.id.clone();
+    let root = f.root.clone();
+    let target = f.root.parent().unwrap().join("Moved while watching");
+    let shared = Arc::new(Mutex::new(f.r));
+    let monitor = crate::monitor::Monitor::start(shared.clone(), |_| {}).unwrap();
+    wait_for(|| {
+        shared
+            .lock()
+            .unwrap()
+            .tracking_view(&id)
+            .unwrap()
+            .watch_status
+            == "watching"
+    });
+    fs::rename(&root, &target).unwrap();
+    wait_for(|| {
+        shared.lock().unwrap().snapshot().unwrap().projects[0].folder_state == "needs_reassignment"
+    });
+    {
+        let mut r = shared.lock().unwrap();
+        let plan = r.folder_plan(&id, target.to_str().unwrap()).unwrap();
+        r.reassign_folder(&id, &plan.path, &plan.token).unwrap();
+    }
+    wait_for(|| {
+        shared
+            .lock()
+            .unwrap()
+            .tracking_view(&id)
+            .unwrap()
+            .watch_status
+            == "watching"
+    });
+    fs::write(target.join("docs/Notes.md"), "Captured after move").unwrap();
+    wait_for(|| shared.lock().unwrap().versions(&did).unwrap().len() == 2);
+    shared
+        .lock()
+        .unwrap()
+        .configure_tracking(&id, false, false, vec![])
+        .unwrap();
+    fs::rename(&target, &root).unwrap();
+    wait_for(|| {
+        shared
+            .lock()
+            .unwrap()
+            .db
+            .query_row(
+                "SELECT folder_state FROM projects WHERE id=?1",
+                [&id],
+                |r| r.get::<_, String>(0),
+            )
+            .unwrap()
+            == "needs_reassignment"
+    });
+    monitor.shutdown();
+}

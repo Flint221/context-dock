@@ -71,6 +71,8 @@ pub fn require_ready(db: &Connection, id: &str) -> Result<()> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FolderPlan {
+    #[serde(skip_serializing)]
+    revision: i64,
     pub path: String,
     pub previous_path: String,
     pub found: usize,
@@ -96,8 +98,21 @@ impl Registry {
         drop(q);
         let mut changed = vec![];
         for (id, state) in projects {
-            if state == "ready" && require_ready(&self.db, &id).is_err() {
-                changed.push(id);
+            if state == "ready" {
+                if let Err(message) = require_ready(&self.db, &id) {
+                    let saved: String = self
+                        .db
+                        .query_row(
+                            "SELECT folder_state FROM projects WHERE id=?1",
+                            [&id],
+                            |r| r.get(0),
+                        )
+                        .map_err(error)?;
+                    if saved != "needs_reassignment" {
+                        return Err(message);
+                    }
+                    changed.push(id);
+                }
             }
         }
         Ok(changed)
@@ -110,7 +125,11 @@ impl Registry {
         }
         let path = scanner::canonical(selected)?;
         let root = Path::new(&path);
-        if root.starts_with(&self.store) || self.store.starts_with(root) {
+        let root_key = models::key(&path);
+        let store_key = models::key(&self.store.to_string_lossy());
+        if Path::new(&root_key).starts_with(&store_key)
+            || Path::new(&store_key).starts_with(&root_key)
+        {
             return Err(
                 "Choose a dedicated project folder outside ContextDock's application storage."
                     .into(),
@@ -210,6 +229,7 @@ impl Registry {
             .to_string(),
         );
         Ok(FolderPlan {
+            revision,
             path,
             previous_path,
             found,
@@ -222,15 +242,15 @@ impl Registry {
     }
 
     pub fn reassign_folder(&mut self, id: &str, path: &str, token: &str) -> Result<()> {
-        let tx = self.db.unchecked_transaction().map_err(error)?;
         let plan = self.folder_plan(id, path)?;
         if token != plan.token {
             return Err("The folder or project changed since review. Choose the folder again and review the updated checks.".into());
         }
         let (_guard, identity) = root_guard(&plan.path)?;
-        tx.execute("UPDATE projects SET path=?2,path_key=?3,folder_identity=?4,folder_state='ready',folder_revision=folder_revision+1,status='available',scan_error=NULL,watch_status=CASE WHEN tracking_enabled=1 THEN 'starting' ELSE 'off' END WHERE id=?1 AND removed_at IS NULL",params![id,plan.path,models::key(&plan.path),identity]).map_err(error)?;
-        let verified:bool=tx.query_row("SELECT path=?2 AND folder_identity=?3 AND folder_state='ready' FROM projects WHERE id=?1",params![id,plan.path,identity],|r|r.get(0)).map_err(error)?;
-        if !verified {
+        let tx = self.db.unchecked_transaction().map_err(error)?;
+        let changed=tx.execute("UPDATE projects SET path=?2,path_key=?3,folder_identity=?4,folder_state='ready',folder_revision=folder_revision+1,status='available',scan_error=NULL,watch_status=CASE WHEN tracking_enabled=1 THEN 'starting' ELSE 'off' END WHERE id=?1 AND removed_at IS NULL AND folder_revision=?5",params![id,plan.path,models::key(&plan.path),identity,plan.revision]).map_err(error)?;
+        let verified:bool=tx.query_row("SELECT path=?2 AND folder_identity=?3 AND folder_state='ready' AND path_key=?4 AND folder_revision=?5 FROM projects WHERE id=?1",params![id,plan.path,identity,models::key(&plan.path),plan.revision+1],|r|r.get(0)).map_err(error)?;
+        if changed != 1 || !verified {
             return Err(
                 "Folder reassignment could not be verified. The previous registration is retained."
                     .into(),

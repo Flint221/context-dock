@@ -162,6 +162,73 @@ struct Fixture {
     id: String,
     doc: String,
 }
+
+#[test]
+fn missing_selected_source_blocks_queued_uploads_and_recovers_without_losing_cloud_identity() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let store = s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id").to_string();
+    let bytes = fs::read(f.root.join("Master_Context.md")).unwrap();
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert!(api.0.borrow().calls.is_empty());
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("missing or inaccessible"));
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(view["localReady"], false);
+    assert!(view["localError"].as_str().unwrap().contains("missing"));
+    fs::write(f.root.join("Master_Context.md"), bytes).unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["localReady"], true);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id"),
+        store
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+
+#[test]
+fn reassignment_stops_old_request_guard_and_questions_wait_for_local_reconciliation() {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        Arc::new(AtomicBool::new(false)),
+    )
+    .unwrap();
+    let target = f.root.parent().unwrap().join("Relocated");
+    fs::rename(&f.root, &target).unwrap();
+    let plan = f.r.folder_plan(&f.id, target.to_str().unwrap()).unwrap();
+    f.r.reassign_folder(&f.id, &plan.path, &plan.token).unwrap();
+    api.0.borrow_mut().calls.clear();
+    assert!(guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .unwrap_err()
+        .message
+        .contains("folder changed"));
+    assert!(api.0.borrow().calls.is_empty());
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("Recheck"));
+    fs::write(target.join("Master_Context.md"), "Changed while moving").unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("still syncing"));
+}
 impl Fixture {
     fn new() -> Self {
         let temp = tempdir().unwrap();

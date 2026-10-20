@@ -36,6 +36,7 @@ const project: Project = {
   trackingEnabled: false,
   archiveEnabled: false,
   trackingRevision: 0,
+  folderState: "ready",
 };
 let view: TrackingView;
 const changed = vi.fn(async () => {});

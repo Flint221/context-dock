@@ -61,7 +61,11 @@ export function Dashboard({
             >
               <AlertTriangle size={16} />
               {p.name}
-              <span className={`badge ${p.status}`}>{p.status}</span>
+              <span className={`badge ${p.status}`}>
+                {p.folderState === "needs_reassignment"
+                  ? "Folder lost · Reassign"
+                  : p.status}
+              </span>
             </button>
           ))}
         </section>

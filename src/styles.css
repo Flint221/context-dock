@@ -1552,8 +1552,36 @@ dialog:has(.comparison) {
 }
 
 /* Keep the switch independent of the general 18px checkbox rule. */
-.cloud-check.cloud-switch { align-items: center; margin: 0; }
+.cloud-check.cloud-switch {
+  align-items: center;
+  margin: 0;
+}
 .cloud-check.cloud-switch input {
-  width: 42px; height: 24px; flex: 0 0 42px;
-  padding: 0; margin: 0; appearance: none;
+  width: 42px;
+  height: 24px;
+  flex: 0 0 42px;
+  padding: 0;
+  margin: 0;
+  appearance: none;
+}
+.folder-recovery h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.folder-recovery,
+.folder-missing {
+  border: 1px solid var(--warning, #b07b29);
+  border-radius: 12px;
+  padding: 20px;
+}
+.folder-review {
+  margin-top: 20px;
+}
+.folder-missing {
+  margin: 16px 0;
+}
+.folder-missing li {
+  overflow-wrap: anywhere;
+  margin: 6px 0;
 }

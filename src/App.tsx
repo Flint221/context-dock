@@ -1,5 +1,5 @@
 import { displayPath } from "./format";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
   Check,
@@ -37,47 +37,38 @@ export default function App() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const active = useRef(false);
+  const readSequence = useRef(0);
   const load = useCallback(async () => {
-    setData(await registry.snapshot());
-    setLoaded(true);
+    const sequence = ++readSequence.current;
+    const snapshot = await registry.snapshot();
+    if (active.current && sequence === readSequence.current) {
+      setData(snapshot);
+      setLoaded(true);
+    }
   }, []);
   useEffect(() => {
-    let active = true;
-    registry
-      .snapshot()
-      .then((snapshot) => {
-        if (active) {
-          setData(snapshot);
-          setLoaded(true);
-        }
-      })
-      .catch((e) => {
-        if (active) setError(String(e));
+    active.current = true;
+    const refresh = () =>
+      void load().catch((e) => {
+        if (active.current) setError(String(e));
       });
+    refresh();
     let unlisten: (() => void) | undefined;
     registry
-      .subscribe(() => {
-        registry
-          .snapshot()
-          .then((snapshot) => {
-            if (active) setData(snapshot);
-          })
-          .catch((e) => {
-            if (active) setError(String(e));
-          });
-      })
+      .subscribe(refresh)
       .then((stop) => {
-        if (active) unlisten = stop;
+        if (active.current) unlisten = stop;
         else stop();
       })
       .catch((e) => {
-        if (active) setError(String(e));
+        if (active.current) setError(String(e));
       });
     return () => {
-      active = false;
+      active.current = false;
       unlisten?.();
     };
-  }, []);
+  }, [load]);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {

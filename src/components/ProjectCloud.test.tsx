@@ -19,6 +19,38 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("blocks new questions about missing selected files while saved chats remain readable", async () => {
+  connected();
+  chats = [structuredClone(saved)];
+  view.localReady = false;
+  view.localError =
+    "Selected project files are missing. Restore them and refresh documents.";
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByText("SQLite [1].")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+  expect(
+    screen.getByText(/Selected project files are missing/),
+  ).toBeInTheDocument();
+  view.localReady = true;
+  view.localError = null;
+  await act(async () => changed());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Your question" }),
+    ).toBeEnabled(),
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Your question" }),
+    "Ready again",
+  );
+  expect(chat.action).not.toHaveBeenCalledWith(
+    "p1",
+    "ask",
+    expect.anything(),
+    expect.anything(),
+  );
+});
 const saved: Chat = {
   id: "c1",
   title: "Database question",

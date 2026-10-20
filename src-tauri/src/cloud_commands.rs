@@ -79,6 +79,18 @@ impl<'a> ProjectApi<'a> {
                 "Cloud sync paused, disconnected or stopped before the next request.",
             ));
         }
+        if !self.cleanup {
+            let p = cloud::project(&self.db, &self.project)
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+            if n(&p, "delete_requested") != 1 {
+                cloud::desired(
+                    &self.db,
+                    &self.project,
+                    &cloud::draft(&self.db, &p).map_err(|e| cloud_api::ApiError::local(&e))?,
+                )
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+            }
+        }
         Ok(())
     }
 }
