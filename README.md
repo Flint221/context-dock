@@ -30,7 +30,7 @@ The x64 build runs on Windows 11 x64 and supported Windows 11 ARM devices throug
 
 ## Optional OpenAI cloud indexing
 
-Cloud is **off by default**, including on upgrade. Local tracking, archival and comparisons work without a key or internet. In Settings, save your personal key in **Windows Credential Manager** and Test connection (read-only listing; no upload). Never put the key in chat, an environment file or the repository. The password field clears on Save; SQLite/browser storage never receives the key.
+Cloud is **off by default**, including on upgrade. Local tracking, archival and comparisons work without a key or internet. In Settings, use **Save and test key** to save your personal key in **Windows Credential Manager** and verify it with a read-only listing (no upload). Never put the key in chat, an environment file or the repository. The password field clears on Save; SQLite/browser storage never receives the key.
 
 In each project, select eligible tracked logical document families, choose **Current version only** (default) or **Full captured history**, review file counts/raw bytes/additions/removals, and explicitly consent to upload/retention/API charges. Click **Start Initial Sync** separately. New projects do not upload just because a global key exists. The separate **Automatically sync newly captured versions** checkbox is off by default. Resume cloud sync can create the owned store before Start without uploading documents.
 

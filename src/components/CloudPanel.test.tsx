@@ -18,6 +18,7 @@ let view: CloudView;
 beforeEach(() => {
   vi.clearAllMocks();
   view = {
+    connectionStatus: "connected",
     enabled: 0,
     paused: 1,
     auto_sync: 0,
@@ -144,13 +145,15 @@ it("clears the uncontrolled password field immediately and does not put a key in
   render(<OpenAIConnection />);
   const input = screen.getByLabelText("API key");
   await user.type(input, "test-secret-that-is-never-a-real-key");
-  await user.click(screen.getByRole("button", { name: "Save / replace key" }));
+  await user.click(screen.getByRole("button", { name: "Save and test key" }));
   expect(input).toHaveValue("");
   expect(cloud.save).toHaveBeenCalledWith(
     "test-secret-that-is-never-a-real-key",
   );
   expect(local).not.toHaveBeenCalled();
-  expect(await screen.findByRole("status")).toHaveTextContent("Key saved");
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "Key saved and connection verified",
+  );
   local.mockRestore();
 });
 it("shows remote deletion confirmation without issuing deletion when cancelled", async () => {
@@ -183,6 +186,9 @@ it("shows an actionable configuration failure inside its consent dialog", async 
     .mockRejectedValueOnce("Review a fresh preview");
   render(<CloudPanel project="p1" />);
   await screen.findByLabelText(/Master Context/);
+  await user.click(
+    screen.getByRole("button", { name: "Select all eligible documents" }),
+  );
   await user.click(
     screen.getByRole("button", { name: "Review cloud changes" }),
   );
@@ -237,4 +243,101 @@ it("allows an explicitly confirmed association cleanup while sync is paused with
     "resume",
     expect.anything(),
   );
+});
+it("blocks an untested key before showing consent and offers an explicit project-side retry", async () => {
+  const user = userEvent.setup();
+  view.connectionStatus = "untested";
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    view.connectionStatus = "connected";
+    return undefined as never;
+  });
+  render(<CloudPanel project="p1" />);
+  await user.click(await screen.findByLabelText(/Master Context/));
+  const review = screen.getByRole("button", { name: "Review cloud changes" });
+  expect(review).toBeDisabled();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Test saved OpenAI key" }),
+  );
+  await waitFor(() => expect(review).toBeEnabled());
+  expect(cloud.action).toHaveBeenCalledWith(null, "test");
+  expect(cloud.action).not.toHaveBeenCalledWith(
+    "p1",
+    "apply",
+    expect.anything(),
+  );
+});
+it("shows why initial sync is disabled until a nonempty selection is saved, then closes consent on success", async () => {
+  const user = userEvent.setup();
+  vi.mocked(cloud.action).mockImplementation(async (_project, action) => {
+    if (action === "preview")
+      return {
+        token: "ready",
+        files: 1,
+        bytes: 100,
+        additions: 1,
+        removals: 0,
+        storeName: "Test",
+      } as never;
+    if (action === "apply") {
+      view.enabled = 1;
+      view.families[0].selected = 1;
+      view.store_state = "pending";
+    }
+    return undefined as never;
+  });
+  render(<CloudPanel project="p1" />);
+  await screen.findByLabelText(/Master Context/);
+  expect(
+    screen.getByRole("button", { name: "Review cloud changes" }),
+  ).toBeDisabled();
+  expect(
+    screen.getByText(/Select at least one eligible document below/),
+  ).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Select all eligible documents" }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Review cloud changes" }),
+  );
+  const modal = await screen.findByRole("dialog");
+  await user.click(within(modal).getByRole("checkbox"));
+  await user.click(
+    within(modal).getByRole("button", { name: "Confirm cloud configuration" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(
+    screen.getByRole("button", { name: "Start Initial Sync" }),
+  ).toBeEnabled();
+  expect(
+    screen.getByText(/Cloud configuration saved. Click Start Initial Sync/),
+  ).toBeInTheDocument();
+});
+it("keeps key-test recovery available when save succeeds but the automatic connection test fails", async () => {
+  const user = userEvent.setup();
+  vi.mocked(cloud.connection).mockResolvedValue({
+    saved: true,
+    status: "error",
+    error: "Test failed",
+    tested_at: null,
+    usage: [],
+  });
+  vi.mocked(cloud.action).mockRejectedValueOnce("OpenAI rejected the key");
+  render(<OpenAIConnection />);
+  await user.type(
+    screen.getByLabelText("API key"),
+    "synthetic-key-not-a-real-secret",
+  );
+  await user.click(screen.getByRole("button", { name: "Save and test key" }));
+  expect(
+    await screen.findByText("OpenAI rejected the key"),
+  ).toBeInTheDocument();
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Test connection" }),
+    ).toBeEnabled(),
+  );
+  expect(screen.getByLabelText("API key")).toHaveValue("");
 });

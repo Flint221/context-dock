@@ -956,3 +956,31 @@ fn search_waits_for_deselected_associations_to_be_removed() {
     assert!(cloud_sync::search(&f.r.db, &f.id, "old selected content", &api, "bound").is_err());
     assert!(api.0.borrow().calls.iter().all(|c| !c.ends_with("/search")));
 }
+#[test]
+fn initial_empty_selection_is_rejected_without_enabling_project() {
+    let mut f = Fixture::new();
+    let mut draft = f.draft();
+    draft.documents.clear();
+    assert!(cloud::preview(&f.r.db, &f.id, &draft)
+        .err()
+        .unwrap()
+        .contains("Select at least one"));
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 0);
+    // Emptying an existing index remains an explicit supported selection change.
+    f.enable();
+    assert_eq!(cloud::preview(&f.r.db, &f.id, &draft).unwrap().files, 0);
+}
+#[test]
+fn untested_connection_is_reported_before_consent_without_remote_requests() {
+    let mut f = Fixture::new();
+    f.r.db
+        .execute("UPDATE cloud_connection SET status='untested'", [])
+        .unwrap();
+    let draft = f.draft();
+    let result =
+        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "preview", &json!({"draft":draft}));
+    assert!(result.unwrap_err().contains("Test the saved OpenAI key"));
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(view["connectionStatus"], "untested");
+    assert_eq!(view["enabled"], 0);
+}

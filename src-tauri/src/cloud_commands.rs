@@ -335,6 +335,18 @@ pub fn action_impl(
         "preview" => {
             let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
                 .map_err(|_| "Invalid cloud configuration.")?;
+            if draft.enabled {
+                let connected: bool = db
+                    .query_row(
+                        "SELECT status='connected' FROM cloud_connection WHERE singleton=1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .map_err(error)?;
+                if !connected {
+                    return Err("Test the saved OpenAI key successfully in Settings or with Test saved OpenAI key before reviewing cloud changes. No configuration was saved.".into());
+                }
+            }
             Ok(serde_json::to_value(cloud::preview(db, id, &draft)?)
                 .map_err(|_| "Invalid preview")?)
         }

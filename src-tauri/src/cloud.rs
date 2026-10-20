@@ -128,6 +128,9 @@ pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
 pub fn preview(db: &Connection, id: &str, draft: &CloudDraft) -> Result<CloudPlan> {
     let p = project(db, id)?;
     let versions = desired(db, id, draft)?;
+    if draft.enabled && n(&p, "started") == 0 && versions.is_empty() {
+        return Err("Select at least one eligible document before enabling cloud indexing. No configuration was saved.".into());
+    }
     let jobs = jobs(db, id)?;
     let wanted = versions.iter().map(|v| v.id.as_str()).collect::<Vec<_>>();
     let additions = versions
@@ -199,14 +202,15 @@ pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
 }
 pub fn view(db: &Connection, id: &str) -> Result<Value> {
     let mut p = project(db, id)?;
+    let connection = rows(
+        db,
+        "SELECT status,scope FROM cloud_connection WHERE singleton=1",
+        &[],
+    )?
+    .pop()
+    .ok_or("Connection state unavailable.")?;
+    p["connectionStatus"] = connection["status"].clone();
     if n(&p, "enabled") == 1 && s(&p, "store_state") != "deleted" {
-        let connection = rows(
-            db,
-            "SELECT status,scope FROM cloud_connection WHERE singleton=1",
-            &[],
-        )?
-        .pop()
-        .ok_or("Connection state unavailable.")?;
         if s(&connection, "status") != "connected" {
             p["status"] = json!("key_disconnected");
             p["error"] = json!("Save/test the OpenAI key in Settings to resume cloud operations.");

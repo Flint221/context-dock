@@ -23,6 +23,7 @@ export function CloudPanel({ project }: { project: string }) {
   const [draft, setDraft] = useState<Draft>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [plan, setPlan] = useState<Plan | null>(null);
   const [consent, setConsent] = useState(false);
   const [index, setIndex] = useState(false);
@@ -79,11 +80,13 @@ export function CloudPanel({ project }: { project: string }) {
       await load();
     } catch (e) {
       if (alive.current) setError(String(e));
+      await load().catch(() => {});
     } finally {
       if (alive.current) setBusy(false);
     }
   }
   function edit(next: Partial<Draft>) {
+    setNotice("");
     dirty.current = true;
     setDraft((d) => ({ ...d, ...next }));
     setPlan(null);
@@ -94,6 +97,9 @@ export function CloudPanel({ project }: { project: string }) {
     setAttestation(false);
     setDestruction({ action, job });
   }
+  const connectionReady = view?.connectionStatus === "connected";
+  const selectionMissing =
+    draft.enabled && !view?.started && draft.documents.length === 0;
   return (
     <section className="panel cloud-panel" aria-label="Cloud indexing">
       <div className="cloud-heading">
@@ -114,6 +120,37 @@ export function CloudPanel({ project }: { project: string }) {
         </p>
       )}
       {view?.error && <p role="status">{view.error}</p>}
+      {notice && <p role="status">{notice}</p>}
+      {view && !view.enabled && (
+        <div className="cloud-setup">
+          <p>
+            <strong>Finish cloud setup before initial upload.</strong> Checking
+            Enable prepares a draft; the project stays local-only until
+            configuration is successfully saved.
+          </p>
+          <p>
+            1. Save and test your OpenAI key in Settings. 2. Select documents
+            below. 3. Review and confirm cloud changes. 4. Click Start Initial
+            Sync.
+          </p>
+        </div>
+      )}
+      {view && !connectionReady && (
+        <div className="cloud-setup" role="status">
+          <p>
+            OpenAI connection: <strong>{view.connectionStatus}</strong>. A saved
+            key must pass a connection test before cloud indexing can be
+            enabled. If no key is saved, open Settings → OpenAI connection →
+            Save and test key.
+          </p>
+          <button
+            disabled={busy}
+            onClick={() => void run(() => cloud.action(null, "test"))}
+          >
+            Test saved OpenAI key
+          </button>
+        </div>
+      )}
       <p>
         Only explicitly selected, tracked document families can be uploaded.
         Discovery alone never uploads files. Pausing stops the next request; an
@@ -188,6 +225,27 @@ export function CloudPanel({ project }: { project: string }) {
               limits.
             </p>
             <div className="cloud-family-list">
+              <p>
+                <strong>
+                  Documents to index · {draft.documents.length} selected
+                </strong>
+              </p>
+              {selectionMissing && (
+                <p>Select at least one eligible document below to continue.</p>
+              )}
+              <button
+                type="button"
+                disabled={!view.families.some((f) => f.eligible)}
+                onClick={() =>
+                  edit({
+                    documents: view.families
+                      .filter((f) => f.eligible)
+                      .map((f) => f.id),
+                  })
+                }
+              >
+                Select all eligible documents
+              </button>
               {view.families.map((f) => (
                 <label className="cloud-family" key={f.id}>
                   <input
@@ -217,6 +275,7 @@ export function CloudPanel({ project }: { project: string }) {
               ))}
             </div>
             <button
+              disabled={(draft.enabled && !connectionReady) || selectionMissing}
               onClick={() =>
                 void run(async () => {
                   const next = await cloud.action<Plan>(project, "preview", {
@@ -328,7 +387,11 @@ export function CloudPanel({ project }: { project: string }) {
             if (!busy) setPlan(null);
           }}
         >
-          {error && <p role="alert">{error}</p>}
+          {error && (
+            <p role="alert">
+              <strong>Configuration was not saved.</strong> {error}
+            </p>
+          )}
           <p>
             Store name: <strong>{plan.storeName}</strong>. OpenAI will receive
             exact immutable Markdown/DOCX snapshots and opaque ContextDock
@@ -379,6 +442,11 @@ export function CloudPanel({ project }: { project: string }) {
                   });
                   dirty.current = false;
                   setPlan(null);
+                  setNotice(
+                    draft.enabled
+                      ? "Cloud configuration saved. Click Start Initial Sync to begin uploading your selected documents."
+                      : "Cloud configuration saved.",
+                  );
                 })
               }
             >

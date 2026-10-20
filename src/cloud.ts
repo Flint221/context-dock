@@ -37,6 +37,7 @@ export interface Job {
   rawBytes: number;
 }
 export interface CloudView {
+  connectionStatus: string;
   enabled: number;
   paused: number;
   auto_sync: number;

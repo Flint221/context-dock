@@ -46,9 +46,9 @@ All data is stored locally.
 
 **Prepare/files:** Keep the two captured samples unchanged. In your own [OpenAI API keys page](https://platform.openai.com/api-keys), create a disposable key with Files and Vector Stores read/write access in the intended API project. Have billing/quotas available as required by your account.
 
-**Click:** Settings → OpenAI connection → enter the key in the password field → **Save / replace key** → **Test connection**. Close/reopen ContextDock, return to Settings and confirm a saved key is indicated without its value being revealed. Windows Credential Manager → Windows Credentials → Generic Credentials should contain `ContextDock.OpenAI`.
+**Click:** Settings → OpenAI connection → enter the key in the password field → **Save and test key**. Close/reopen ContextDock, return to Settings and confirm a saved key is indicated without its value being revealed. Windows Credential Manager → Windows Credentials → Generic Credentials should contain `ContextDock.OpenAI`.
 
-**Operation/result:** Only an authenticated `GET /v1/vector_stores?limit=1` is needed for Test. Expect `connected`, a cleared password field, and no new remote index/File. Listing success does not prove upload permissions or available billing.
+**Operation/result:** Only an authenticated `GET /v1/vector_stores?limit=1` is needed for Test. Expect `connected`, a cleared password field, and no new remote index/File. Listing success does not prove upload permissions or available billing. Saving now performs this read-only test in the same action; Test connection can recheck an already saved key. A failed test leaves retry available and does not enable a project.
 
 **Failure/recovery:** A useful key/permission/network error, not secret text, should appear. Correct the key or API project/permissions and Test again. No local source, history or tracking setting should change. Never share the key to troubleshoot.
 
@@ -56,7 +56,7 @@ All data is stored locally.
 
 **Prepare/files:** Return to the disposable project with two captured v1 families.
 
-**Click:** Cloud indexing → select both eligible families → keep **Current version only** → check **Automatically sync newly captured versions** → Review cloud changes. Expect two snapshots, their combined raw size, additions, zero removals and proposed store name. Read the retention/cost disclosure, check consent and **Confirm cloud configuration**. This saves the plan but does not start initial uploads. Click **Resume cloud sync** to create only the index before initial sync.
+**Click:** Cloud indexing → select both eligible families (or Select all eligible documents) → keep **Current version only** → check **Automatically sync newly captured versions** → Review cloud changes. Expect two snapshots, their combined raw size, additions, zero removals and proposed store name. Read the retention/cost disclosure, check consent and **Confirm cloud configuration**. This saves the plan but does not start initial uploads. Click **Resume cloud sync** to create only the index before initial sync.
 
 **Operation/result:** One `POST /v1/vector_stores`, with installation/project/operation ownership metadata. Expect a persisted `vs_…` ID and ready state. In OpenAI Storage → Vector stores verify that exact ID/name exists, initially without attached files. Confirm another project did not acquire this store.
 

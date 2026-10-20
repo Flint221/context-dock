@@ -26,14 +26,20 @@ export function OpenAIConnection() {
     setMessage("");
     try {
       await action();
-      const next = await cloud.connection();
       if (alive.current) {
-        setConnection(next);
         setMessage(success);
       }
     } catch (e) {
       if (alive.current) setMessage(String(e));
     } finally {
+      // Saving may succeed even when the subsequent read-only key test fails.
+      // Refresh that state so Test connection remains available for recovery.
+      try {
+        const next = await cloud.connection();
+        if (alive.current) setConnection(next);
+      } catch (e) {
+        if (alive.current) setMessage((previous) => previous || String(e));
+      }
       if (alive.current) setBusy(false);
     }
   }
@@ -63,10 +69,10 @@ export function OpenAIConnection() {
           const input = key.current!;
           const request = cloud.save(input.value);
           input.value = "";
-          void run(
-            () => request,
-            "Key saved. Test the connection before enabling a project.",
-          );
+          void run(async () => {
+            await request;
+            await cloud.action(null, "test");
+          }, "Key saved and connection verified. Select documents in your project, review cloud changes, then Start Initial Sync.");
         }}
       >
         <label>
@@ -83,7 +89,7 @@ export function OpenAIConnection() {
         </label>
         <div className="cloud-actions">
           <button disabled={busy} type="submit">
-            Save / replace key
+            Save and test key
           </button>
           <button
             disabled={busy || !connection?.saved}
