@@ -152,7 +152,7 @@ export default function App() {
         <div className="sidebar-footer">
           <ShieldCheck size={17} />
           <span>
-            Local by design<small>Your files stay on your computer.</small>
+            Local by design<small>Local history, optional cloud AI.</small>
           </span>
         </div>
       </aside>
@@ -211,7 +211,7 @@ export default function App() {
                   : page === "settings"
                     ? "Make ContextDock feel at home."
                     : project
-                      ? "Discover files and track independent document histories."
+                      ? "Track document history and ask about your synced files."
                       : "Existing folders. Independent documents. One place to find them."}
               </p>
             </div>

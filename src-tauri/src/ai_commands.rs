@@ -14,13 +14,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 pub struct Runtime {
-    path: PathBuf,
-    gate: Arc<Mutex<()>>,
+    pub(crate) path: PathBuf,
+    pub(crate) gate: Arc<Mutex<()>>,
 }
 impl Runtime {
     pub fn new(path: PathBuf) -> Result<Self> {
         let path = std::fs::canonicalize(path).map_err(|_| "Cannot resolve analysis storage.")?;
         let db = cloud::connect(&path)?;
+        crate::chat::recover(&db)?;
         db.execute("UPDATE ai_reports SET state='uncertain',error='Application closed during a potentially billable request. No automatic retry; inspect usage before generating again.' WHERE state IN ('running','cancel_requested')",[]).map_err(error)?;
         Ok(Self {
             path,
@@ -41,7 +42,7 @@ impl InferenceApi for Guard<'_> {
         if ai_inference::contains_credential(&body, self.credential) {
             return Err(ApiError::local("Selected evidence contains the saved API credential. Redact it in a newly captured version before analysis. No request was sent."));
         }
-        let allowed:i64=self.db.query_row("SELECT COUNT(*) FROM ai_reports a JOIN projects p ON p.id=a.project_id JOIN cloud_connection k ON k.singleton=1 WHERE a.id=?1 AND a.project_id=?2 AND a.state='running' AND p.removed_at IS NULL AND k.status='connected' AND k.scope=?3",params![self.id,self.project,self.scope],|v|v.get(0)).map_err(|_|ApiError::local("Cannot verify analysis authorization."))?;
+        let allowed:i64=self.db.query_row("SELECT COUNT(*) FROM ai_reports a JOIN projects p ON p.id=a.project_id JOIN cloud_projects c ON c.project_id=p.id JOIN cloud_connection k ON k.singleton=1 WHERE a.id=?1 AND a.project_id=?2 AND a.state='running' AND p.removed_at IS NULL AND k.status='connected' AND k.scope=?3 AND c.scope=?3 AND c.enabled=1 AND c.paused=0",params![self.id,self.project,self.scope],|v|v.get(0)).map_err(|_|ApiError::local("Cannot verify analysis authorization."))?;
         if allowed != 1 {
             return Err(ApiError::local(
                 "Analysis cancelled or connection changed before sending. No request was sent.",
@@ -72,6 +73,8 @@ pub async fn ai_action(
                 if let Some(cached)=cloud::rows(&r.db,"SELECT id FROM ai_reports WHERE project_id=?1 AND cache_key=?2 AND state='completed' ORDER BY completed_at DESC LIMIT 1",&[&project,&s(&row,"cache_key")])?.pop() {return ai::report(&r,&project,s(&cached,"id"));}
             }
             let connected:i64=r.db.query_row("SELECT COUNT(*) FROM cloud_connection WHERE status='connected'",[],|v|v.get(0)).map_err(error)?;
+            let cloud=cloud::project(&r.db,&project)?;
+            if crate::cloud::n(&cloud,"enabled")!=1 || crate::cloud::n(&cloud,"paused")!=0 {return Err("Turn on Cloud sync before generating AI. Saved reports remain available offline.".into());}
             if connected!=1 {return Err("A fresh AI analysis requires a tested OpenAI connection. Saved reports and baselines remain available offline.".into());}
             let key=cloud_credentials::read()?.ok_or("Save and test your OpenAI key in Settings first.")?;
             let api=OpenAi::for_analysis(&key)?;

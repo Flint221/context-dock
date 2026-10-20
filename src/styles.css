@@ -37,7 +37,8 @@ body {
 }
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 button {
@@ -69,6 +70,224 @@ input:focus-visible,
 select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
+}
+
+.simple-cloud,
+.project-chat {
+  padding: 24px;
+  margin-bottom: 24px;
+}
+.simple-cloud > p,
+.simple-cloud > .toolbar-actions,
+.simple-cloud > details {
+  margin-top: 16px;
+}
+.cloud-switch {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cloud-switch input {
+  appearance: none;
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--border);
+  border: 1px solid var(--muted);
+  position: relative;
+  cursor: pointer;
+}
+.cloud-switch input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 0.12s;
+}
+.cloud-switch input:checked {
+  background: #4168ba;
+  border-color: #4168ba;
+}
+.cloud-switch input:checked::after {
+  transform: translateX(18px);
+  background: white;
+}
+.project-options {
+  margin: 0 0 16px;
+  color: var(--muted);
+}
+.project-options > .project-toolbar {
+  margin-top: 12px;
+  color: var(--text);
+}
+.chat-heading,
+.chat-title,
+.chat-send-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+.chat-heading {
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.chat-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.chat-heading p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+.chat-heading > button,
+.chat-title > button,
+.chat-send-row > button {
+  flex-shrink: 0;
+}
+.chat-status {
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--soft);
+  margin-bottom: 16px;
+}
+.chat-layout {
+  display: grid;
+  grid-template-columns: minmax(150px, 210px) minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.chat-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+  max-height: 620px;
+  overflow-y: auto;
+}
+.chat-list button {
+  justify-content: flex-start;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.chat-list button[aria-current="page"] {
+  background: var(--soft);
+  border-color: var(--accent);
+}
+.chat-list p,
+.chat-empty {
+  color: var(--muted);
+  padding: 12px;
+}
+.chat-conversation {
+  min-width: 0;
+}
+.chat-title {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.chat-title h3 {
+  overflow-wrap: anywhere;
+}
+.chat-messages {
+  min-height: 180px;
+  max-height: 540px;
+  overflow-y: auto;
+  padding: 20px;
+}
+.chat-turn + .chat-turn {
+  margin-top: 24px;
+}
+.chat-question {
+  background: var(--soft);
+  padding: 14px 16px;
+  border-radius: 10px;
+  margin-left: 24px;
+}
+.chat-answer {
+  padding: 16px 0 0;
+}
+.chat-question p,
+.chat-answer > p,
+.chat-source p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+  line-height: 1.65;
+}
+.chat-answer > small {
+  display: block;
+  color: var(--muted);
+  margin-top: 10px;
+}
+.chat-answer details {
+  margin-top: 12px;
+}
+.chat-source {
+  border-left: 3px solid var(--border);
+  padding: 10px 14px;
+  margin-top: 10px;
+}
+.chat-source p {
+  font-size: 13px;
+  color: var(--muted);
+}
+.chat-composer {
+  border-top: 1px solid var(--border);
+  padding: 16px;
+}
+.chat-composer label {
+  display: block;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.chat-composer textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 90px;
+  max-height: 260px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.chat-composer textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.chat-composer textarea:disabled {
+  opacity: 0.65;
+}
+.chat-send-row {
+  margin-top: 10px;
+}
+.chat-send-row small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+@media (max-width: 980px) {
+  .chat-layout {
+    grid-template-columns: 1fr;
+  }
+  .chat-list {
+    max-height: 170px;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .chat-heading,
+  .chat-title,
+  .chat-send-row {
+    flex-wrap: wrap;
+  }
 }
 button.primary {
   background: #4168ba;

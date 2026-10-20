@@ -1,6 +1,5 @@
 import { TrackingPanel } from "./TrackingPanel";
-import { CloudPanel } from "./CloudPanel";
-import { ProjectIntelligence } from "./ProjectIntelligence";
+import { ProjectCloud } from "./ProjectCloud";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -41,31 +40,34 @@ export function ProjectDetails({
       <button className="back" disabled={busy} onClick={back}>
         <ArrowLeft size={16} /> All projects
       </button>
-      <section className="panel project-toolbar">
-        <div>
-          <h2>Registered folder</h2>
-          <p className="full-path">{displayPath(project.path)}</p>
-          <small>Last scan: {date(project.lastScan)}</small>
-        </div>
-        <div className="toolbar-actions">
-          <button disabled={busy} onClick={copy}>
-            <Copy size={16} />
-            Copy path
-          </button>
-          <button disabled={busy} onClick={open}>
-            <FolderOpen size={16} />
-            Explorer
-          </button>
-          <button disabled={busy} onClick={rename}>
-            <Pencil size={16} />
-            Rename
-          </button>
-          <button className="danger" disabled={busy} onClick={remove}>
-            <Trash2 size={16} />
-            Remove
-          </button>
-        </div>
-      </section>
+      <details className="project-options">
+        <summary>Project folder and options</summary>
+        <section className="panel project-toolbar">
+          <div>
+            <h2>Registered folder</h2>
+            <p className="full-path">{displayPath(project.path)}</p>
+            <small>Last scan: {date(project.lastScan)}</small>
+          </div>
+          <div className="toolbar-actions">
+            <button disabled={busy} onClick={copy}>
+              <Copy size={16} />
+              Copy path
+            </button>
+            <button disabled={busy} onClick={open}>
+              <FolderOpen size={16} />
+              Explorer
+            </button>
+            <button disabled={busy} onClick={rename}>
+              <Pencil size={16} />
+              Rename
+            </button>
+            <button className="danger" disabled={busy} onClick={remove}>
+              <Trash2 size={16} />
+              Remove
+            </button>
+          </div>
+        </section>
+      </details>
       {project.scanError && (
         <div className="banner warning">
           <AlertTriangle size={18} />
@@ -79,18 +81,13 @@ export function ProjectDetails({
           Refresh documents
         </button>
       </div>
+      <ProjectCloud key={`cloud:${project.id}`} project={project.id} />
       <TrackingPanel
         key={`tracking:${project.id}`}
         project={project}
         changed={changed}
       />
       <Documents key={`documents:${project.id}`} documents={documents} />
-      <CloudPanel key={`cloud:${project.id}`} project={project.id} />
-      <ProjectIntelligence
-        key={`ai:${project.id}`}
-        project={project.id}
-        name={project.name}
-      />
     </>
   );
 }

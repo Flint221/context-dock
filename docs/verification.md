@@ -1,3 +1,15 @@
+# Verification — ContextDock 0.5.1 simple cloud chat
+
+October 20: **117 Rust tests** and **47 frontend tests** pass, including nine new native chat tests and six new interaction tests. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied and production build pass. Chat tests use scripted vector-search/Responses results and disposable SQLite/files; no actual key, user document upload or paid API call was used. The application identity/data location remains unchanged, and schema 4→5 migration preserves old snapshots, cloud mapping and approved baseline rows.
+
+Native coverage verifies current-version cloud retrieval, source IDs, explicit one-model-call behavior, follow-up context, independent conversations, restart persistence, local cascade deletion without cloud/source changes, off/paused/unsynced/wrong-key/project isolation guards, disable between retrieval and inference, foreign-source rejection, empty retrieval without inference, uncertain timeout/restart without replay and credential-like question rejection. Frontend coverage verifies one enable confirmation followed by automatic Start, cancel/disable behavior, offline chat reading/deletion, multiple saved chats after remount, waiting for latest indexed versions and errors unlocking controls without paid retries. Existing tracking/diff/cloud/baseline suites still pass.
+
+A disposable browser preview of the built assets with mocked IPC was used to inspect dark-theme spacing, collapsed project/advanced controls, question submission, source-backed answer display and Cloud sync off retaining readable chats while disabling the composer. Preview actions use synthetic data only; this is not a live native/API acceptance claim. See manual-testing-chat.md for the installed-app acceptance sequence.
+
+The unsigned Windows x64 NSIS installer built successfully at `src-tauri/target/release/bundle/nsis/ContextDock_0.5.1_x64-setup.exe`, **4,231,778 bytes**. The agent did not install it, close the user's app, modify real app data or run authenticated acceptance requests. No merge, release tag or updater was created.
+
+---
+
 # Verification — ContextDock 0.5.0
 
 ## October 20 alignment citation follow-up

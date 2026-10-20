@@ -476,6 +476,25 @@ pub fn search(
     api: &dyn CloudApi,
     bound: &str,
 ) -> Result<Value> {
+    search_impl(db, id, query, api, bound, false)
+}
+pub fn search_current(
+    db: &Connection,
+    id: &str,
+    query: &str,
+    api: &dyn CloudApi,
+    bound: &str,
+) -> Result<Value> {
+    search_impl(db, id, query, api, bound, true)
+}
+fn search_impl(
+    db: &Connection,
+    id: &str,
+    query: &str,
+    api: &dyn CloudApi,
+    bound: &str,
+    current_only: bool,
+) -> Result<Value> {
     let p = cloud::project(db, id)?;
     if n(&p, "enabled") != 1 || n(&p, "paused") == 1 || s(&p, "scope") != bound {
         return Err("Enable/resume this project and verify the saved key first.".into());
@@ -500,7 +519,7 @@ pub fn search(
         json!({"type":"eq","key":"contextdock","value":cloud::install(db)?}),
         json!({"type":"eq","key":"project","value":id}),
     ];
-    if s(&p, "mode") == "current" {
+    if current_only || s(&p, "mode") == "current" {
         filters.push(json!({"type":"eq","key":"is_current","value":true}));
     }
     let response=api.request("POST",&format!("/vector_stores/{}/search",s(&p,"store_id")),Some(json!({"query":query,"max_num_results":5,"rewrite_query":false,"filters":{"type":"and","filters":filters}}))).map_err(|e|e.message)?;
@@ -518,8 +537,10 @@ pub fn search(
             .find(|j| s(j, "file_id") == s(hit, "file_id") && s(j, "state") == "indexed")
             .ok_or("Search returned an unknown file. Reconcile before searching again.")?;
         let attrs = identity(db, &p, job).map_err(|e| e.message)?;
-        if !wanted.iter().any(|v| v.id == s(job, "version_id"))
-            || (s(&p, "mode") == "current"
+        if !wanted
+            .iter()
+            .any(|v| v.id == s(job, "version_id") && (!current_only || v.current))
+            || ((current_only || s(&p, "mode") == "current")
                 && hit["attributes"]["is_current"] != attrs["is_current"])
         {
             return Err("Local selection/current version changed during search. Synchronize and search again.".into());

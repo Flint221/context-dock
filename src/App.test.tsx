@@ -86,6 +86,7 @@ it("registers a real picker selection and opens its discovered documents", async
     "Cattle Tool",
     "C:\\Temporary project",
   );
+  await user.click(screen.getByText("Project folder and options"));
   await user.click(screen.getByRole("button", { name: "Remove" }));
   expect(screen.getByText(/all its files will remain/)).toBeInTheDocument();
   await user.click(screen.getByText("Cancel"));
@@ -125,7 +126,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.5.0 · Milestone 5")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.5.1 · Milestone 5")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -154,6 +155,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   render(<App />);
   await user.click(await screen.findByRole("button", { name: /Original/ }));
   expect(registry.refresh).toHaveBeenCalledWith("p1");
+  await user.click(screen.getByText("Project folder and options"));
   await user.click(screen.getByRole("button", { name: "Rename" }));
   await user.clear(screen.getByLabelText("Project name"));
   await user.type(screen.getByLabelText("Project name"), "Renamed");

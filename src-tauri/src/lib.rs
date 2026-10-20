@@ -4,6 +4,10 @@ mod ai_inference;
 mod ai_models;
 #[cfg(test)]
 mod ai_tests;
+mod chat;
+mod chat_commands;
+#[cfg(test)]
+mod chat_tests;
 mod cloud;
 mod cloud_api;
 mod cloud_commands;
@@ -276,6 +280,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             ai_commands::ai_action,
+            chat_commands::chat_action,
             cloud_commands::cloud_read,
             cloud_commands::cloud_link,
             cloud_commands::cloud_key,

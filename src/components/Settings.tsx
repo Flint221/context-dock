@@ -47,8 +47,10 @@ export function SettingsView({
             Registrations, history and preferences use per-user SQLite storage.
             Snapshot bytes remain in application data across upgrades and
             project removal. Monitoring operates only while ContextDock is
-            running. No telemetry. Optional OpenAI indexing requires a saved
-            key, project selection and explicit upload consent.
+            running. Chats are also saved locally in the app database. Cloud
+            sync enables OpenAI uploads and project questions; turning it off
+            blocks new AI requests and keeps local history available. No
+            telemetry.
           </p>
         </div>
       </section>
