@@ -68,9 +68,10 @@ export function CurrentProcesses() {
   }, []);
   useEffect(() => {
     active.current = true;
-    void refresh();
+    const initialRead = window.setTimeout(() => void refresh(), 0);
     return () => {
       active.current = false;
+      window.clearTimeout(initialRead);
     };
   }, [refresh]);
   useEffect(() => {
