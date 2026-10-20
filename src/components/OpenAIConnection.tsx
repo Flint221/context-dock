@@ -1,10 +1,15 @@
 import { CloudLink } from "./CloudLink";
 import { useEffect, useRef, useState } from "react";
 import { cloud, bytes, type Connection } from "../cloud";
+import { beginOperation } from "../operations";
+import { OperationStatus } from "./OperationStatus";
+import { Modal } from "./Modal";
 export function OpenAIConnection() {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const key = useRef<HTMLInputElement>(null);
   const alive = useRef(true);
   useEffect(() => {
@@ -21,27 +26,49 @@ export function OpenAIConnection() {
       alive.current = false;
     };
   }, []);
-  async function run(action: () => Promise<unknown>, success: string) {
+  async function run(
+    action: () => Promise<unknown>,
+    success: string,
+    verify?: (value: Connection) => boolean,
+  ) {
+    const release = beginOperation("openai-connection");
+    if (!release) return false;
     setBusy(true);
     setMessage("");
+    setFailed(false);
+    let complete = false;
     try {
       await action();
+      const next = await cloud.connection();
+      if (alive.current) setConnection(next);
+      if (verify && !verify(next))
+        throw new Error(
+          "The backend did not confirm the requested OpenAI connection state. Refresh or test the connection before trying again.",
+        );
       if (alive.current) {
         setMessage(success);
       }
+      complete = true;
     } catch (e) {
-      if (alive.current) setMessage(String(e));
+      if (alive.current) {
+        setMessage(String(e));
+        setFailed(true);
+      }
     } finally {
       // Saving may succeed even when the subsequent read-only key test fails.
       // Refresh that state so Test connection remains available for recovery.
-      try {
-        const next = await cloud.connection();
-        if (alive.current) setConnection(next);
-      } catch (e) {
-        if (alive.current) setMessage((previous) => previous || String(e));
+      if (!complete) {
+        try {
+          const next = await cloud.connection();
+          if (alive.current) setConnection(next);
+        } catch (e) {
+          if (alive.current) setMessage((previous) => previous || String(e));
+        }
       }
+      release();
       if (alive.current) setBusy(false);
     }
+    return complete;
   }
   return (
     <section className="panel cloud-panel">
@@ -53,10 +80,9 @@ export function OpenAIConnection() {
         . Enter it only here; do not share it in chat.
       </p>
       <p>
-        Optional OpenAI features. Local tracking, comparisons, baselines and
-        saved reports work without an API key. Cloud indexing requires project
-        selection and consent. Project intelligence requires approval for each
-        paid analysis.
+        Local version history, comparisons and saved chats work without an API
+        key. Turn on Cloud sync in a project to upload selected documents and
+        ask questions. Each Send is an explicit, potentially paid AI request.
       </p>
       <p>
         Status: <strong>{connection?.status ?? "Loading"}</strong> · Key{" "}
@@ -68,12 +94,16 @@ export function OpenAIConnection() {
         onSubmit={(e) => {
           e.preventDefault();
           const input = key.current!;
-          const request = cloud.save(input.value);
-          input.value = "";
-          void run(async () => {
-            await request;
-            await cloud.action(null, "test");
-          }, "Key saved and connection verified. Open Project intelligence for an on-demand analysis, or configure optional cloud indexing in your project.");
+          void run(
+            async () => {
+              const value = input.value;
+              input.value = "";
+              await cloud.save(value);
+              await cloud.action(null, "test");
+            },
+            "Key saved and connection verified. Turn on Cloud sync in your project to ask questions.",
+            (next) => next.saved && next.status === "connected",
+          );
         }}
       >
         <label>
@@ -99,6 +129,7 @@ export function OpenAIConnection() {
               void run(
                 () => cloud.action(null, "test"),
                 "Connection tested with a read-only vector-store listing. No index or file was created.",
+                (next) => next.status === "connected",
               )
             }
           >
@@ -107,19 +138,61 @@ export function OpenAIConnection() {
           <button
             disabled={busy || !connection?.saved}
             type="button"
-            onClick={() =>
-              void run(
-                () => cloud.action(null, "disconnect_key"),
-                "Saved key removed. Remote files and indexes remain in OpenAI.",
-              )
-            }
+            onClick={() => {
+              setMessage("");
+              setFailed(false);
+              setDisconnecting(true);
+            }}
           >
             Disconnect OpenAI
           </button>
         </div>
       </form>
-      {(message || connection?.error) && (
-        <p role="status">{message || connection?.error}</p>
+      <OperationStatus
+        busy={busy}
+        message="Applying and verifying the OpenAI connection…"
+        success={!failed ? message : undefined}
+      />
+      {failed && message && <p role="alert">{message}</p>}
+      {!message && connection?.error && <p role="alert">{connection.error}</p>}
+      {disconnecting && (
+        <Modal
+          title="Disconnect OpenAI?"
+          close={() => {
+            if (!busy) setDisconnecting(false);
+          }}
+        >
+          <p>
+            Remove the saved key and stop new OpenAI requests for all projects.
+            Local history and chats are kept. Existing cloud files remain
+            online, and an already-sent request may finish.
+          </p>
+          <OperationStatus
+            busy={busy}
+            message="Disconnecting and verifying key removal…"
+          />
+          {failed && message && <p role="alert">{message}</p>}
+          <div className="cloud-actions">
+            <button
+              className="danger"
+              disabled={busy}
+              onClick={() => {
+                void run(
+                  () => cloud.action(null, "disconnect_key"),
+                  "OpenAI disconnected — confirmed. Saved key removed; remote files and indexes remain in OpenAI.",
+                  (next) => !next.saved && next.status === "disconnected",
+                ).then((ok) => {
+                  if (ok && alive.current) setDisconnecting(false);
+                });
+              }}
+            >
+              {busy ? "Disconnecting…" : "Disconnect OpenAI"}
+            </button>
+            <button disabled={busy} onClick={() => setDisconnecting(false)}>
+              Cancel
+            </button>
+          </div>
+        </Modal>
       )}
       <p>
         The key is never saved in SQLite or browser storage. Replacing it

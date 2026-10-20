@@ -195,7 +195,41 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         "consent",
         "Cloud selection and retention policy explicitly confirmed.",
     )?;
+    verify_flags(
+        &tx,
+        id,
+        &[
+            ("enabled", draft.enabled as i64),
+            ("auto_sync", draft.automatic as i64),
+            ("soft_limit", draft.soft_limit),
+        ],
+    )?;
+    let saved = project(&tx, id)?;
+    let mut selected = families(&tx, id)?
+        .iter()
+        .filter(|f| n(f, "selected") == 1)
+        .map(|f| s(f, "id").to_string())
+        .collect::<Vec<_>>();
+    let mut requested = draft.documents.clone();
+    selected.sort();
+    requested.sort();
+    if s(&saved, "mode") != draft.mode || selected != requested {
+        return Err(
+            "Cloud configuration verification failed. The requested selection was not saved."
+                .into(),
+        );
+    }
     tx.commit().map_err(error)
+}
+pub fn verify_flags(db: &Connection, id: &str, expected: &[(&str, i64)]) -> Result<()> {
+    let saved = project(db, id)?;
+    if expected
+        .iter()
+        .any(|(key, value)| saved[*key].as_i64() != Some(*value))
+    {
+        return Err("Cloud setting verification failed. The backend did not save the requested state; refresh status before trying again.".into());
+    }
+    Ok(())
 }
 pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
     rows(db,"SELECT j.*,v.number,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])

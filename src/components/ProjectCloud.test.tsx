@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ProjectCloud } from "./ProjectCloud";
@@ -84,7 +91,7 @@ beforeEach(() => {
     changed = cb;
     return () => {};
   });
-  vi.mocked(cloud.action).mockImplementation(async (_p, action) => {
+  vi.mocked(cloud.action).mockImplementation(async (_p, action, payload) => {
     if (action === "preview")
       return {
         token: "review",
@@ -95,7 +102,19 @@ beforeEach(() => {
         storeName: "Test project",
       } as never;
     if (action === "apply") {
+      const draft = (
+        payload as {
+          draft: {
+            automatic: boolean;
+            mode: "current" | "history";
+            softLimit: number;
+          };
+        }
+      ).draft;
       view.enabled = 1;
+      view.auto_sync = Number(draft.automatic);
+      view.mode = draft.mode;
+      view.soft_limit = draft.softLimit;
       view.families[0].selected = 1;
     }
     if (action === "start") connected();
@@ -279,4 +298,115 @@ it("failed sends show the error and unlock controls without an automatic paid re
   expect(
     vi.mocked(chat.action).mock.calls.filter((call) => call[1] === "send"),
   ).toHaveLength(1);
+});
+it("locks repeated confirmations until the backend state has been read back", async () => {
+  connected();
+  const user = userEvent.setup();
+  let finishAction!: () => void;
+  let finishRead!: (value: CloudView) => void;
+  let verifying = false;
+  const pendingAction = new Promise<void>((resolve) => {
+    finishAction = resolve;
+  });
+  const pendingRead = new Promise<CloudView>((resolve) => {
+    finishRead = resolve;
+  });
+  const normal = vi.mocked(cloud.action).getMockImplementation()!;
+  vi.mocked(cloud.action).mockImplementation(async (p, a, data) => {
+    if (a === "disconnect") {
+      await pendingAction;
+      view.enabled = 0;
+      view.paused = 1;
+      verifying = true;
+      return undefined as never;
+    }
+    return normal(p, a, data);
+  });
+  vi.mocked(cloud.view).mockImplementation(async () =>
+    verifying ? pendingRead : structuredClone(view),
+  );
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  await user.click(toggle);
+  const dialog = screen.getByRole("dialog");
+  const confirm = within(dialog).getByRole("button", {
+    name: "Turn off Cloud sync",
+  });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(
+    vi.mocked(cloud.action).mock.calls.filter((c) => c[1] === "disconnect"),
+  ).toHaveLength(1);
+  expect(toggle).toBeDisabled();
+  expect(confirm).toBeDisabled();
+  expect(within(dialog).getByRole("status")).toHaveTextContent(
+    "checking the saved state",
+  );
+  await user.click(
+    within(dialog).getByRole("button", { name: "Close dialog" }),
+  );
+  expect(dialog).toBeInTheDocument();
+  await act(async () => finishAction());
+  expect(confirm).toBeDisabled();
+  expect(dialog).toBeInTheDocument();
+  await act(async () => finishRead(structuredClone(view)));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(toggle).not.toBeChecked();
+  expect(toggle).toBeEnabled();
+  expect(screen.getByRole("status")).toHaveTextContent(
+    "Cloud sync is off — confirmed",
+  );
+});
+it("rejects an acknowledged toggle whose backend state did not change", async () => {
+  connected();
+  const user = userEvent.setup();
+  vi.mocked(cloud.action).mockResolvedValue(undefined);
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  await user.click(toggle);
+  const dialog = screen.getByRole("dialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: "Turn off Cloud sync" }),
+  );
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "backend did not confirm",
+  );
+  expect(toggle).toBeChecked();
+  expect(dialog).toBeInTheDocument();
+  expect(
+    within(dialog).getByRole("button", { name: "Turn off Cloud sync" }),
+  ).toBeEnabled();
+  expect(
+    screen.queryByText(/Cloud sync is off — confirmed/),
+  ).not.toBeInTheDocument();
+});
+it("shows verification read failures instead of claiming the toggle completed", async () => {
+  connected();
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  await user.click(toggle);
+  vi.mocked(cloud.view).mockRejectedValueOnce(
+    new Error("Could not read saved cloud status"),
+  );
+  const dialog = screen.getByRole("dialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: "Turn off Cloud sync" }),
+  );
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "Could not read saved cloud status",
+  );
+  expect(
+    within(dialog).getByRole("button", { name: "Turn off Cloud sync" }),
+  ).toBeEnabled();
+  expect(
+    screen.queryByText(/Cloud sync is off — confirmed/),
+  ).not.toBeInTheDocument();
 });

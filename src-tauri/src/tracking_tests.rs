@@ -6,6 +6,18 @@ use crate::{
 };
 use std::{collections::HashSet, fs, path::PathBuf};
 use tempfile::{tempdir, TempDir};
+#[test]
+fn tracking_toggle_verifies_saved_flags_before_reporting_success() {
+    let mut f = Fixture::new(&[("Master.md", "# Preserve history")]);
+    f.enable(false);
+    f.r.db.execute_batch("CREATE TRIGGER ignore_tracking_toggle BEFORE UPDATE OF tracking_enabled,archive_enabled ON projects BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+    let error =
+        f.r.configure_tracking(&f.project, false, false, vec![])
+            .unwrap_err();
+    assert!(error.contains("verification failed"));
+    assert!(f.r.tracking_view(&f.project).unwrap().enabled);
+    assert_eq!(f.count(&f.document("Master.md")), 1);
+}
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,

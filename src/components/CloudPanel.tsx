@@ -11,6 +11,9 @@ import {
 } from "../cloud";
 import { Modal } from "./Modal";
 import { date } from "../format";
+import { beginOperation } from "../operations";
+import { verifyCloudAction, verifyCloudDraft } from "../cloudVerification";
+import { OperationStatus } from "./OperationStatus";
 const initial: Draft = {
   enabled: true,
   automatic: false,
@@ -27,7 +30,15 @@ function savedDraft(view: CloudView): Draft {
     softLimit: view.soft_limit,
   };
 }
-export function CloudPanel({ project }: { project: string }) {
+export function CloudPanel({
+  project,
+  onBusyChange,
+  onChanged,
+}: {
+  project: string;
+  onBusyChange?: (busy: boolean) => void;
+  onChanged?: () => Promise<unknown>;
+}) {
   const [view, setView] = useState<CloudView | null>(null);
   const [draft, setDraft] = useState<Draft>(initial);
   const [busy, setBusy] = useState(false);
@@ -39,6 +50,7 @@ export function CloudPanel({ project }: { project: string }) {
   const [stopping, setStopping] = useState<"project" | "automatic" | null>(
     null,
   );
+  const [transition, setTransition] = useState<"pause" | "resume" | null>(null);
   const [index, setIndex] = useState(false);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -54,12 +66,16 @@ export function CloudPanel({ project }: { project: string }) {
   const [attestation, setAttestation] = useState(false);
   const [recovery, setRecovery] = useState<Job | true | null>(null);
   const alive = useRef(true);
+  const readSequence = useRef(0);
   const dirty = useRef(false);
   const load = useCallback(async () => {
+    const sequence = ++readSequence.current;
     const next = await cloud.view(project);
-    if (!alive.current) return;
-    setView(next);
-    if (!dirty.current) setDraft(savedDraft(next));
+    if (alive.current && sequence === readSequence.current) {
+      setView(next);
+      if (!dirty.current) setDraft(savedDraft(next));
+    }
+    return next;
   }, [project]);
   useEffect(() => {
     alive.current = true;
@@ -83,16 +99,30 @@ export function CloudPanel({ project }: { project: string }) {
     };
   }, [load]);
   async function run(action: () => Promise<unknown>) {
+    const release = beginOperation(`cloud:${project}`);
+    if (!release) return;
     setBusy(true);
+    onBusyChange?.(true);
     setError("");
     setNotice("");
     try {
       await action();
       await load();
     } catch (e) {
-      if (alive.current) setError(String(e));
+      if (alive.current) {
+        setError(String(e));
+        setNotice("");
+      }
       await load().catch(() => {});
     } finally {
+      await onChanged?.().catch((e) => {
+        if (alive.current) {
+          setError(`Could not refresh confirmed cloud status: ${String(e)}`);
+          setNotice("");
+        }
+      });
+      release();
+      onBusyChange?.(false);
       if (alive.current) setBusy(false);
     }
   }
@@ -134,13 +164,26 @@ export function CloudPanel({ project }: { project: string }) {
     setPlan(null);
     setAfterReview(null);
     setStopping(null);
+    setTransition(null);
     setError("");
   }
   function stopSync(kind: "project" | "automatic") {
     setError("");
     setStopping(kind);
   }
-  const action = (name: string) => void run(() => cloud.action(project, name));
+  async function perform(name: string) {
+    await cloud.action(project, name);
+    verifyCloudAction(await load(), name);
+  }
+  const action = (name: string) =>
+    void run(async () => {
+      await perform(name);
+      setNotice(
+        ["start", "sync", "resume"].includes(name)
+          ? "Sync request confirmed. Indexing may still be in progress."
+          : "Cloud action confirmed.",
+      );
+    });
   function manage(action: string, job?: Job) {
     setConfirmation("");
     setAttestation(false);
@@ -186,13 +229,12 @@ export function CloudPanel({ project }: { project: string }) {
       {error && !plan && !stopping && !index && !destruction && !recovery && (
         <p role="alert">{error}</p>
       )}
-      {busy && (
-        <p role="status">
-          Cloud request in progress… Local tracking remains available.
-        </p>
-      )}
+      <OperationStatus
+        busy={busy}
+        message="Applying and checking cloud settings… Local tracking remains available."
+        success={notice}
+      />
       {view?.error && <p role="status">{view.error}</p>}
-      {notice && <p role="status">{notice}</p>}
       {view && !view.enabled && !view.started && (
         <div className="cloud-setup">
           <p>
@@ -403,7 +445,7 @@ export function CloudPanel({ project }: { project: string }) {
             </button>
             <button
               disabled={busy || !view.enabled}
-              onClick={() => action(view.paused ? "resume" : "pause")}
+              onClick={() => setTransition(view.paused ? "resume" : "pause")}
             >
               {view.paused ? "Resume cloud sync" : "Pause cloud sync"}
             </button>
@@ -473,7 +515,13 @@ export function CloudPanel({ project }: { project: string }) {
           }
           close={cancelChanges}
         >
-          {error && <p role="alert">Could not stop syncing. {error}</p>}
+          {error && (
+            <p role="alert">Could not confirm syncing stopped. {error}</p>
+          )}
+          <OperationStatus
+            busy={busy}
+            message="Stopping sync and checking the saved state…"
+          />
           <p>
             {stopping === "project"
               ? "Stop cloud syncing for this project."
@@ -487,8 +535,7 @@ export function CloudPanel({ project }: { project: string }) {
               disabled={busy}
               onClick={() =>
                 void run(async () => {
-                  await cloud.action(
-                    project,
+                  await perform(
                     stopping === "project" ? "disconnect" : "stop_automatic",
                   );
                   dirty.current = false;
@@ -513,9 +560,14 @@ export function CloudPanel({ project }: { project: string }) {
       )}
       {plan && (
         <Modal title="Confirm OpenAI cloud indexing" close={cancelChanges}>
+          <OperationStatus
+            busy={busy}
+            message="Saving and checking cloud configuration…"
+          />
           {error && (
             <p role="alert">
-              <strong>Configuration was not saved.</strong> {error}
+              <strong>Cloud configuration could not be confirmed.</strong>{" "}
+              {error}
             </p>
           )}
           <p>
@@ -566,11 +618,12 @@ export function CloudPanel({ project }: { project: string }) {
                     token: plan.token,
                     consent: true,
                   });
+                  verifyCloudDraft(await load(), draft);
                   dirty.current = false;
                   setPlan(null);
                   if (afterReview && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
-                    await cloud.action(project, afterReview);
+                    await perform(afterReview);
                     setNotice("Cloud configuration saved. Sync requested.");
                     return;
                   }
@@ -599,6 +652,51 @@ export function CloudPanel({ project }: { project: string }) {
             Changes to an already-started index queue only the changes shown
             above.
           </p>
+        </Modal>
+      )}
+      {transition && (
+        <Modal
+          title={
+            transition === "pause" ? "Pause cloud sync?" : "Resume cloud sync?"
+          }
+          close={cancelChanges}
+        >
+          <p>
+            {transition === "pause"
+              ? "Pause new uploads and AI requests. Local history and saved chats remain available; an already-sent request may finish."
+              : "Resume cloud syncing for the saved document selection and allow AI questions when the current versions are indexed. API charges may apply."}
+          </p>
+          {error && <p role="alert">{error}</p>}
+          <OperationStatus
+            busy={busy}
+            message="Saving and checking cloud status…"
+          />
+          <div className="cloud-actions">
+            <button
+              disabled={busy}
+              aria-busy={busy}
+              onClick={() =>
+                void run(async () => {
+                  await perform(transition);
+                  setNotice(
+                    transition === "pause"
+                      ? "Cloud sync paused — confirmed."
+                      : "Cloud sync resumed — confirmed. Indexing may still be in progress.",
+                  );
+                  setTransition(null);
+                })
+              }
+            >
+              {busy
+                ? "Saving…"
+                : transition === "pause"
+                  ? "Pause cloud sync"
+                  : "Resume cloud sync"}
+            </button>
+            <button disabled={busy} onClick={cancelChanges}>
+              Cancel
+            </button>
+          </div>
         </Modal>
       )}
       {index && view && (

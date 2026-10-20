@@ -60,6 +60,7 @@ impl Registry {
         }
         tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 THEN 1 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
         tx.commit().map_err(error)?;
+        self.verify_tracking_settings(project, enabled, archive)?;
         self.activity(
             project,
             "settings",
@@ -101,6 +102,13 @@ impl Registry {
         } else if enabled && archive {
             let errors = self.recover_operations(project, true)?;
             self.set_tracking_error(project, &errors)?;
+        }
+        self.verify_tracking_settings(project, enabled, archive)
+    }
+    fn verify_tracking_settings(&self, project: &str, enabled: bool, archive: bool) -> Result<()> {
+        let (saved_enabled, saved_archive, _) = self.tracking_flags(project)?;
+        if saved_enabled != enabled || saved_archive != archive {
+            return Err("Tracking setting verification failed. Refresh documents to check the saved state before trying again.".into());
         }
         Ok(())
     }

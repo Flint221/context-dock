@@ -1,4 +1,11 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, it, expect, vi } from "vitest";
 import { TrackingPanel } from "./TrackingPanel";
@@ -121,11 +128,22 @@ it("requires a separate archival toggle and retains history controls when tracki
       name: /Enable automatic archival of/,
     }),
   );
+  expect(registry.configureTracking).not.toHaveBeenCalled();
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Enable archival",
+    }),
+  );
   await waitFor(() =>
     expect(registry.configureTracking).toHaveBeenCalledWith("p", true, true),
   );
   await user.click(
     await screen.findByRole("button", { name: "Disable tracking" }),
+  );
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off tracking",
+    }),
   );
   await waitFor(() =>
     expect(registry.configureTracking).toHaveBeenCalledWith("p", false, true),
@@ -239,6 +257,11 @@ it("unlocks resume decisions and scan controls after success or failure", async 
   await user.click(
     await screen.findByRole("button", { name: "Resume tracking" }),
   );
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Resume tracking",
+    }),
+  );
   await waitFor(() =>
     expect(screen.getByLabelText("Assign to document family")).toBeEnabled(),
   );
@@ -265,4 +288,72 @@ it("unlocks resume decisions and scan controls after success or failure", async 
   );
   expect(screen.queryByText("Working…")).not.toBeInTheDocument();
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+it("cancels archival changes and refuses success when the saved flags disagree", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  const archival = await screen.findByRole("checkbox", {
+    name: /Enable automatic archival of/,
+  });
+  await user.click(archival);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(archival).not.toBeChecked();
+  expect(registry.configureTracking).not.toHaveBeenCalled();
+  vi.mocked(registry.configureTracking).mockResolvedValueOnce(undefined);
+  await user.click(archival);
+  const dialog = screen.getByRole("dialog");
+  await user.click(
+    within(dialog).getByRole("button", { name: "Enable archival" }),
+  );
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "backend did not confirm",
+  );
+  expect(archival).not.toBeChecked();
+  expect(dialog).toBeInTheDocument();
+  expect(
+    within(dialog).getByRole("button", { name: "Enable archival" }),
+  ).toBeEnabled();
+});
+it("sends a tracking toggle once and keeps its spinner until state verification finishes", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  const user = userEvent.setup();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  vi.mocked(registry.configureTracking).mockImplementation(
+    async (_p, enabled, archive) => {
+      await pending;
+      view.enabled = enabled;
+      view.archiveEnabled = archive;
+    },
+  );
+  render(<TrackingPanel project={project} changed={changed} />);
+  await user.click(
+    await screen.findByRole("button", { name: "Disable tracking" }),
+  );
+  const dialog = screen.getByRole("dialog");
+  const confirm = within(dialog).getByRole("button", {
+    name: "Turn off tracking",
+  });
+  act(() => {
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+  });
+  expect(registry.configureTracking).toHaveBeenCalledTimes(1);
+  expect(confirm).toBeDisabled();
+  expect(within(dialog).getByRole("status")).toHaveTextContent(
+    "checking the backend",
+  );
+  await act(async () => finish());
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(screen.getByRole("button", { name: "Resume tracking" })).toBeEnabled();
+  expect(screen.getByRole("status")).toHaveTextContent("saved and confirmed");
 });

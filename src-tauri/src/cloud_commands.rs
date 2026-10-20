@@ -329,6 +329,21 @@ pub fn action_impl(
         .map_err(error)?;
         db.execute("UPDATE cloud_projects SET status='key_disconnected',error='Reconnect and test an API key to resume cloud operations.' WHERE enabled=1",[]).map_err(error)?;
         cloud_credentials::delete()?;
+        if cloud_credentials::read()?.is_some() {
+            return Err("OpenAI disconnect verification failed: the saved key is still present. Try Disconnect again.".into());
+        }
+        let status: String = db
+            .query_row(
+                "SELECT status FROM cloud_connection WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if status != "disconnected" {
+            return Err(
+                "OpenAI disconnect verification failed: refresh the connection status.".into(),
+            );
+        }
         return Ok(Value::Null);
     }
     if action == "test" {
@@ -380,10 +395,29 @@ pub fn action_impl(
         }
         "stop_automatic" => {
             db.execute("UPDATE cloud_projects SET auto_sync=0,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
+            cloud::verify_flags(
+                db,
+                id,
+                &[
+                    ("auto_sync", 0),
+                    ("paused", 1),
+                    ("sync_requested", 0),
+                    ("delete_requested", 0),
+                ],
+            )?;
             Ok(Value::Null)
         }
         "pause" | "disconnect" => {
             db.execute("UPDATE cloud_projects SET paused=1,delete_requested=CASE WHEN ?2='disconnect' THEN 0 ELSE delete_requested END,enabled=CASE WHEN ?2='disconnect' THEN 0 ELSE enabled END,status=?2,revision=revision+1 WHERE project_id=?1",params![id,action]).map_err(error)?;
+            cloud::verify_flags(
+                db,
+                id,
+                if action == "disconnect" {
+                    &[("enabled", 0), ("paused", 1), ("delete_requested", 0)]
+                } else {
+                    &[("paused", 1)]
+                },
+            )?;
             Ok(Value::Null)
         }
         "start" | "sync" | "resume" | "reconcile" => {
@@ -414,6 +448,17 @@ pub fn action_impl(
                 "request",
                 "User requested sync/resume/reconciliation.",
             )?;
+            if action != "reconcile" {
+                cloud::verify_flags(
+                    db,
+                    id,
+                    if action == "start" {
+                        &[("enabled", 1), ("paused", 0), ("started", 1)]
+                    } else {
+                        &[("enabled", 1), ("paused", 0)]
+                    },
+                )?;
+            }
             Ok(Value::Null)
         }
         "search" => {

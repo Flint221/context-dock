@@ -283,6 +283,35 @@ fn credentials_are_validated_without_echoing_input() {
     assert!(crate::cloud_credentials::validate("a".repeat(5000)).is_err());
 }
 #[test]
+fn toggle_commands_reject_a_database_write_that_did_not_save_the_requested_state() {
+    let mut f = Fixture::new();
+    f.enable();
+    f.r.db.execute_batch("CREATE TRIGGER reject_cloud_off AFTER UPDATE OF enabled ON cloud_projects WHEN NEW.enabled=0 BEGIN UPDATE cloud_projects SET enabled=1 WHERE project_id=NEW.project_id; END;").unwrap();
+    let err = cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({}))
+        .unwrap_err();
+    assert!(err.contains("verification failed"));
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 1);
+    f.r.db
+        .execute_batch("DROP TRIGGER reject_cloud_off;")
+        .unwrap();
+    cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).unwrap();
+    cloud::verify_flags(&f.r.db, &f.id, &[("enabled", 0), ("paused", 1)]).unwrap();
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+#[test]
+fn cloud_configuration_verification_rolls_back_a_silently_ignored_save() {
+    let mut f = Fixture::new();
+    f.enable();
+    let mut draft = f.draft();
+    draft.automatic = true;
+    let plan = cloud::preview(&f.r.db, &f.id, &draft).unwrap();
+    f.r.db.execute_batch("CREATE TRIGGER ignore_cloud_settings BEFORE UPDATE ON cloud_projects BEGIN SELECT RAISE(IGNORE); END;").unwrap();
+    assert!(cloud::apply(&mut f.r.db, &f.id, &draft, &plan.token)
+        .unwrap_err()
+        .contains("verification failed"));
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 0);
+}
+#[test]
 fn no_api_requests_for_local_only_or_paused() {
     let mut f = Fixture::new();
     let api = Mock::default();

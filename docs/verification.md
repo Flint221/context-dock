@@ -1,3 +1,15 @@
+# Verification — ContextDock 0.5.2 major control safeguards
+
+October 20: **120 Rust tests** and **56 frontend tests** pass. TypeScript, ESLint, rustfmt and all-target Clippy with warnings denied pass. Three new native regressions inject database triggers that silently ignore/reverse settings writes: cloud disconnect, cloud configuration and tracking now report verification errors instead of false success; configuration failure rolls back its transaction. Nine new frontend regressions cover double-click suppression through backend readback, unknown/read-failure states, mismatch errors, confirmation/cancellation for tracking/archival/pause/resume/global disconnect and idempotent shared operation locks. Existing cloud-chat/history suites remain passing.
+
+Major settings show a spinner while pending and a success check only after saved-state confirmation. Acknowledged requests with unchanged state remain errors; backend read failures do not unlock project questions using a stale On value. Global key save/test calls now begin inside the same synchronous operation lock instead of dispatching a save before the lock. Native key disconnect verifies removal, but automated tests never read/delete an actual saved key. All backend failure injection uses disposable databases; frontend key/storage tests use synthetic values and mocked IPC. No authenticated API, installer execution, production app-state change, release or merge was performed by the agent.
+
+The basic current-document Q&A/local-chat feature is implemented; the redesigned AI tool interface, historical-version chat selection, streaming, export and storage controls remain outside this pass. Queuing a sync operation is separately reported from completed remote indexing. See manual-testing-chat.md for current installed acceptance.
+
+Production build and unsigned Windows x64 NSIS packaging pass. Updated installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.2_x64-setup.exe`, **4,234,035 bytes**. Application identity and schema 005 are unchanged from 0.5.1. The installer was not run by the agent.
+
+---
+
 # Verification — ContextDock 0.5.1 simple cloud chat
 
 October 20: **117 Rust tests** and **47 frontend tests** pass, including nine new native chat tests and six new interaction tests. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied and production build pass. Chat tests use scripted vector-search/Responses results and disposable SQLite/files; no actual key, user document upload or paid API call was used. The application identity/data location remains unchanged, and schema 4→5 migration preserves old snapshots, cloud mapping and approved baseline rows.

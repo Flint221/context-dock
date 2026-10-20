@@ -1,6 +1,6 @@
-# ContextDock 0.5.1 — simple cloud chat acceptance
+# ContextDock 0.5.2 — simple cloud chat acceptance
 
-Use a disposable project with a tracked Markdown document containing `React frontend` and `SQLite database`. Existing projects/history remain available. Install 0.5.1 with the app closed. Schema 4→5 retains snapshots, archives, cloud mappings/settings and old baselines/reports; do not downgrade to 0.5.0 after migration.
+Use a disposable project with a tracked Markdown document containing `React frontend` and `SQLite database`. Existing projects/history remain available. Install 0.5.2 with the app closed. Schema 4→5 retains snapshots, archives, cloud mappings/settings and old baselines/reports; do not downgrade to 0.5.0 after migration.
 
 1. Save and test your own key in Settings. Open the disposable project. With Cloud sync off, confirm history/diffs still work and Ask project explains why Send is unavailable. No baseline form should appear. Folder actions are under Project folder and options.
 2. Turn on Cloud sync. Review the named documents and disclosure, then Cancel: the switch must stay off and no initial upload should begin. Turn it on again and confirm Enable Cloud sync and AI. One confirmation saves selection, enables automatic version sync and starts initial sync. No separate Start button is needed.
@@ -13,3 +13,7 @@ Use a disposable project with a tracked Markdown document containing `React fron
 9. Disconnect the network or use a test account with rejected requests. Send must unlock after failure, retain the question/error in history when dispatch began and never automatically repeat a paid model call. An interrupted request becomes uncertain on restart; inspect provider usage before manually sending again.
 
 Chat uses up to five provenance-checked search passages, recent completed turns within a bounded context budget, 2,000-byte questions and 2,048 maximum output tokens. Older messages remain saved even when outside model context. It is a question-and-answer interface, not an exhaustive comparison, autonomous tool, source editor or rollback feature. Sources validate which retrieved files were supplied, not the truth of every generated assertion.
+
+## Major toggle acceptance
+
+For project Cloud sync, advanced automatic sync/pause/resume, tracking/archival and Settings → Disconnect OpenAI: open the confirmation and Cancel first. The saved state must remain unchanged. Confirm next and rapidly double-click: one operation should run, the spinner should remain through backend verification and the controls should unlock afterward. Success shows a checkmark only after readback; sync request confirmation must not claim that indexing is complete. A failed status read must show an error/unknown state and offer status refresh instead of allowing questions from stale state. Disconnect OpenAI removes the key only after confirmation and keeps local/cloud documents; do not use it unless you are ready to re-enter your own key. No test requires sharing the key with the coding agent.

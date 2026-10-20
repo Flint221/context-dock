@@ -3,18 +3,36 @@ import { cloud, bytes, type CloudView, type Draft, type Plan } from "../cloud";
 import { CloudPanel } from "./CloudPanel";
 import { ProjectChat } from "./ProjectChat";
 import { Modal } from "./Modal";
+import { beginOperation } from "../operations";
+import { verifyCloudAction, verifyCloudDraft } from "../cloudVerification";
+import { OperationStatus } from "./OperationStatus";
 
 export function ProjectCloud({ project }: { project: string }) {
   const [view, setView] = useState<CloudView | null>(null);
+  const [stateKnown, setStateKnown] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [advancedBusy, setAdvancedBusy] = useState(false);
+  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [stop, setStop] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [setup, setSetup] = useState<{ draft: Draft; plan: Plan } | null>(null);
   const alive = useRef(true);
+  const readSequence = useRef(0);
   const load = useCallback(async () => {
-    const next = await cloud.view(project);
-    if (alive.current) setView(next);
+    const sequence = ++readSequence.current;
+    try {
+      const next = await cloud.view(project);
+      if (alive.current && sequence === readSequence.current) {
+        setView(next);
+        setStateKnown(true);
+      }
+      return next;
+    } catch (e) {
+      if (alive.current && sequence === readSequence.current)
+        setStateKnown(false);
+      throw e;
+    }
   }, [project]);
   useEffect(() => {
     alive.current = true;
@@ -36,18 +54,21 @@ export function ProjectCloud({ project }: { project: string }) {
       unsubscribe?.();
     };
   }, [load]);
-  async function run(work: () => Promise<void>) {
+  async function run(work: () => Promise<unknown>) {
+    const release = beginOperation(`cloud:${project}`);
+    if (!release) return;
     setBusy(true);
     setError("");
+    setNotice("");
     try {
       await work();
     } catch (e) {
       if (alive.current) setError(String(e));
     } finally {
       if (alive.current) {
-        await load().catch(() => {});
         setBusy(false);
       }
+      release();
     }
   }
   const enabled = !!view?.enabled && !view.paused;
@@ -96,11 +117,15 @@ export function ProjectCloud({ project }: { project: string }) {
           <div>
             <h2>Cloud sync</h2>
             <p>
-              {enabled
-                ? ready
-                  ? "On · Documents ready for questions"
-                  : "On · Preparing your documents"
-                : "Off · Local version history"}
+              {!stateKnown
+                ? busy
+                  ? "Checking cloud status…"
+                  : "Cloud status unavailable · Refresh status"
+                : enabled
+                  ? ready
+                    ? "On · Documents ready for questions"
+                    : "On · Preparing your documents"
+                  : "Off · Local version history"}
             </p>
           </div>
           <label className="cloud-check cloud-switch">
@@ -109,13 +134,22 @@ export function ProjectCloud({ project }: { project: string }) {
               role="switch"
               aria-label="Cloud sync"
               checked={enabled}
-              disabled={busy || !view}
+              disabled={
+                busy || advancedBusy || !!setup || stop || !view || !stateKnown
+              }
+              aria-busy={busy}
               onChange={(e) => {
                 if (e.target.checked) enable();
                 else setStop(true);
               }}
             />
-            {enabled ? "On" : "Off"}
+            {!stateKnown
+              ? busy
+                ? "Checking…"
+                : "Unknown"
+              : enabled
+                ? "On"
+                : "Off"}
           </label>
         </div>
         <p>
@@ -128,16 +162,29 @@ export function ProjectCloud({ project }: { project: string }) {
         )}
         {error && !setup && !stop && <p role="alert">{error}</p>}
         {enabled && view?.error && <p role="alert">{view.error}</p>}
+        <OperationStatus
+          busy={busy || advancedBusy}
+          message="Saving and checking cloud status…"
+          success={notice}
+        />
         <div className="toolbar-actions">
-          <button disabled={busy} onClick={() => void run(load)}>
+          <button
+            disabled={busy || advancedBusy}
+            onClick={() => void run(load)}
+          >
             Refresh status
           </button>
           {enabled && (
             <button
-              disabled={busy}
+              disabled={busy || advancedBusy}
               onClick={() =>
                 void run(async () => {
                   await cloud.action(project, "sync");
+                  verifyCloudAction(await load(), "sync");
+                  if (alive.current)
+                    setNotice(
+                      "Sync requested and confirmed. Document indexing may still be in progress.",
+                    );
                 })
               }
             >
@@ -153,15 +200,29 @@ export function ProjectCloud({ project }: { project: string }) {
           }}
         >
           <summary>Advanced cloud settings</summary>
-          {advanced && <CloudPanel key={project} project={project} />}
+          {advanced && (
+            <CloudPanel
+              key={project}
+              project={project}
+              onBusyChange={(saving) => {
+                setAdvancedBusy(saving);
+                if (saving) setNotice("");
+              }}
+              onChanged={load}
+            />
+          )}
         </details>
       </section>
       <ProjectChat
         key={project}
         project={project}
         enabled={enabled}
-        ready={ready}
-        reason={reason}
+        ready={ready && stateKnown && !busy && !advancedBusy}
+        reason={
+          stateKnown
+            ? reason
+            : "Cloud status could not be verified. Refresh status before asking a question."
+        }
       />
       {setup && (
         <Modal
@@ -200,19 +261,32 @@ export function ProjectCloud({ project }: { project: string }) {
             online until explicitly deleted. Chats are saved locally.
           </p>
           {error && <p role="alert">{error}</p>}
+          <OperationStatus
+            busy={busy}
+            message="Enabling Cloud sync and checking the saved settings…"
+          />
           <div className="toolbar-actions">
             <button
               className="primary"
               disabled={busy}
               onClick={() =>
                 void run(async () => {
+                  setStateKnown(false);
                   await cloud.action(project, "apply", {
                     draft: setup.draft,
                     token: setup.plan.token,
                     consent: true,
                   });
-                  if (alive.current) setSetup(null);
+                  verifyCloudDraft(await load(), setup.draft);
+                  setStateKnown(false);
                   await cloud.action(project, "start");
+                  verifyCloudAction(await load(), "start");
+                  if (alive.current) {
+                    setSetup(null);
+                    setNotice(
+                      "Cloud sync enabled and confirmed. Waiting for document indexing to finish.",
+                    );
+                  }
                 })
               }
             >
@@ -246,18 +320,29 @@ export function ProjectCloud({ project }: { project: string }) {
             an already-sent request may finish.
           </p>
           {error && <p role="alert">{error}</p>}
+          <OperationStatus
+            busy={busy}
+            message="Turning off Cloud sync and checking the saved state…"
+          />
           <div className="toolbar-actions">
             <button
               className="primary"
               disabled={busy}
               onClick={() =>
                 void run(async () => {
+                  setStateKnown(false);
                   await cloud.action(project, "disconnect");
-                  if (alive.current) setStop(false);
+                  verifyCloudAction(await load(), "disconnect");
+                  if (alive.current) {
+                    setStop(false);
+                    setNotice(
+                      "Cloud sync is off — confirmed. Local history and saved chats remain available.",
+                    );
+                  }
                 })
               }
             >
-              Turn off Cloud sync
+              {busy ? "Turning off…" : "Turn off Cloud sync"}
             </button>
             <button
               disabled={busy}
