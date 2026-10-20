@@ -741,6 +741,28 @@ fn foreign_association_blocks_index_deletion() {
     assert_eq!(api.0.borrow().associations.len(), 2);
 }
 #[test]
+fn index_deletion_confirms_display_name_and_rejects_stale_or_missing_identity() {
+    let p = json!({"store_name":"ContextDock - Project Ω", "store_id":"vs_original"});
+    let payload = json!({"confirmation":"ContextDock - Project Ω", "storeId":"vs_original"});
+    assert!(cloud_commands::validate_index_deletion(&p, &payload).is_ok());
+    for invalid in [
+        json!({"confirmation":"DELETE vs_original", "storeId":"vs_original"}),
+        json!({"confirmation":"ContextDock - Project Ω", "storeId":"vs_other"}),
+        json!({"confirmation":"ContextDock - Project Ω"}),
+        json!({"confirmation":"ContextDock - Wrong project", "storeId":"vs_original"}),
+    ] {
+        assert!(cloud_commands::validate_index_deletion(&p, &invalid).is_err());
+    }
+    let renamed = json!({"store_name":"Renamed index", "store_id":"vs_original"});
+    assert!(cloud_commands::validate_index_deletion(&renamed, &payload).is_err());
+    let missing = json!({"store_name":"", "store_id":""});
+    assert!(cloud_commands::validate_index_deletion(
+        &missing,
+        &json!({"confirmation":"", "storeId":""})
+    )
+    .is_err());
+}
+#[test]
 fn delete_index_retains_files_and_local_history() {
     let mut f = Fixture::new();
     f.enable();

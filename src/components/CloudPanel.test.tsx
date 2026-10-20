@@ -396,6 +396,41 @@ it("shows remote deletion confirmation without issuing deletion when cancelled",
   await user.click(within(modal).getByRole("button", { name: "Cancel" }));
   expect(cloud.action).not.toHaveBeenCalled();
 });
+it("confirms index deletion with its displayed name while sending the target ID separately", async () => {
+  const user = userEvent.setup();
+  view.enabled = 1;
+  view.store_id = "vs_owned";
+  view.store_state = "linked";
+  view.store_name = "ContextDock - Project Ω";
+  render(<CloudPanel project="p1" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Delete project cloud index" }),
+  );
+  const modal = screen.getByRole("dialog");
+  const input = within(modal).getByLabelText(
+    "Type ContextDock - Project Ω to confirm",
+  );
+  const confirm = within(modal).getByRole("button", {
+    name: "Confirm remote deletion",
+  });
+  await user.type(input, "DELETE vs_owned");
+  expect(confirm).toBeDisabled();
+  await user.clear(input);
+  await user.type(input, view.store_name);
+  expect(confirm).toBeEnabled();
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(confirm);
+  await waitFor(() =>
+    expect(cloud.action).toHaveBeenCalledWith(
+      "p1",
+      "delete_index",
+      expect.objectContaining({
+        confirmation: "ContextDock - Project Ω",
+        storeId: "vs_owned",
+      }),
+    ),
+  );
+});
 it("shows an actionable configuration failure inside its consent dialog", async () => {
   const user = userEvent.setup();
   vi.mocked(cloud.action)

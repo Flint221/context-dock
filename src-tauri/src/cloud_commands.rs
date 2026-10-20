@@ -304,6 +304,17 @@ pub async fn cloud_action(
     .await
     .map_err(|_| "Cloud operation failed.".to_string())?
 }
+pub(crate) fn validate_index_deletion(project: &Value, payload: &Value) -> Result<()> {
+    let name = s(project, "store_name");
+    let id = s(project, "store_id");
+    if id.is_empty() || s(payload, "storeId") != id {
+        return Err("The cloud index changed. Close this dialog and review deletion again.".into());
+    }
+    if name.trim().is_empty() || s(payload, "confirmation") != name {
+        return Err("Type the exact cloud index name shown in the confirmation dialog.".into());
+    }
+    Ok(())
+}
 pub fn action_impl(
     db: &mut Connection,
     project: Option<&str>,
@@ -465,9 +476,7 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "delete_index" => {
-            if s(payload, "confirmation") != format!("DELETE {}", s(&p, "store_id")) {
-                return Err("Type DELETE followed by the exact vector-store ID.".into());
-            }
+            validate_index_deletion(&p, payload)?;
             let (api, bound) = current_api(db)?;
             if s(&p, "scope") != bound {
                 return Err("Verify this index with the saved key first.".into());

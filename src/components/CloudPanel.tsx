@@ -47,6 +47,10 @@ export function CloudPanel({ project }: { project: string }) {
     job?: Job;
   } | null>(null);
   const [confirmation, setConfirmation] = useState("");
+  const deletionText =
+    destruction?.action === "delete_index"
+      ? (view?.store_name ?? "")
+      : `DELETE ${destruction?.job?.file_id ?? ""}`;
   const [attestation, setAttestation] = useState(false);
   const [recovery, setRecovery] = useState<Job | true | null>(null);
   const alive = useRef(true);
@@ -787,7 +791,7 @@ export function CloudPanel({ project }: { project: string }) {
                   : "Permanently delete this uploaded File from OpenAI? This may affect other resources that use it."}
               </p>
               <label>
-                Type DELETE {destruction.job?.file_id ?? view?.store_id}
+                Type {deletionText} to confirm
                 <input
                   value={confirmation}
                   onChange={(e) => setConfirmation(e.target.value)}
@@ -814,8 +818,7 @@ export function CloudPanel({ project }: { project: string }) {
               disabled={
                 busy ||
                 (destruction.action !== "remove" &&
-                  confirmation !==
-                    `DELETE ${destruction.job?.file_id ?? view?.store_id}`) ||
+                  (!deletionText || confirmation !== deletionText)) ||
                 (destruction.action === "purge_file" && !attestation)
               }
               onClick={() =>
@@ -829,6 +832,7 @@ export function CloudPanel({ project }: { project: string }) {
                       version: destruction.job?.version_id,
                       confirm: true,
                       confirmation,
+                      storeId: view?.store_id,
                       noOtherReferences: attestation,
                     },
                   );
