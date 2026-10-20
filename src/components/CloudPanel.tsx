@@ -26,6 +26,7 @@ export function CloudPanel({ project }: { project: string }) {
   const [notice, setNotice] = useState("");
   const [plan, setPlan] = useState<Plan | null>(null);
   const [consent, setConsent] = useState(false);
+  const [afterReview, setAfterReview] = useState<"start" | "sync" | null>(null);
   const [index, setIndex] = useState(false);
   const [hits, setHits] = useState<Hit[] | null>(null);
   const [query, setQuery] = useState("");
@@ -101,6 +102,24 @@ export function CloudPanel({ project }: { project: string }) {
   const connectionReady = view?.connectionStatus === "connected";
   const selectionMissing =
     draft.enabled && !view?.started && draft.documents.length === 0;
+  const hasChanges =
+    !!view &&
+    (draft.enabled !== (!!view.enabled || view.store_state === "none") ||
+      draft.automatic !== !!view.auto_sync ||
+      draft.mode !== view.mode ||
+      draft.softLimit !== view.soft_limit ||
+      view.families.some(
+        (f) => !!f.selected !== draft.documents.includes(f.id),
+      ));
+  function review(nextAction: "start" | "sync" | null = null) {
+    void run(async () => {
+      const next = await cloud.action<Plan>(project, "preview", { draft });
+      if (!alive.current) return;
+      setAfterReview(nextAction);
+      setConsent(false);
+      setPlan(next);
+    });
+  }
   return (
     <section className="panel cloud-panel" aria-label="Cloud indexing">
       <div className="cloud-heading">
@@ -174,6 +193,12 @@ export function CloudPanel({ project }: { project: string }) {
           </p>
           <fieldset disabled={busy}>
             <legend>Project cloud selection</legend>
+            {hasChanges && (
+              <p role="status">
+                Unsaved cloud changes. Sync Now opens a review of these changes
+                before syncing. You can also use Review cloud changes below.
+              </p>
+            )}
             <label className="cloud-check">
               <input
                 type="checkbox"
@@ -277,15 +302,7 @@ export function CloudPanel({ project }: { project: string }) {
             </div>
             <button
               disabled={(draft.enabled && !connectionReady) || selectionMissing}
-              onClick={() =>
-                void run(async () => {
-                  const next = await cloud.action<Plan>(project, "preview", {
-                    draft,
-                  });
-                  setConsent(false);
-                  setPlan(next);
-                })
-              }
+              onClick={() => review()}
             >
               Review cloud changes
             </button>
@@ -306,13 +323,13 @@ export function CloudPanel({ project }: { project: string }) {
             <button
               className="primary"
               disabled={busy || !view.enabled || !!view.started}
-              onClick={() => action("start")}
+              onClick={() => (hasChanges ? review("start") : action("start"))}
             >
               Start Initial Sync
             </button>
             <button
               disabled={busy || !view.enabled || !view.started}
-              onClick={() => action("sync")}
+              onClick={() => (hasChanges ? review("sync") : action("sync"))}
             >
               Sync Now
             </button>
@@ -443,6 +460,12 @@ export function CloudPanel({ project }: { project: string }) {
                   });
                   dirty.current = false;
                   setPlan(null);
+                  if (afterReview && draft.enabled) {
+                    setNotice("Cloud configuration saved. Requesting sync…");
+                    await cloud.action(project, afterReview);
+                    setNotice("Cloud configuration saved. Sync requested.");
+                    return;
+                  }
                   setNotice(
                     draft.enabled
                       ? view?.started
@@ -453,7 +476,11 @@ export function CloudPanel({ project }: { project: string }) {
                 })
               }
             >
-              Confirm cloud configuration
+              {afterReview && draft.enabled
+                ? afterReview === "start"
+                  ? "Confirm and start initial sync"
+                  : "Confirm and sync"
+                : "Confirm cloud configuration"}
             </button>
             <button disabled={busy} onClick={() => setPlan(null)}>
               Cancel
