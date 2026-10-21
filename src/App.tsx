@@ -122,7 +122,7 @@ export default function App() {
       <aside>
         <div className="brand">
           <span className="brand-icon">
-            <Folder size={23} />
+            <img src="/contextdock.svg" alt="" width={37} height={37} />
           </span>
           <div>
             ContextDock<small>PROJECT WORKSPACE</small>
