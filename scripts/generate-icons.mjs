@@ -1,6 +1,7 @@
 import { copyFileSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, URL } from "node:url";
+import process from "node:process";
 import { spawnSync } from "node:child_process";
 
 // One vector source supplies the sidebar, browser favicon and native branding.

@@ -11,12 +11,27 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { RemoveProject } from "./RemoveProject";
 import { cloud, type CloudView } from "../cloud";
 import { registry } from "../services/registry";
+import type { Project } from "../types";
 vi.mock("../cloud", () => ({ cloud: { view: vi.fn(), action: vi.fn() } }));
 vi.mock("../services/registry", () => ({
   registry: { remove: vi.fn(), snapshot: vi.fn() },
 }));
 let view: CloudView;
-const project = { id: "p1", name: "Test project" };
+const project: Project = {
+  id: "p1",
+  name: "Test project",
+  path: "C:\\Fixtures\\Test project",
+  createdAt: "2026-10-20T12:00:00Z",
+  status: "available",
+  lastScan: null,
+  scanError: null,
+  documentCount: 0,
+  latestModified: null,
+  trackingEnabled: false,
+  archiveEnabled: false,
+  trackingRevision: 0,
+  folderState: "ready",
+};
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cloud.action).mockResolvedValue(undefined);
@@ -76,7 +91,7 @@ it("keeps the dialog open if the removal readback still contains the project", a
     projects: [project],
     documents: [],
     theme: "system",
-  } as Awaited<ReturnType<typeof registry.snapshot>>);
+  });
   render(<RemoveProject project={project} close={close} removed={removed} />);
   const confirm = await screen.findByRole("button", { name: "Remove project" });
   await waitFor(() => expect(confirm).toBeEnabled());

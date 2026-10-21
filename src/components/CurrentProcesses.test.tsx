@@ -96,7 +96,7 @@ it("defaults to local preview cards and hides system, UDP, database and unrelate
   );
   await ready(false);
   expect(
-    screen.getByRole("button", { name: "Local previews", exact: true }),
+    screen.getByRole("button", { name: "Local previews" }),
   ).toHaveAttribute("aria-pressed", "true");
   expect(
     screen.getByRole("button", {
@@ -149,9 +149,7 @@ it("switches reversibly to the full list, clears hidden selections, and defaults
   await user.click(
     screen.getByRole("checkbox", { name: "Select node.exe PID 1" }),
   );
-  await user.click(
-    screen.getByRole("button", { name: "Local previews", exact: true }),
-  );
+  await user.click(screen.getByRole("button", { name: "Local previews" }));
   expect(screen.queryByText("System")).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Advanced processes" }));
   expect(
@@ -160,7 +158,7 @@ it("switches reversibly to the full list, clears hidden selections, and defaults
   first.unmount();
   await ready(false);
   expect(
-    screen.getByRole("button", { name: "Local previews", exact: true }),
+    screen.getByRole("button", { name: "Local previews" }),
   ).toHaveAttribute("aria-pressed", "true");
 });
 
