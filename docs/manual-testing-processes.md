@@ -1,16 +1,16 @@
 # Current processes — 0.6.2 manual checks
 
-## Pending polish: Local previews default
+## Local previews default (0.6.4)
 
 Before the historical full-inventory steps below, verify the new default view: Local previews should show compact cards for typical Node/Python/frontend servers on local TCP bindings. System services, UDP, database/debug endpoints and unrelated high-port apps should be absent. Each card should expose a preview URL, Preview, Copy URL, Stop app and collapsed app details. A usual IPv4/IPv6 localhost pair should produce one preview entry; other 127.x.x.x hosts remain independent.
 
 Switch to Advanced processes to perform the full-inventory checks below. Switch back to Local previews, then back to Advanced: earlier checkbox selections must be cleared. Close/reopen the tab: Local previews must be selected again. A custom server hidden by the heuristic must remain discoverable in Advanced. Search should accept ports, app names, local URLs and localhost aliases. HTTPS on/off should update displayed/copied URLs and the native preview scheme without changing the underlying process.
 
-Review Stop app or Stop all previews, then Cancel: no native stop should occur. Confirm only disposable servers. The review must list their whole owning processes and all ports; hidden database/system owners must not enter the simplified bulk target list. No active HTTP probe, cloud request, startup change or new background polling should occur merely by switching views. New regressions are written but execution is deferred to the final polishing checks.
+Review Stop app or Stop all previews, then Cancel: no native stop should occur. Confirm only disposable servers. The review must list their whole owning processes and all ports; hidden database/system owners must not enter the simplified bulk target list. No active HTTP probe, cloud request, startup change or new background polling should occur merely by switching views. The final 0.6.4 automated checks pass; installed manual checks remain for the user.
 
 Use a disposable preview and save work before testing Stop. Do not bulk-stop unfamiliar apps. Nothing here requires enabling document tracking or cloud access.
 
-1. Install the 0.6.2 build, preserving the existing application identifier/data. Open **Current processes** directly above Settings. It must work with no registered projects and with projects awaiting folder reassignment. Add project should not appear on this page. Check light/dark themes and narrow-window horizontal table scrolling.
+1. Install the 0.6.4 build, preserving the existing application identifier/data. Open **Current processes** directly above Settings. It must work with no registered projects and with projects awaiting folder reassignment. Add project should not appear on this page. Check light/dark themes and narrow-window horizontal table scrolling.
 2. Start a disposable local website preview using your usual development tool. Note its port and PID. Refresh the list and search that port. Check executable path, PID, parent, start time and all endpoints. Compare counts with Windows Resource Monitor if desired. IPv4/IPv6 wildcard bindings are separate endpoints, not separate apps. A UDP binding does not imply a listening TCP website.
 3. Click **Preview** for its loopback/wildcard TCP endpoint. Your default browser should open the exact local port. If the server uses HTTPS, check **Use HTTPS for previews** and try again; uncheck to restore HTTP. Nonweb protocols may fail in the browser. UDP and LAN-only endpoints should have no Preview. Copy endpoint and Details and inspect the clipboard.
 4. Toggle TCP/UDP and Loopback + wildcard filters both ways. Search by name, PID and path. Clear the search. Switch **Show** to **User apps and listeners**: eligible apps without ports should appear; switch back to hide them. Selection should clear when filters change so hidden items are not accidentally stopped.

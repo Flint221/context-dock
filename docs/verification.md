@@ -1,3 +1,17 @@
+# 0.6.4 — Final Milestone 6 polish
+
+October 20, 2026. **108 frontend tests across 14 files** and **154 native tests** pass (one intentionally ignored child-fixture entry point is invoked by its parent integration test). TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, Windows x64 NSIS packaging and `git diff --check` pass. Package/lockfile, Rust and Tauri versions are 0.6.4; identifier `com.contextdock.desktop` and schema 006 remain unchanged.
+
+Removal regressions verify dialog closure after confirmed absence, handing the same verified snapshot to the workspace, stale background reads not restoring removed cards/documents, and navigation retaining the removal. The native retain/delete-cloud variants preserve exact source/snapshot/archive bytes and local version/chat rows across registry restart. Simplified process regressions cover default preview cards, local runtime/port filtering and deduplication without mutating inventory, URL schemes, preview dispatch, scoped reviewed bulk stop and cancellation, reversible Advanced mode, cleared hidden selections and the default after remount. Final validation corrected unsupported test query options, an incomplete project fixture, the version assertion and explicit Node imports in the icon generator.
+
+Browser review rendered the actual App/components and production CSS with synthetic registry/cloud/process data and replaced native APIs. Reviewed light/dark dashboards, the shared cloud-folder logo, the 780px layout, Local previews cards and red stop controls, switching to/from Advanced diagnostics, and the tracking badge. The dark Watching badge computed to 13px text, green `rgb(140, 221, 176)` on `rgb(32, 59, 48)`. No console warning/error entries were returned during the process-page check. The temporary tab/server were closed. These checks do not establish installed WebView2 behavior, live cloud behavior or interactive upgrade acceptance.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.4_x64-setup.exe`, **4,384,655 bytes**, SHA-256 `1FBCE1F8E6FD26E769CD129EB976DAD8011D7476800EDD8D84F077F478E49D13`. The packaged executable reports file/product version 0.6.4. It was not installed or launched against user data. Native branding assets and the browser/sidebar logo derive from `public/contextdock.svg` via `npm run icons`.
+
+Local success does not imply that GitHub Actions has finished. Installed acceptance and the main-branch CI result remain user confirmation after merge.
+
+---
+
 # 0.6.3 — Motion and interface polish
 
 October 20, 2026, `milestone-6`. **154 native tests** pass (plus the intentionally ignored child-fixture entry point invoked by its integration test), and **99 frontend tests** pass across 13 files. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, the production frontend and Windows x64 NSIS packaging pass. No native production behavior or database schema changed; versions/lockfiles are 0.6.3, identity remains `com.contextdock.desktop`, and schema remains 006.

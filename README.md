@@ -1,13 +1,17 @@
 # ContextDock
 
-ContextDock 0.6.3 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.6.4 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
-## Pending polish: simplified local previews
+## Simplified local previews and final polish (0.6.4)
 
 **Current processes** now opens in **Local previews** mode by default. Compact cards show likely local frontend/web servers with their URLs, **Preview**, **Copy URL**, **Stop app**, and a reviewed **Stop all previews** action. System services, UDP, common database/debug ports and unrelated background listeners are hidden from this view. Ordinary dual-stack localhost bindings are grouped to reduce duplicates. **Advanced processes** restores the complete original inventory, filters, selections and startup diagnostics; switching views clears pending selections, and reopening the tab defaults to Local previews again.
 
-This is a display heuristic using verified current-user process eligibility, local TCP bindings, runtime names and common preview ports. It does not probe sites or claim every result speaks HTTP; unusual/custom servers may require Advanced processes. Stopping remains a confirmed whole-process action, with all existing identity/protection checks. These changes are local pending the final checks, push and installer build.
+This is a display heuristic using verified current-user process eligibility, local TCP bindings, runtime names and common preview ports. It does not probe sites or claim every result speaks HTTP; unusual/custom servers may require Advanced processes. Stopping remains a confirmed whole-process action, with all existing identity/protection checks. Automated checks and local installer packaging pass; installed acceptance remains a user check.
+
+Small text is larger throughout the interface, with emphasized version values. Green indicates active/available/success states, amber indicates warnings or paused/review states, and red indicates errors/missing items and destructive actions. Status labels remain visible in both themes. Project removal closes its dialog and returns to All projects using the verified snapshot; older background reads cannot restore the removed card. Local source files, captured history, archives and chats remain retained, with cloud deletion controlled by the removal choice.
+
+The cloud-inside-folder logo is shared by the sidebar, browser favicon and native Windows assets. Edit `public/contextdock.svg` and run `npm run icons` to regenerate the tracked PNG/ICO files and `app-icon.png`; this command does not build an installer. Installed Windows icons update with the next installer.
 
 ## Motion and feedback (0.6.3)
 
