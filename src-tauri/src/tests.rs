@@ -28,7 +28,7 @@ fn migrations_persistence_rename_duplicate_and_safe_removal() {
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        5
+        6
     );
     r.remove(&id).unwrap();
     assert!(r.snapshot().unwrap().documents.is_empty());
@@ -64,7 +64,8 @@ fn recursive_discovery_identity_exclusions_and_read_only() {
         .unwrap()
         .modified()
         .unwrap();
-    let mut r = Registry::open(&temp.path().join("r.db")).unwrap();
+    fs::create_dir(temp.path().join("app")).unwrap();
+    let mut r = Registry::open(&temp.path().join("app/r.db")).unwrap();
     let id = r.add("Project", root.to_str().unwrap()).unwrap();
     let first = r.snapshot().unwrap();
     assert_eq!(first.documents.len(), 5);
@@ -107,6 +108,9 @@ fn recursive_discovery_identity_exclusions_and_read_only() {
     assert!(s.documents.iter().all(|d| d.status == "unavailable"));
     fs::rename(temp.path().join("disconnected"), &root).unwrap();
     r.refresh(&id).unwrap();
+    assert_eq!(r.snapshot().unwrap().projects[0].status, "unavailable");
+    let plan = r.folder_plan(&id, root.to_str().unwrap()).unwrap();
+    r.reassign_folder(&id, &plan.path, &plan.token).unwrap();
     assert_eq!(r.snapshot().unwrap().projects[0].status, "available");
 }
 #[test]
@@ -221,13 +225,13 @@ fn future_database_version_is_rejected_without_downgrading() {
     let path = t.path().join("r.db");
     {
         let r = Registry::open(&path).unwrap();
-        r.db.pragma_update(None, "user_version", 6).unwrap();
+        r.db.pragma_update(None, "user_version", 7).unwrap();
     }
     assert!(Registry::open(&path).is_err());
     let c = rusqlite::Connection::open(path).unwrap();
     assert_eq!(
         c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        6
+        7
     );
 }

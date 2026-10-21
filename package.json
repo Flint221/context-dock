@@ -1,9 +1,10 @@
 {
   "name": "contextdock",
   "private": true,
-  "version": "0.5.4",
+  "version": "0.6.4",
   "type": "module",
   "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b",

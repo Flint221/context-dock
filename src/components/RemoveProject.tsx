@@ -9,6 +9,7 @@ import { registry } from "../services/registry";
 import { beginOperation } from "../operations";
 import { Modal } from "./Modal";
 import { OperationStatus } from "./OperationStatus";
+import type { Snapshot } from "../types";
 
 export function RemoveProject({
   project,
@@ -17,7 +18,7 @@ export function RemoveProject({
 }: {
   project: { id: string; name: string };
   close: () => void;
-  removed: () => Promise<void>;
+  removed: (snapshot: Snapshot) => void;
 }) {
   const [view, setView] = useState<CloudView | null>(null);
   const [retain, setRetain] = useState(false);
@@ -56,7 +57,8 @@ export function RemoveProject({
         throw new Error(
           "Project removal could not be verified. Refresh and retry.",
         );
-      await removed();
+      close();
+      removed(snapshot);
     } catch (e) {
       setError(String(e));
     } finally {

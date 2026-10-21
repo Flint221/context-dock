@@ -22,6 +22,9 @@ struct Remote {
     ignore_store_delete: bool,
     shared_file: bool,
     lose_file_delete_reply: bool,
+    ignore_association_delete: bool,
+    bad_association_receipt: bool,
+    extra_stores: Vec<Value>,
 }
 #[derive(Default)]
 struct Mock(RefCell<Remote>);
@@ -39,6 +42,7 @@ impl CloudApi for Mock {
         }
         if path.starts_with("/vector_stores?") {
             let mut stores = r.store.iter().cloned().collect::<Vec<_>>();
+            stores.extend(r.extra_stores.clone());
             if r.shared_file {
                 stores.push(json!({"id":"vs_other","metadata":{}}));
             }
@@ -61,6 +65,7 @@ impl CloudApi for Mock {
             if method == "DELETE" {
                 if !r.ignore_store_delete {
                     r.store = None;
+                    r.associations.clear();
                 }
                 return Ok(json!({"deleted":true}));
             }
@@ -68,6 +73,23 @@ impl CloudApi for Mock {
         }
         if path.starts_with("/vector_stores/vs_other/files?") {
             return Ok(json!({"data":r.associations,"has_more":false}));
+        }
+        if path.starts_with("/vector_stores/vs_older/files?")
+            || path.starts_with("/vector_stores/vs_unrelated/files?")
+        {
+            return Ok(json!({"data":[],"has_more":false}));
+        }
+        if path == "/vector_stores/vs_older" || path == "/vector_stores/vs_unrelated" {
+            let index = r
+                .extra_stores
+                .iter()
+                .position(|v| path == format!("/vector_stores/{}", s(v, "id")))
+                .ok_or_else(missing)?;
+            if method == "DELETE" {
+                r.extra_stores.remove(index);
+                return Ok(json!({"deleted":true}));
+            }
+            return Ok(r.extra_stores[index].clone());
         }
         if path.starts_with("/vector_stores/vs_test/files?") {
             return Ok(json!({"data":r.associations,"has_more":false}));
@@ -86,8 +108,10 @@ impl CloudApi for Mock {
                 .ok_or_else(missing)?;
             return match method {
                 "DELETE" => {
-                    r.associations.remove(index);
-                    Ok(json!({"deleted":true}))
+                    if !r.ignore_association_delete && !r.bad_association_receipt {
+                        r.associations.remove(index);
+                    }
+                    Ok(json!({"deleted":!r.bad_association_receipt}))
                 }
                 "POST" => {
                     r.associations[index]["attributes"] = body.unwrap()["attributes"].clone();
@@ -161,6 +185,73 @@ struct Fixture {
     r: Registry,
     id: String,
     doc: String,
+}
+
+#[test]
+fn missing_selected_source_blocks_queued_uploads_and_recovers_without_losing_cloud_identity() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let store = s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id").to_string();
+    let bytes = fs::read(f.root.join("Master_Context.md")).unwrap();
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert!(api.0.borrow().calls.is_empty());
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("missing or inaccessible"));
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(view["localReady"], false);
+    assert!(view["localError"].as_str().unwrap().contains("missing"));
+    fs::write(f.root.join("Master_Context.md"), bytes).unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["localReady"], true);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id"),
+        store
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+
+#[test]
+fn reassignment_stops_old_request_guard_and_questions_wait_for_local_reconciliation() {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        Arc::new(AtomicBool::new(false)),
+    )
+    .unwrap();
+    let target = f.root.parent().unwrap().join("Relocated");
+    fs::rename(&f.root, &target).unwrap();
+    let plan = f.r.folder_plan(&f.id, target.to_str().unwrap()).unwrap();
+    f.r.reassign_folder(&f.id, &plan.path, &plan.token).unwrap();
+    api.0.borrow_mut().calls.clear();
+    assert!(guard
+        .request("GET", "/vector_stores?limit=1", None)
+        .unwrap_err()
+        .message
+        .contains("folder changed"));
+    assert!(api.0.borrow().calls.is_empty());
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("Recheck"));
+    fs::write(target.join("Master_Context.md"), "Changed while moving").unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("still syncing"));
 }
 impl Fixture {
     fn new() -> Self {
@@ -303,6 +394,414 @@ fn credentials_are_validated_without_echoing_input() {
         .contains(secret));
     assert!(crate::cloud_credentials::validate("a".repeat(40)).is_ok());
     assert!(crate::cloud_credentials::validate("a".repeat(5000)).is_err());
+}
+
+#[test]
+fn history_policy_round_trip_detaches_and_restores_original_captures_without_duplicate_files() {
+    let mut f = Fixture::new();
+    f.edit();
+    let api = Mock::default();
+    let mut history = f.draft();
+    history.mode = "history".into();
+    f.apply(history.clone());
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET started=1,paused=0,sync_requested=1",
+            [],
+        )
+        .unwrap();
+    for _ in 0..12 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    let files = api
+        .0
+        .borrow()
+        .files
+        .iter()
+        .map(|(v, _)| s(v, "id").to_string())
+        .collect::<Vec<_>>();
+    f.apply(f.draft());
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(
+        api.0.borrow().associations[0]["attributes"]["is_current"],
+        true
+    );
+    f.apply(history);
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(
+        api.0
+            .borrow()
+            .files
+            .iter()
+            .map(|(v, _)| s(v, "id").to_string())
+            .collect::<Vec<_>>(),
+        files
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+}
+
+#[test]
+fn cloud_off_stop_intent_survives_an_in_flight_document_removal_failure() {
+    struct BeginCleanup {
+        db: rusqlite::Connection,
+        id: String,
+        payload: Value,
+    }
+    impl CloudApi for BeginCleanup {
+        fn request(&self, _: &str, _: &str, _: Option<Value>) -> Result<Value, ApiError> {
+            cloud_cleanup::begin(&self.db, &self.id, &self.payload).unwrap();
+            Err(ApiError::local(
+                "Ordinary request stopped for full cleanup.",
+            ))
+        }
+        fn upload(&self, _: &str, _: Vec<u8>) -> Result<Value, ApiError> {
+            panic!("Cleanup must not upload");
+        }
+        fn content(&self, _: &str) -> Result<Vec<u8>, ApiError> {
+            panic!("No content request is expected");
+        }
+    }
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let mut none = f.draft();
+    none.documents.clear();
+    f.apply(none);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let interrupt = BeginCleanup {
+        db: cloud::connect(&f.r.store.join("test.db")).unwrap(),
+        id: f.id.clone(),
+        payload: json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]}),
+    };
+    cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &interrupt, "bound").unwrap();
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "cleanup_pending"
+    );
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "cloud_deleted"
+    );
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+}
+
+#[test]
+fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
+) {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let mut f = Fixture::new();
+    f.edit();
+    fs::write(f.root.join("Other.md"), "Independent family").unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    let other =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.name == "Other.md")
+            .unwrap()
+            .document_id
+            .clone();
+    let mut full = f.draft();
+    full.mode = "history".into();
+    full.documents.push(other.clone());
+    f.apply(full.clone());
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET started=1,paused=0,sync_requested=1",
+            [],
+        )
+        .unwrap();
+    let api = Mock::default();
+    for _ in 0..20 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().associations.len(), 3);
+    let store = s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id").to_string();
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=1,sync_requested=0", [])
+        .unwrap();
+    let mut reduced = full.clone();
+    reduced.documents = vec![other.clone()];
+    f.apply(reduced);
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 2);
+    assert_eq!(
+        n(&cloud::project(&f.r.db, &f.id).unwrap(), "sync_requested"),
+        0
+    );
+    api.0.borrow_mut().calls.clear();
+    let guarded = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        Arc::new(AtomicBool::new(false)),
+    )
+    .unwrap();
+    for _ in 0..2 {
+        cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &guarded, "bound").unwrap();
+    }
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(
+        s(&api.0.borrow().associations[0]["attributes"], "document"),
+        other
+    );
+    assert!(api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .all(|c| c.starts_with("GET ") || c.starts_with("DELETE /vector_stores/vs_test/files/")));
+    assert_eq!(api.0.borrow().files.len(), 3);
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "paused"), 1);
+    f.apply(full);
+    f.step(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=0,sync_requested=1", [])
+        .unwrap();
+    for _ in 0..20 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().associations.len(), 3);
+    assert_eq!(api.0.borrow().files.len(), 3);
+    assert!(!api.0.borrow().calls.iter().any(|c| c == "UPLOAD"));
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id"),
+        store
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+}
+
+#[test]
+fn opted_out_documents_are_removed_before_unrelated_additions_even_if_new_source_goes_missing() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    fs::write(f.root.join("Replacement.md"), "New family").unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    let other =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.name == "Replacement.md")
+            .unwrap()
+            .document_id
+            .clone();
+    let mut changed = f.draft();
+    changed.documents = vec![other];
+    f.apply(changed);
+    fs::remove_file(f.root.join("Replacement.md")).unwrap();
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert!(api.0.borrow().associations.is_empty());
+    assert!(!api.0.borrow().calls.iter().any(|c| c == "UPLOAD"));
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(cloud::selection_removals(&f.r.db, &f.id)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_for_retry() {
+    for bad_receipt in [true, false] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        f.r.db
+            .execute("UPDATE cloud_projects SET paused=1", [])
+            .unwrap();
+        let mut none = f.draft();
+        none.documents.clear();
+        f.apply(none);
+        api.0.borrow_mut().bad_association_receipt = bad_receipt;
+        api.0.borrow_mut().ignore_association_delete = !bad_receipt;
+        f.step(&api);
+        assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
+        assert_eq!(
+            s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+            "selection_removal_failed"
+        );
+        assert_eq!(
+            cloud::view(&f.r.db, &f.id).unwrap()["status"],
+            "selection_removal_failed"
+        );
+        let db = f.r.store.join("test.db");
+        f.r = Registry::open(&db).unwrap();
+        assert!(
+            !cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap()
+        );
+        assert!(!s(&f.jobs()[0], "file_id").is_empty());
+        api.0.borrow_mut().bad_association_receipt = false;
+        api.0.borrow_mut().ignore_association_delete = false;
+        cloud_commands::action_impl(
+            &mut f.r.db,
+            Some(&f.id),
+            "retry_selection_removals",
+            &json!({}),
+        )
+        .unwrap();
+        f.step(&api);
+        assert!(api.0.borrow().associations.is_empty());
+        assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "paused"), 1);
+        assert_eq!(api.0.borrow().files.len(), 1);
+    }
+}
+
+#[test]
+fn pure_opt_out_can_be_saved_without_source_or_credentials_and_only_authorizes_narrow_deletion() {
+    use std::sync::{atomic::AtomicBool, Arc};
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    fs::rename(&f.root, f.root.with_file_name("unavailable")).unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=1", [])
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_connection SET status='disconnected'", [])
+        .unwrap();
+    let mut none = f.draft();
+    none.documents.clear();
+    let plan =
+        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "preview", &json!({"draft":none}))
+            .unwrap();
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "apply",
+        &json!({"draft":none,"token":plan["token"],"consent":true}),
+    )
+    .unwrap();
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
+    let guarded = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        Arc::new(AtomicBool::new(false)),
+    )
+    .unwrap();
+    api.0.borrow_mut().calls.clear();
+    assert!(guarded
+        .request("GET", "/vector_stores/vs_test", None)
+        .is_err());
+    f.r.db
+        .execute("UPDATE cloud_connection SET status='connected'", [])
+        .unwrap();
+    assert!(guarded
+        .upload("blocked.md", b"Never upload".to_vec())
+        .is_err());
+    assert!(guarded
+        .request("DELETE", "/vector_stores/vs_unrelated/files/file-1", None)
+        .is_err());
+    assert!(api.0.borrow().calls.is_empty());
+    cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &guarded, "bound").unwrap();
+    assert!(api.0.borrow().associations.is_empty());
+}
+
+#[test]
+fn lost_upload_response_is_recovered_after_document_opt_out_and_reselection_without_duplicate_upload(
+) {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.step(&api);
+    api.0.borrow_mut().fail = Some(ApiError {
+        message: "Lost upload receipt".into(),
+        ambiguous: true,
+        retry: false,
+        missing: false,
+        delay: 0,
+    });
+    // The next step checks the store before upload; inject the ambiguous upload state
+    // using the mock's upload path directly to reproduce a sent-but-unacknowledged upload.
+    cloud::queue(&mut f.r.db, &f.id).unwrap();
+    let job = f.jobs().remove(0);
+    let version = cloud::version(&f.r.db, s(&job, "version_id")).unwrap();
+    assert!(api
+        .upload(
+            s(&job, "remote_name"),
+            cloud::verified(&f.r.store, &version, 52428800).unwrap()
+        )
+        .is_err());
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET state='uncertain',phase='recover'",
+            [],
+        )
+        .unwrap();
+    let mut none = f.draft();
+    none.documents.clear();
+    f.apply(none);
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "removed");
+    f.apply(f.draft());
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|c| *c == "UPLOAD")
+            .count(),
+        1
+    );
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+}
+
+#[test]
+fn cloud_off_deletes_all_owned_old_stores_preserves_foreign_store_and_reenable_restores_saved_selection(
+) {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let install = cloud::install(&f.r.db).unwrap();
+    api.0.borrow_mut().extra_stores = vec![
+        json!({"id":"vs_older","metadata":{"contextdock":install,"project":f.id,"operation":"old-operation"}}),
+        json!({"id":"vs_unrelated","metadata":{"contextdock":install,"project":"other-project","operation":"unrelated"}}),
+    ];
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let payload = json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]});
+    cloud_cleanup::begin(&f.r.db, &f.id, &payload).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+    assert_eq!(api.0.borrow().extra_stores.len(), 1);
+    assert_eq!(s(&api.0.borrow().extra_stores[0], "id"), "vs_unrelated");
+    let saved = cloud::draft(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap();
+    assert_eq!(saved.documents, vec![f.doc.clone()]);
+    f.enable();
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(
+        s(&api.0.borrow().associations[0]["attributes"], "project"),
+        f.id
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+    for status in ["cleanup_pending", "cleanup_failed"] {
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET paused=1,status=?1,error='Cleanup needs verification'",
+                [status],
+            )
+            .unwrap();
+        assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["status"], status);
+    }
 }
 #[test]
 fn toggle_commands_reject_a_database_write_that_did_not_save_the_requested_state() {
@@ -1328,11 +1827,78 @@ fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local
     let api = Mock::default();
     f.enable();
     f.sync(&api);
+    let source_path = f.root.join("Master_Context.md");
+    let source_bytes = fs::read(&source_path).unwrap();
+    let snapshot_path = f.r.versions(&f.doc).unwrap()[0].snapshot_path.clone();
+    let snapshot_bytes = fs::read(&snapshot_path).unwrap();
+    let archive_path = f.root.join("Old Context Files").join("retained.md");
+    fs::create_dir_all(archive_path.parent().unwrap()).unwrap();
+    fs::write(&archive_path, b"retained local archive").unwrap();
+    let chat = crate::chat::create(&f.r, &f.id).unwrap();
+    let chat_id = s(&chat, "id").to_string();
+    f.r.db.execute(
+        "INSERT INTO project_chat_turns(id,chat_id,question,answer,state,created_at) VALUES('retained-turn',?1,'Saved question','Saved answer','completed',?2)",
+        params![chat_id, crate::models::now()],
+    ).unwrap();
+    let doc_id = f.doc.clone();
+    let saved_versions = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM document_versions WHERE document_id=?1",
+        &[&doc_id],
+    )
+    .unwrap();
+    let saved_chat = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM project_chats WHERE id=?1",
+        &[&chat_id],
+    )
+    .unwrap();
+    let saved_turns = cloud::rows(
+        &f.r.db,
+        "SELECT * FROM project_chat_turns WHERE chat_id=?1",
+        &[&chat_id],
+    )
+    .unwrap();
+    let assert_local_preserved = |r: &Registry| {
+        assert!(r.snapshot().unwrap().projects.is_empty());
+        assert!(r.snapshot().unwrap().documents.is_empty());
+        assert_eq!(fs::read(&source_path).unwrap(), source_bytes);
+        assert_eq!(fs::read(&snapshot_path).unwrap(), snapshot_bytes);
+        assert_eq!(fs::read(&archive_path).unwrap(), b"retained local archive");
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM document_versions WHERE document_id=?1",
+                &[&doc_id]
+            )
+            .unwrap(),
+            saved_versions
+        );
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM project_chats WHERE id=?1",
+                &[&chat_id]
+            )
+            .unwrap(),
+            saved_chat
+        );
+        assert_eq!(
+            cloud::rows(
+                &r.db,
+                "SELECT * FROM project_chat_turns WHERE chat_id=?1",
+                &[&chat_id]
+            )
+            .unwrap(),
+            saved_turns
+        );
+    };
     assert!(f.r.remove_with_cloud_choice(&f.id, false).is_err());
     assert!(
         cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "disconnect", &json!({})).is_err()
     );
     f.r.remove_with_cloud_choice(&f.id, true).unwrap();
+    assert_local_preserved(&f.r);
     assert!(f.r.snapshot().unwrap().projects.is_empty());
     assert!(api.0.borrow().store.is_some());
     assert_eq!(api.0.borrow().files.len(), 1);
@@ -1342,6 +1908,8 @@ fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local
     cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
     cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
     f.r.remove_with_cloud_choice(&f.id, false).unwrap();
+    assert_local_preserved(&f.r);
+    assert_local_preserved(&Registry::open(&f.r.store.join("test.db")).unwrap());
     assert!(api.0.borrow().store.is_none());
     assert!(f.root.join("Master_Context.md").exists());
     assert_eq!(

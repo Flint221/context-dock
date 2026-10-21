@@ -36,6 +36,7 @@ const project: Project = {
   trackingEnabled: false,
   archiveEnabled: false,
   trackingRevision: 0,
+  folderState: "ready",
 };
 let view: TrackingView;
 const changed = vi.fn(async () => {});
@@ -317,6 +318,48 @@ it("cancels archival changes and refuses success when the saved flags disagree",
   expect(
     within(dialog).getByRole("button", { name: "Enable archival" }),
   ).toBeEnabled();
+});
+
+it("round-trips the archival checkbox with cancellation and verified off state while tracking stays on", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  vi.mocked(registry.configureTracking).mockImplementation(
+    async (_p, enabled, archive) => {
+      view.enabled = enabled;
+      view.archiveEnabled = archive;
+    },
+  );
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  const checkbox = await screen.findByRole("checkbox", {
+    name: /Enable automatic archival of/,
+  });
+  await user.click(checkbox);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Enable archival",
+    }),
+  );
+  await waitFor(() => expect(checkbox).toBeChecked());
+  await user.click(checkbox);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(checkbox).toBeChecked();
+  expect(registry.configureTracking).toHaveBeenCalledTimes(1);
+  await user.click(checkbox);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off archival",
+    }),
+  );
+  await waitFor(() => expect(checkbox).not.toBeChecked());
+  expect(view.enabled).toBe(true);
+  expect(registry.configureTracking).toHaveBeenLastCalledWith(
+    project.id,
+    true,
+    false,
+  );
 });
 it("sends a tracking toggle once and keeps its spinner until state verification finishes", async () => {
   view.enabled = true;

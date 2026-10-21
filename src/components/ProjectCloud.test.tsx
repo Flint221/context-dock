@@ -19,6 +19,76 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("updates measured indexing progress from backend counts and never counts failures as indexed", async () => {
+  connected();
+  view.indexed = 2;
+  view.pending = 3;
+  view.failed = 0;
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "40");
+  view.indexed = 3;
+  view.pending = 1;
+  view.failed = 1;
+  await act(async () => changed());
+  expect(
+    screen.getByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "60");
+  expect(
+    screen.getByText(/1 pending · 1 failed or uncertain/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});
+it("keeps paused progress explicit and hides the index meter after opting out", async () => {
+  connected();
+  view.indexed = 1;
+  view.pending = 1;
+  view.paused = 1;
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "50");
+  expect(screen.getByText(/Uploads paused ·/)).toBeInTheDocument();
+  view.enabled = 0;
+  await act(async () => changed());
+  expect(
+    screen.queryByRole("progressbar", { name: "Indexed versions" }),
+  ).not.toBeInTheDocument();
+  expect(cloud.action).not.toHaveBeenCalled();
+});
+it("blocks new questions about missing selected files while saved chats remain readable", async () => {
+  connected();
+  chats = [structuredClone(saved)];
+  view.localReady = false;
+  view.localError =
+    "Selected project files are missing. Restore them and refresh documents.";
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByText("SQLite [1].")).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+  expect(
+    screen.getByText(/Selected project files are missing/),
+  ).toBeInTheDocument();
+  view.localReady = true;
+  view.localError = null;
+  await act(async () => changed());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Your question" }),
+    ).toBeEnabled(),
+  );
+  await user.type(
+    screen.getByRole("textbox", { name: "Your question" }),
+    "Ready again",
+  );
+  expect(chat.action).not.toHaveBeenCalledWith(
+    "p1",
+    "ask",
+    expect.anything(),
+    expect.anything(),
+  );
+});
 const saved: Chat = {
   id: "c1",
   title: "Database question",
@@ -158,6 +228,82 @@ function connected() {
   view.families[0].cloudNumber = 1;
   view.indexed = 1;
 }
+it("keeps a paused cloud project checked so unchecking always means verified cloud deletion", async () => {
+  connected();
+  view.paused = 1;
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  const toggle = await screen.findByRole("switch", { name: "Cloud sync" });
+  await waitFor(() => expect(toggle).toBeChecked());
+  expect(screen.getByText("Paused · Cloud data retained")).toBeInTheDocument();
+  await user.click(toggle);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(toggle).toBeChecked();
+  expect(cloud.action).not.toHaveBeenCalled();
+  await user.click(toggle);
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Turn off Cloud sync",
+    }),
+  );
+  await waitFor(() => expect(toggle).not.toBeChecked());
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith(
+    "p1",
+    "delete_cloud",
+    expect.objectContaining({ confirm: true, storeId: "vs_test" }),
+  );
+});
+it.each(["empty", "ineligible"])(
+  "preserves an %s saved selection instead of silently selecting all documents on re-enable",
+  async (kind) => {
+    view.selectionSaved = true;
+    view.status = "cloud_deleted";
+    if (kind === "ineligible")
+      view.families.push({
+        ...view.families[0],
+        id: "old-selection",
+        name: "Needs review",
+        selected: 1,
+        eligible: 0,
+      });
+    const user = userEvent.setup();
+    render(<ProjectCloud project="p1" />);
+    await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
+    expect(
+      await screen.findByText(
+        /saved document selection is empty or needs review/,
+      ),
+    ).toBeInTheDocument();
+    expect(cloud.action).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("switch", { name: "Cloud sync" }),
+    ).not.toBeChecked();
+  },
+);
+it("re-enables only the saved subset rather than newly eligible unrelated families", async () => {
+  view.selectionSaved = true;
+  view.status = "cloud_deleted";
+  view.families[0].selected = 1;
+  view.families.push({
+    ...view.families[0],
+    id: "not-selected",
+    name: "Unselected",
+    selected: 0,
+  });
+  const user = userEvent.setup();
+  render(<ProjectCloud project="p1" />);
+  await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
+  await screen.findByRole("dialog");
+  expect(cloud.action).toHaveBeenCalledExactlyOnceWith("p1", "preview", {
+    draft: expect.objectContaining({ documents: ["d1"] }),
+  });
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", { name: "Cancel" }),
+  );
+  expect(vi.mocked(cloud.action).mock.calls).toHaveLength(1);
+});
 it("keeps cloud off until one confirmation, then starts sync and enables a simple question", async () => {
   const user = userEvent.setup();
   render(<ProjectCloud project="p1" />);

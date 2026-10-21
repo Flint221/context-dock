@@ -5,6 +5,7 @@ import App from "./App";
 import { cloud } from "./cloud";
 import { registry } from "./services/registry";
 import type { Snapshot } from "./types";
+import { processes } from "./services/processes";
 vi.mock("./services/registry", () => ({
   registry: {
     snapshot: vi.fn(),
@@ -29,6 +30,115 @@ vi.mock("./cloud", async (original) => ({
   },
 }));
 let state: Snapshot;
+it("preserves page controls during status updates and resets the scene and scroll only on navigation", async () => {
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
+    notify = cb;
+    return () => {};
+  });
+  const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
+    processes: [],
+    warnings: [],
+    scannedAt: "2026-10-20T12:00:00Z",
+  });
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "Current processes" }));
+  const search = await screen.findByRole("searchbox", {
+    name: "Search apps or ports",
+  });
+  await waitFor(() => expect(inventory).toHaveBeenCalledTimes(1));
+  await user.type(search, "5173");
+  const scene = search.closest(".page-scene");
+  const scrollCount = vi.mocked(window.scrollTo).mock.calls.length;
+  await act(async () => notify());
+  expect(screen.getByRole("searchbox")).toHaveValue("5173");
+  expect(search.closest(".page-scene")).toBe(scene);
+  expect(window.scrollTo).toHaveBeenCalledTimes(scrollCount);
+  expect(inventory).toHaveBeenCalledTimes(1);
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  expect(scene).not.toBeInTheDocument();
+  expect(window.scrollTo).toHaveBeenLastCalledWith({
+    top: 0,
+    left: 0,
+    behavior: "instant",
+  });
+  inventory.mockRestore();
+});
+it("places Current processes above Settings and opens it independently of project registrations", async () => {
+  const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
+    processes: [],
+    warnings: [],
+    scannedAt: "2026-10-20T12:00:00Z",
+  });
+  const user = userEvent.setup();
+  render(<App />);
+  const nav = screen.getByRole("navigation", { name: "Main navigation" });
+  const buttons = within(nav).getAllByRole("button");
+  expect(buttons[2]).toHaveTextContent("Current processes");
+  expect(buttons[3]).toHaveTextContent("Settings");
+  await user.click(buttons[2]);
+  expect(
+    await screen.findByRole("button", { name: "Refresh processes" }),
+  ).toBeInTheDocument();
+  await waitFor(() => expect(inventory).toHaveBeenCalled());
+  expect(
+    screen.queryByRole("button", { name: "Add project" }),
+  ).not.toBeInTheDocument();
+  await user.click(buttons[3]);
+  expect(
+    screen.queryByRole("button", { name: "Refresh processes" }),
+  ).not.toBeInTheDocument();
+  inventory.mockRestore();
+});
+it("does not let an older registry read dismiss a newer folder-loss state", async () => {
+  const p = {
+    id: "p1",
+    name: "Relocated project",
+    path: "C:\\Old",
+    createdAt: "",
+    status: "available",
+    lastScan: null,
+    scanError: null,
+    documentCount: 0,
+    latestModified: null,
+    trackingEnabled: false,
+    archiveEnabled: false,
+    trackingRevision: 0,
+    folderState: "ready" as const,
+  };
+  state = { projects: [p], documents: [], theme: "system" };
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
+    notify = cb;
+    return () => {};
+  });
+  let finish: (value: Snapshot) => void = () => {};
+  vi.mocked(registry.snapshot).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<App />);
+  await waitFor(() => expect(registry.subscribe).toHaveBeenCalled());
+  state = {
+    ...state,
+    projects: [
+      { ...p, status: "unavailable", folderState: "needs_reassignment" },
+    ],
+  };
+  await act(async () => notify());
+  expect(
+    await screen.findByText("Folders needing attention", { selector: "h2" }),
+  ).toBeInTheDocument();
+  await act(async () =>
+    finish({ projects: [p], documents: [], theme: "system" }),
+  );
+  expect(
+    screen.getByText("Folders needing attention", { selector: "h2" }),
+  ).toBeInTheDocument();
+});
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cloud.subscribe).mockResolvedValue(() => {});
@@ -99,6 +209,7 @@ it("registers a real picker selection and opens its discovered documents", async
       trackingEnabled: false,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     });
     state.documents.push({
       id: "d1",
@@ -171,7 +282,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.5.4 · Milestone 5")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.6.4 · Milestone 6")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -189,6 +300,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
       trackingEnabled: false,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     },
   ];
   vi.mocked(registry.rename).mockImplementation(async (_id, name) => {
@@ -211,13 +323,114 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   await screen.findByText("Document metadata refreshed.");
   await user.click(screen.getByRole("button", { name: "Remove project" }));
   expect(registry.remove).not.toHaveBeenCalled();
+  const snapshotsBeforeRemoval = vi.mocked(registry.snapshot).mock.calls.length;
   await user.click(
     within(screen.getByRole("dialog")).getByRole("button", {
       name: "Remove project",
     }),
   );
   await screen.findByText("Add your first project");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(registry.snapshot).toHaveBeenCalledTimes(snapshotsBeforeRemoval + 1);
   expect(registry.remove).toHaveBeenCalledWith("p1", false);
+});
+
+it("returns to All projects after removal and ignores an older read across later navigation", async () => {
+  const user = userEvent.setup();
+  const base = {
+    path: "C:\\Test",
+    createdAt: "",
+    status: "available",
+    lastScan: null,
+    scanError: null,
+    documentCount: 1,
+    latestModified: null,
+    trackingEnabled: false,
+    archiveEnabled: false,
+    trackingRevision: 0,
+    folderState: "ready" as const,
+  };
+  state.projects = [
+    { ...base, id: "p1", name: "Removed project" },
+    { ...base, id: "p2", name: "Remaining project", path: "C:\\Other" },
+  ];
+  state.documents = state.projects.map((p) => ({
+    id: `source-${p.id}`,
+    projectId: p.id,
+    documentId: `document-${p.id}`,
+    name: `${p.name}.md`,
+    relativePath: `${p.name}.md`,
+    absolutePath: `${p.path}\\${p.name}.md`,
+    kind: "markdown",
+    size: 20,
+    modifiedAt: null,
+    lastObserved: "",
+    status: "available",
+  }));
+  let notify: () => void = () => {};
+  vi.mocked(registry.subscribe).mockImplementation(async (listener) => {
+    notify = listener;
+    return () => {};
+  });
+  vi.mocked(registry.remove).mockImplementation(async (id) => {
+    state.projects = state.projects.filter((p) => p.id !== id);
+    state.documents = state.documents.filter((d) => d.projectId !== id);
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /Removed project C:/ }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Refresh documents" }),
+    ).toBeEnabled(),
+  );
+  const stale = structuredClone(state);
+  let finishOldRead: (snapshot: Snapshot) => void = () => {};
+  vi.mocked(registry.snapshot).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishOldRead = resolve;
+      }),
+  );
+  await act(async () => notify());
+  await user.click(screen.getByRole("button", { name: "Remove project" }));
+  const dialog = screen.getByRole("dialog", { name: "Remove project?" });
+  const confirm = within(dialog).getByRole("button", {
+    name: "Remove project",
+  });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  expect(
+    await screen.findByRole("button", { name: /Remaining project C:/ }),
+  ).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: /Removed project C:/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "All projects" }),
+  ).not.toBeInTheDocument();
+  await act(async () => finishOldRead(stale));
+  await user.click(screen.getByRole("button", { name: "Dashboard" }));
+  expect(
+    screen.queryByRole("button", { name: /Removed project/ }),
+  ).not.toBeInTheDocument();
+  expect(screen.queryByText("Removed project.md")).not.toBeInTheDocument();
+  expect(
+    screen.getByText("Registered projects").parentElement,
+  ).toHaveTextContent("1");
+  expect(
+    screen.getByText("Discovered documents").parentElement,
+  ).toHaveTextContent("1");
+  await user.click(screen.getByRole("button", { name: "Projects1" }));
+  expect(
+    screen.queryByRole("button", { name: /Removed project/ }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /Remaining project C:/ }),
+  ).toBeInTheDocument();
+  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", false);
 });
 
 it("keeps one live tracking panel through updates and removes it on navigation", async () => {
@@ -236,6 +449,7 @@ it("keeps one live tracking panel through updates and removes it on navigation",
       trackingEnabled: true,
       archiveEnabled: false,
       trackingRevision: 0,
+      folderState: "ready",
     },
   ];
   let notify: () => void = () => {};

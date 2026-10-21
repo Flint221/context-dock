@@ -179,9 +179,7 @@ export function TrackingPanel({
           </p>
         </div>
         {view && (
-          <span
-            className={`badge ${view.enabled && view.watchStatus === "watching" ? "available" : ""}`}
-          >
+          <span className={`badge ${view.enabled ? view.watchStatus : ""}`}>
             {view.enabled ? view.watchStatus : "Tracking off"}
           </span>
         )}
@@ -367,7 +365,9 @@ export function TrackingPanel({
                           <td>{f.versionCount}</td>
                           <td>{date(f.lastCaptured)}</td>
                           <td>
-                            <span className={`badge ${f.sourceStatus}`}>
+                            <span
+                              className={`badge ${f.needsReview ? "warning" : !view.enabled ? "paused" : f.sourceStatus || ""}`}
+                            >
                               {f.needsReview
                                 ? "Needs Review"
                                 : view.enabled

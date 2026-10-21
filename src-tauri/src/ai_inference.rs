@@ -220,6 +220,7 @@ pub fn generate(
         return Err("Confirm the paid analysis request first. No request was sent.".into());
     }
     ai::project(r, p)?;
+    crate::folder_recovery::require_ready(&r.db, p)?;
     let saved = ai::report(r, p, id)?;
     if saved["state"] != "preview" {
         return Err("This request was already sent, cancelled or interrupted. Review a new plan before another paid request.".into());

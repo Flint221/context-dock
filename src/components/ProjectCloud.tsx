@@ -12,6 +12,7 @@ import {
   hasCloudData,
 } from "../cloudVerification";
 import { OperationStatus } from "./OperationStatus";
+import { ProgressBar } from "./ProgressBar";
 
 export function ProjectCloud({ project }: { project: string }) {
   const [view, setView] = useState<CloudView | null>(null);
@@ -81,9 +82,11 @@ export function ProjectCloud({ project }: { project: string }) {
   const cleanupNeeded =
     !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
   const retained = !!view && !enabled && hasCloudData(view);
+  const indexedTotal = view ? view.indexed + view.pending + view.failed : 0;
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
   const ready =
     enabled &&
+    view?.localReady !== false &&
     view?.connectionStatus === "connected" &&
     !!view.store_id &&
     view.failed === 0 &&
@@ -92,13 +95,15 @@ export function ProjectCloud({ project }: { project: string }) {
     selected.every((f) => f.currentNumber === f.cloudNumber);
   const reason = !view
     ? "Loading cloud status…"
-    : view.connectionStatus !== "connected"
-      ? "Save and test your OpenAI key in Settings to connect."
-      : view.error
-        ? view.error
-        : selected.length === 0
-          ? "Enable version tracking and select documents for cloud sync."
-          : "Your documents are syncing. Questions unlock when the current versions are ready.";
+    : view.localError
+      ? view.localError
+      : view.connectionStatus !== "connected"
+        ? "Save and test your OpenAI key in Settings to connect."
+        : view.error
+          ? view.error
+          : selected.length === 0
+            ? "Enable version tracking and select documents for cloud sync."
+            : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;
     void run(async () => {
@@ -107,7 +112,15 @@ export function ProjectCloud({ project }: { project: string }) {
         throw new Error(
           "Enable document tracking below and capture a document first, then turn on Cloud sync.",
         );
-      const saved = eligible.filter((f) => f.selected);
+      const saved = view.families.filter((f) => f.selected);
+      if (
+        (view.selectionSaved || saved.length > 0) &&
+        (!saved.length || saved.some((f) => !f.eligible))
+      ) {
+        throw new Error(
+          "Your saved document selection is empty or needs review. Choose documents in Advanced cloud settings before enabling; no other documents were selected automatically.",
+        );
+      }
       const draft: Draft = {
         enabled: true,
         automatic: true,
@@ -146,7 +159,7 @@ export function ProjectCloud({ project }: { project: string }) {
               type="checkbox"
               role="switch"
               aria-label="Cloud sync"
-              checked={enabled}
+              checked={!!view?.enabled}
               disabled={
                 busy ||
                 advancedBusy ||
@@ -192,6 +205,26 @@ export function ProjectCloud({ project }: { project: string }) {
           message="Saving and checking cloud status…"
           success={notice}
         />
+        {view &&
+          stateKnown &&
+          !cleanupNeeded &&
+          !!view.enabled &&
+          !!view.started &&
+          indexedTotal > 0 && (
+            <div className="cloud-index-progress">
+              <ProgressBar
+                label="Indexed versions"
+                value={(100 * view.indexed) / indexedTotal}
+                detail={`${view.indexed} of ${indexedTotal} indexed`}
+              />
+              <small className={view.failed ? "error" : undefined}>
+                {view.paused ? "Uploads paused · " : ""}
+                {view.pending} pending · {view.failed} failed or uncertain
+                {!ready &&
+                  " · Questions unlock when selected current versions are ready."}
+              </small>
+            </div>
+          )}
         <div className="toolbar-actions">
           <button
             disabled={busy || advancedBusy}
@@ -210,6 +243,8 @@ export function ProjectCloud({ project }: { project: string }) {
           )}
           {enabled && (
             <button
+              className="primary"
+              aria-busy={busy || advancedBusy}
               disabled={busy || advancedBusy}
               onClick={() =>
                 void run(async () => {

@@ -30,6 +30,57 @@ const changePlan: Plan = {
   removals: 0,
   storeName: "ContextDock - Test",
 };
+
+it("saves opt-out with an untested key, keeps uploads paused, and exposes pending removal retry", async () => {
+  view.enabled = 1;
+  view.started = 1;
+  view.paused = 1;
+  view.families[0].selected = 1;
+  view.connectionStatus = "error";
+  vi.mocked(cloud.action).mockImplementation(async (p, action, payload) => {
+    if (action === "preview")
+      return { ...changePlan, files: 0, additions: 0, removals: 1 } as never;
+    await confirmedAction(p, action, payload);
+    if (action === "apply") view.selectionRemovalPending = 1;
+    if (action === "retry_selection_removals") view.selectionRemovalPending = 0;
+    return undefined as never;
+  });
+  const user = userEvent.setup();
+  render(<CloudPanel project="p1" />);
+  await user.click(await screen.findByLabelText(/Master Context/));
+  let dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(screen.getByLabelText(/Master Context/)).toBeChecked();
+  await user.click(screen.getByLabelText(/Master Context/));
+  dialog = await screen.findByRole("dialog");
+  await user.click(within(dialog).getByRole("checkbox"));
+  await user.click(
+    within(dialog).getByRole("button", { name: "Confirm cloud configuration" }),
+  );
+  await waitFor(() =>
+    expect(screen.getByLabelText(/Master Context/)).not.toBeChecked(),
+  );
+  expect(
+    await screen.findByText(
+      /document index removals await remote verification/,
+    ),
+  ).toBeInTheDocument();
+  expect(view.paused).toBe(1);
+  expect(vi.mocked(cloud.action).mock.calls.map((c) => c[1])).toEqual([
+    "preview",
+    "preview",
+    "apply",
+  ]);
+  await user.click(
+    screen.getByRole("button", { name: "Retry document removals" }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.queryByText(/document index removals await remote verification/),
+    ).not.toBeInTheDocument(),
+  );
+  expect(view.paused).toBe(1);
+});
 async function confirmedAction(
   _project: string | null,
   action: string,

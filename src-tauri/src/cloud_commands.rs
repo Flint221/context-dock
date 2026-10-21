@@ -25,6 +25,7 @@ pub struct ProjectApi<'a> {
     scope: String,
     stop: Arc<AtomicBool>,
     cleanup: bool,
+    folder_revision: i64,
 }
 impl<'a> ProjectApi<'a> {
     pub fn new(
@@ -34,21 +35,64 @@ impl<'a> ProjectApi<'a> {
         scope: &str,
         stop: Arc<AtomicBool>,
     ) -> Result<Self> {
+        let db = cloud::connect(path)?;
+        let folder_revision = db
+            .query_row(
+                "SELECT folder_revision FROM projects WHERE id=?1",
+                [project],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
         Ok(Self {
             api,
-            db: cloud::connect(path)?,
+            db,
             project: project.into(),
             scope: scope.into(),
             stop,
             cleanup: false,
+            folder_revision,
         })
     }
-    fn check(&self) -> std::result::Result<(), cloud_api::ApiError> {
-        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND ((?3=0 AND (c.paused=0 OR c.delete_requested=1)) OR (?3=1 AND c.paused=1 AND c.status='cleanup_pending')) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope,self.cleanup as i64],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
+    fn check(&self, method: &str, path: &str) -> std::result::Result<(), cloud_api::ApiError> {
+        let removal = !self.cleanup
+            && cloud::selection_removal_request(&self.db, &self.project, method, path)
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+        if !self.cleanup && !removal {
+            crate::folder_recovery::require_ready(&self.db, &self.project)
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+            let revision: i64 = self
+                .db
+                .query_row(
+                    "SELECT folder_revision FROM projects WHERE id=?1",
+                    [&self.project],
+                    |r| r.get(0),
+                )
+                .map_err(|_| {
+                    cloud_api::ApiError::local("Cannot check the project folder revision.")
+                })?;
+            if revision != self.folder_revision {
+                return Err(cloud_api::ApiError::local(
+                    "The project folder changed. Refresh documents before syncing again.",
+                ));
+            }
+        }
+        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND ((?3=0 AND c.status NOT IN ('cleanup_pending','cleanup_failed') AND (c.paused=0 OR c.delete_requested=1 OR ?4=1)) OR (?3=1 AND c.paused=1 AND c.status='cleanup_pending')) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope,self.cleanup as i64,removal as i64],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
         if active != 1 || self.stop.load(Ordering::Relaxed) {
             return Err(cloud_api::ApiError::local(
                 "Cloud sync paused, disconnected or stopped before the next request.",
             ));
+        }
+        if !self.cleanup && !removal {
+            let p = cloud::project(&self.db, &self.project)
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+            if n(&p, "delete_requested") != 1 {
+                cloud::desired(
+                    &self.db,
+                    &self.project,
+                    &cloud::draft(&self.db, &p).map_err(|e| cloud_api::ApiError::local(&e))?,
+                )
+                .map_err(|e| cloud_api::ApiError::local(&e))?;
+            }
         }
         Ok(())
     }
@@ -60,7 +104,7 @@ impl CloudApi for ProjectApi<'_> {
         path: &str,
         body: Option<Value>,
     ) -> std::result::Result<Value, cloud_api::ApiError> {
-        self.check()?;
+        self.check(method, path)?;
         if self.cleanup && !["GET", "DELETE"].contains(&method) {
             return Err(cloud_api::ApiError::local(
                 "Cleanup cannot upload or create resources.",
@@ -73,11 +117,11 @@ impl CloudApi for ProjectApi<'_> {
         name: &str,
         bytes: Vec<u8>,
     ) -> std::result::Result<Value, cloud_api::ApiError> {
-        self.check()?;
+        self.check("POST", "/files")?;
         self.api.upload(name, bytes)
     }
     fn content(&self, id: &str) -> std::result::Result<Vec<u8>, cloud_api::ApiError> {
-        self.check()?;
+        self.check("GET", &format!("/files/{id}/content"))?;
         self.api.content(id)
     }
 }
@@ -110,6 +154,14 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     }
     if n(p, "delete_requested") == 1 {
         return Ok(true);
+    }
+    if !cloud::selection_removals(db, s(p, "project_id"))?.is_empty()
+        && !["cleanup_pending", "cleanup_failed"].contains(&s(p, "status"))
+    {
+        return Ok(true);
+    }
+    if crate::folder_recovery::require_ready(db, s(p, "project_id")).is_err() {
+        return Ok(false);
     }
     if n(p, "paused") == 1 {
         return Ok(false);
@@ -402,6 +454,18 @@ pub fn action_impl(
     }
     let id = project.ok_or("Select a project.")?;
     let p = cloud::project(db, id)?;
+    if ![
+        "pause",
+        "disconnect",
+        "stop_automatic",
+        "preview",
+        "apply",
+        "retry_selection_removals",
+    ]
+    .contains(&action)
+    {
+        crate::folder_recovery::require_ready(db, id)?;
+    }
     if ["cleanup_pending", "cleanup_failed"].contains(&s(&p, "status")) {
         return Err("Finish or retry cloud deletion before changing sync settings. Remote references have been retained.".into());
     }
@@ -409,7 +473,7 @@ pub fn action_impl(
         "preview" => {
             let draft: CloudDraft = serde_json::from_value(payload["draft"].clone())
                 .map_err(|_| "Invalid cloud configuration.")?;
-            if draft.enabled {
+            if draft.enabled && !cloud::selection_reduction(db, &p, &draft)? {
                 let connected: bool = db
                     .query_row(
                         "SELECT status='connected' FROM cloud_connection WHERE singleton=1",
@@ -434,6 +498,16 @@ pub fn action_impl(
                 return Err("Explicit cloud upload and retention consent is required.".into());
             }
             cloud::apply(db, id, &draft, s(payload, "token"))?;
+            Ok(Value::Null)
+        }
+        "retry_selection_removals" => {
+            if n(&p, "enabled") != 1 {
+                return Err("Cloud sync is off. Use confirmed project cloud cleanup to remove retained remote data.".into());
+            }
+            if cloud::selection_removals(db, id)?.is_empty() {
+                return Err("No document opt-out removals need retry.".into());
+            }
+            db.execute("UPDATE cloud_projects SET next_at=0,attempts=0,error=NULL,status='selection_removing' WHERE project_id=?1",[id]).map_err(error)?;
             Ok(Value::Null)
         }
         "stop_automatic" => {

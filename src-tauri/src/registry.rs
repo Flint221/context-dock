@@ -27,7 +27,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 5 {
+        if version > 6 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -55,7 +55,11 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/005_project_chats.sql"))
                 .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 5).map_err(error)?;
+        if version < 6 {
+            tx.execute_batch(include_str!("../migrations/006_folder_recovery.sql"))
+                .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 6).map_err(error)?;
         tx.commit().map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
@@ -132,12 +136,15 @@ impl Registry {
     }
     pub fn refresh(&mut self, id: &str) -> Result<()> {
         let path = self.path(id)?;
+        if crate::folder_recovery::require_ready(&self.db, id).is_err() {
+            return Ok(());
+        }
         let now = models::now();
         let scan = scanner::scan(Path::new(&path));
         let tx = self.db.transaction().map_err(error)?;
         match scan {
             Err(message) => {
-                tx.execute("UPDATE projects SET status='unavailable',last_scan=?1,scan_error=?2 WHERE id=?3",params![now,message,id]).map_err(error)?;
+                tx.execute("UPDATE projects SET folder_state='needs_reassignment',folder_revision=folder_revision+1,status='unavailable',last_scan=?1,scan_error=?2,watch_status='needs_folder' WHERE id=?3",params![now,format!("{} {message}",crate::folder_recovery::LOST),id]).map_err(error)?;
                 tx.execute("UPDATE source_files SET status='unavailable' WHERE project_id=?1 AND status!='archived'",[id]).map_err(error)?;
             }
             Ok(scan) => {
@@ -198,7 +205,8 @@ impl Registry {
         Ok(())
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
-        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id) FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
+        self.check_folders()?;
+        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id),p.folder_state FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
         let projects = q
             .query_map([], |r| {
                 Ok(Project {
@@ -214,6 +222,7 @@ impl Registry {
                     tracking_enabled: r.get(9)?,
                     archive_enabled: r.get(10)?,
                     tracking_revision: r.get(11)?,
+                    folder_state: r.get(12)?,
                 })
             })
             .map_err(error)?

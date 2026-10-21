@@ -37,6 +37,17 @@ function savedDraft(view: CloudView): Draft {
     softLimit: view.soft_limit,
   };
 }
+function selectionReduction(view: CloudView, draft: Draft) {
+  const saved = view.families.filter((f) => f.selected).map((f) => f.id);
+  return (
+    draft.enabled === !!view.enabled &&
+    draft.automatic === !!view.auto_sync &&
+    draft.mode === view.mode &&
+    draft.softLimit === view.soft_limit &&
+    draft.documents.length < saved.length &&
+    draft.documents.every((id) => saved.includes(id))
+  );
+}
 export function CloudPanel({
   project,
   onBusyChange,
@@ -153,10 +164,11 @@ export function CloudPanel({
       view &&
       (view.enabled || view.started) &&
       updated.enabled &&
-      connectionReady
+      (connectionReady || selectionReduction(view, updated))
     ) {
       review(
-        view.started &&
+        !selectionReduction(view, updated) &&
+          view.started &&
           (!view.paused || next.enabled === true || next.automatic === true)
           ? "sync"
           : null,
@@ -191,9 +203,11 @@ export function CloudPanel({
     void run(async () => {
       await perform(name);
       setNotice(
-        ["start", "sync", "resume"].includes(name)
-          ? "Sync request confirmed. Indexing may still be in progress."
-          : "Cloud action confirmed.",
+        name === "retry_selection_removals"
+          ? "Removal retry requested. Waiting for remote verification."
+          : ["start", "sync", "resume"].includes(name)
+            ? "Sync request confirmed. Indexing may still be in progress."
+            : "Cloud action confirmed.",
       );
     });
   function manage(action: string, job?: Job) {
@@ -292,6 +306,20 @@ export function CloudPanel({
             <span>OpenAI index: {bytes(view.usage_bytes)}</span>
             <span>{view.retainedFiles} uploaded Files retained</span>
           </div>
+          {!!view.selectionRemovalPending && (
+            <p role="status">
+              {view.selectionRemovalPending} document index removals await
+              remote verification. Questions stay blocked until they finish.
+              Removals can run while uploads remain paused; restore the tested
+              original key or retry after a failure.
+              <button
+                disabled={busy || !view.enabled}
+                onClick={() => action("retry_selection_removals")}
+              >
+                Retry document removals
+              </button>
+            </p>
+          )}
           <p>
             Index: <code>{view.store_id ?? "Not created"}</code> · Created{" "}
             {date(view.created_at)} · Last verified/synced{" "}
@@ -423,7 +451,12 @@ export function CloudPanel({
               ))}
             </div>
             <button
-              disabled={(draft.enabled && !connectionReady) || selectionMissing}
+              disabled={
+                (draft.enabled &&
+                  !connectionReady &&
+                  !selectionReduction(view, draft)) ||
+                (selectionMissing && !selectionReduction(view, draft))
+              }
               onClick={() => review()}
             >
               Review cloud changes
@@ -539,7 +572,7 @@ export function CloudPanel({
           <p>
             {stopping === "project"
               ? "Turn off Cloud sync and permanently delete this project's vector store and uploaded Files. Re-enabling creates a fresh bucket and re-uploads selected versions. Completion is verified before success."
-              : "Turn off automatic cloud sync and pause queued work. You can still use Sync Now for a manual sync."}{" "}
+              : "Turn off automatic uploads and pause queued upload work. You can still use Sync Now for a manual sync. Already-confirmed document opt-out removals can finish while uploads stay paused."}{" "}
             {stopping === "automatic"
               ? "Cloud files and the index are kept. "
               : ""}
@@ -599,11 +632,13 @@ export function CloudPanel({
             association removals.
           </p>
           <p>
-            OpenAI retains Files and vector-store data until deleted. Detaching
-            an older version or deleting its index does not delete its
-            underlying File. API data is not used for model training by default.
-            Storage/processing charges may apply, and free storage allowances
-            are shared across your account.
+            Individual document opt-outs remove their index entries and retain
+            uploaded Files for re-selection. Turning project Cloud sync off
+            deletes its owned stores and uploaded Files. Document removals run
+            even while uploads stay paused and report success only after remote
+            absence is verified. API data is not used for model training by
+            default. Storage/processing charges may apply, and free storage
+            allowances are shared across your account.
           </p>
           <p>
             <CloudLink href="https://developers.openai.com/api/docs/guides/your-data">
@@ -634,9 +669,16 @@ export function CloudPanel({
                     token: plan.token,
                     consent: true,
                   });
-                  verifyCloudDraft(await load(), draft);
+                  const saved = await load();
+                  verifyCloudDraft(saved, draft);
                   dirty.current = false;
                   setPlan(null);
+                  if (saved.selectionRemovalPending && !afterReview) {
+                    setNotice(
+                      "Cloud selection saved. Document index removals are pending remote verification; uploads keep their current pause setting.",
+                    );
+                    return;
+                  }
                   if (afterReview && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
                     await perform(afterReview);
@@ -679,7 +721,7 @@ export function CloudPanel({
         >
           <p>
             {transition === "pause"
-              ? "Pause new uploads and AI requests. Local history and saved chats remain available; an already-sent request may finish."
+              ? "Pause new uploads and AI requests. Already-confirmed document opt-out removals can finish. Local history and saved chats remain available; an already-sent request may finish."
               : "Resume cloud syncing for the saved document selection and allow AI questions when the current versions are indexed. API charges may apply."}
           </p>
           {error && <p role="alert">{error}</p>}
@@ -774,8 +816,10 @@ export function CloudPanel({
           )}
           <h3>Known cloud versions</h3>
           <p>
-            Removed associations are excluded from future automatic sync. Files
-            are separate retained resources. Failed/uncertain rows require
+            Individually removed versions stay excluded from automatic sync.
+            Families unchecked in Project cloud selection can be selected again
+            to restore their index entries. Uploaded Files remain separate
+            resources until project cleanup. Failed/uncertain rows require
             reconciliation.
           </p>
           {view.jobs.map((job) => (

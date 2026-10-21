@@ -107,7 +107,7 @@ fn upload(db: &Connection, root: &Path, p: &Value, j: &Value, api: &dyn CloudApi
     let jid = s(j, "id");
     let v = cloud::version(db, s(j, "version_id")).map_err(local)?;
     let bytes = cloud::verified(root, &v, n(p, "soft_limit")).map_err(local)?;
-    if s(j, "state") == "pending" {
+    if s(j, "state") == "pending" && s(j, "phase") != "recover" {
         execute(
             db,
             "UPDATE cloud_jobs SET state='uploading',phase='recover' WHERE id=?1",
@@ -232,11 +232,23 @@ fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     if !file.is_empty() {
         if let Some(v) = association(api, store, file)? {
             owns_association(&v, &identity(db, p, j)?, store)?;
-            api.request(
+            match api.request(
                 "DELETE",
                 &format!("/vector_stores/{store}/files/{file}"),
                 None,
-            )?;
+            ) {
+                Ok(receipt) if receipt["deleted"] == true => {}
+                Err(e) if e.missing => {}
+                Err(e) => return Err(e),
+                Ok(_) => {
+                    return Err(ApiError::local(
+                        "OpenAI did not confirm index-entry deletion. Removal remains pending.",
+                    ))
+                }
+            }
+            if association(api, store, file)?.is_some() {
+                return Err(ApiError::local("The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."));
+            }
         }
     }
     execute(db,"UPDATE cloud_jobs SET state='removed',association_status=NULL,remote_current=NULL,error=NULL,next_at=0 WHERE id=?1",&[&s(j,"id")])?;
@@ -281,6 +293,49 @@ pub fn step(
     key_scope: &str,
 ) -> Result<()> {
     let p = cloud::project(db, id)?;
+    // Saved document opt-outs can only GET/DELETE their owned associations, including
+    // while ordinary uploads are paused or the source folder is unavailable.
+    if n(&p, "enabled") == 1
+        && s(&p, "scope") == key_scope
+        && !["cleanup_pending", "cleanup_failed"].contains(&s(&p, "status"))
+        && n(&p, "next_at") <= chrono::Utc::now().timestamp()
+    {
+        if let Some(job) = cloud::selection_removals(db, id)?.first() {
+            let result=match cloud::owned_store(api,db,&p) {
+                Ok(_)=>detach(db,&p,job,api),
+                Err(e) if e.missing=>execute(db,"UPDATE cloud_jobs SET state='removed',association_status=NULL,remote_current=NULL,error=NULL,next_at=0 WHERE id=?1",&[&s(job,"id")]),
+                Err(e)=>Err(e),
+            };
+            // Whole-project Off persists its stop intent before waiting for the
+            // HTTP gate. A late opt-out result must not overwrite that decision.
+            let Ok(current) = cloud::project(db, id) else {
+                return Ok(());
+            };
+            if n(&current, "enabled") != 1
+                || n(&current, "revision") != n(&p, "revision")
+                || ["cleanup_pending", "cleanup_failed"].contains(&s(&current, "status"))
+            {
+                return Ok(());
+            }
+            match result {
+                Ok(()) => {
+                    db.execute("UPDATE cloud_projects SET status=CASE WHEN paused=1 THEN 'paused' ELSE 'queued' END,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",[id]).map_err(error)?;
+                }
+                Err(e) => {
+                    db.execute(
+                        "UPDATE cloud_jobs SET error=?2 WHERE id=?1",
+                        params![s(job, "id"), e.message],
+                    )
+                    .map_err(error)?;
+                    db.execute("UPDATE cloud_projects SET status='selection_removal_failed',error=?2,next_at=?3 WHERE project_id=?1",params![id,format!("Document removal incomplete. Remote references retained for retry. {}",e.message),i64::MAX]).map_err(error)?;
+                }
+            }
+            return Ok(());
+        }
+    }
+    if n(&p, "delete_requested") != 1 {
+        crate::folder_recovery::require_ready(db, id)?;
+    }
     if n(&p, "enabled") != 1
         || s(&p, "scope") != key_scope
         || (n(&p, "paused") == 1 && n(&p, "delete_requested") != 1)
@@ -291,6 +346,9 @@ pub fn step(
         return Ok(());
     }
     let result = (|| -> ApiResult<()> {
+        if n(&p, "delete_requested") != 1 {
+            cloud::desired(db, id, &cloud::draft(db, &p).map_err(local)?).map_err(local)?;
+        }
         if s(&p, "store_id").is_empty() {
             return create_store(db, &p, api);
         }
@@ -495,6 +553,10 @@ fn search_impl(
     bound: &str,
     current_only: bool,
 ) -> Result<Value> {
+    crate::folder_recovery::require_ready(db, id)?;
+    if !cloud::selection_removals(db, id)?.is_empty() {
+        return Err("Document opt-out removals are not yet verified. Finish or retry them before searching.".into());
+    }
     let p = cloud::project(db, id)?;
     if n(&p, "enabled") != 1 || n(&p, "paused") == 1 || s(&p, "scope") != bound {
         return Err("Enable/resume this project and verify the saved key first.".into());

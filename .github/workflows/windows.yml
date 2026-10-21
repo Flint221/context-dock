@@ -1,7 +1,7 @@
 name: Windows installer
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main, 'codex/**', milestone-6]
     tags: ['v*']
   pull_request:
     branches: [main]

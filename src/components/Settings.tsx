@@ -19,6 +19,10 @@ export function SettingsView({
         <div>
           <h2>Appearance</h2>
           <p>Choose a theme for your workspace.</p>
+          <p className="motion-preference">
+            Animations follow your Windows reduced-motion preference. Progress
+            and keyboard focus stay visible with motion turned off.
+          </p>
           <label>
             Theme
             <select
@@ -37,7 +41,7 @@ export function SettingsView({
         <ShieldCheck size={23} />
         <div>
           <h2>About ContextDock</h2>
-          <p>Version {version} · Milestone 5</p>
+          <p>Version {version} · Milestone 6</p>
           <p>
             Discovery reads file metadata. Opt-in tracking captures immutable
             local snapshots. Separately enabled archival preserves older sources

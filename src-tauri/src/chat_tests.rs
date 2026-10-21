@@ -290,7 +290,7 @@ fn chat_migration_preserves_cloud_mapping_snapshots_and_approved_baselines() {
     let baseline=crate::ai::approve(&mut f.r,&f.p,&json!({"approve":true,"title":"Original","content":{"purpose":"Offline MVP","goals":"","requirements":"","nonGoals":"","constraints":"","deliverables":"","principles":""}})).unwrap();
     f.r.db
         .execute_batch(
-            "DROP TABLE project_chat_turns; DROP TABLE project_chats; PRAGMA user_version=4;",
+            "DROP TABLE project_chat_turns; DROP TABLE project_chats; ALTER TABLE projects DROP COLUMN folder_state; ALTER TABLE projects DROP COLUMN folder_identity; ALTER TABLE projects DROP COLUMN folder_revision; PRAGMA user_version=4;",
         )
         .unwrap();
     let r = Registry::open(&f.r.store.join("test.db")).unwrap();

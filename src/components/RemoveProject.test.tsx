@@ -11,12 +11,27 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { RemoveProject } from "./RemoveProject";
 import { cloud, type CloudView } from "../cloud";
 import { registry } from "../services/registry";
+import type { Project } from "../types";
 vi.mock("../cloud", () => ({ cloud: { view: vi.fn(), action: vi.fn() } }));
 vi.mock("../services/registry", () => ({
   registry: { remove: vi.fn(), snapshot: vi.fn() },
 }));
 let view: CloudView;
-const project = { id: "p1", name: "Test project" };
+const project: Project = {
+  id: "p1",
+  name: "Test project",
+  path: "C:\\Fixtures\\Test project",
+  createdAt: "2026-10-20T12:00:00Z",
+  status: "available",
+  lastScan: null,
+  scanError: null,
+  documentCount: 0,
+  latestModified: null,
+  trackingEnabled: false,
+  archiveEnabled: false,
+  trackingRevision: 0,
+  folderState: "ready",
+};
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(cloud.action).mockResolvedValue(undefined);
@@ -50,6 +65,44 @@ function cleared() {
     jobs: [],
   };
 }
+it("closes after verified removal and hands the same snapshot to the workspace", async () => {
+  const user = userEvent.setup();
+  const close = vi.fn();
+  const removed = vi.fn();
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    cleared();
+  });
+  const snapshot = { projects: [], documents: [], theme: "system" as const };
+  vi.mocked(registry.snapshot).mockResolvedValue(snapshot);
+  render(<RemoveProject project={project} close={close} removed={removed} />);
+  const confirm = await screen.findByRole("button", { name: "Remove project" });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(removed).toHaveBeenCalledExactlyOnceWith(snapshot);
+  expect(registry.snapshot).toHaveBeenCalledOnce();
+});
+it("keeps the dialog open if the removal readback still contains the project", async () => {
+  const user = userEvent.setup();
+  const close = vi.fn();
+  const removed = vi.fn();
+  cleared();
+  vi.mocked(registry.snapshot).mockResolvedValue({
+    projects: [project],
+    documents: [],
+    theme: "system",
+  });
+  render(<RemoveProject project={project} close={close} removed={removed} />);
+  const confirm = await screen.findByRole("button", { name: "Remove project" });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Project removal could not be verified",
+  );
+  expect(close).not.toHaveBeenCalled();
+  expect(removed).not.toHaveBeenCalled();
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+});
 it("defaults to deleting cloud data and guards clicks through cleanup verification before removal", async () => {
   const close = vi.fn(),
     removed = vi.fn();

@@ -1,9 +1,53 @@
 # ContextDock
 
-ContextDock 0.5.4 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.6.4 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 
-## Ask project (0.5.4)
+## Simplified local previews and final polish (0.6.4)
+
+**Current processes** now opens in **Local previews** mode by default. Compact cards show likely local frontend/web servers with their URLs, **Preview**, **Copy URL**, **Stop app**, and a reviewed **Stop all previews** action. System services, UDP, common database/debug ports and unrelated background listeners are hidden from this view. Ordinary dual-stack localhost bindings are grouped to reduce duplicates. **Advanced processes** restores the complete original inventory, filters, selections and startup diagnostics; switching views clears pending selections, and reopening the tab defaults to Local previews again.
+
+This is a display heuristic using verified current-user process eligibility, local TCP bindings, runtime names and common preview ports. It does not probe sites or claim every result speaks HTTP; unusual/custom servers may require Advanced processes. Stopping remains a confirmed whole-process action, with all existing identity/protection checks. Automated checks and local installer packaging pass; installed acceptance remains a user check.
+
+Small text is larger throughout the interface, with emphasized version values. Green indicates active/available/success states, amber indicates warnings or paused/review states, and red indicates errors/missing items and destructive actions. Status labels remain visible in both themes. Project removal closes its dialog and returns to All projects using the verified snapshot; older background reads cannot restore the removed card. Local source files, captured history, archives and chats remain retained, with cloud deletion controlled by the removal choice.
+
+The cloud-inside-folder logo is shared by the sidebar, browser favicon and native Windows assets. Edit `public/contextdock.svg` and run `npm run icons` to regenerate the tracked PNG/ICO files and `app-icon.png`; this command does not build an installer. Installed Windows icons update with the next installer.
+
+## Motion and feedback (0.6.3)
+
+Pages reveal from top to bottom with short, capped stagger delays. Buttons respond to hover/press, project cards lift gently, dialogs ease into view, and the sidebar clearly marks the active page. Primary Refresh/Sync actions are easier to find, regular buttons have at least 40-pixel targets, and compact process controls remain at least 34 pixels tall. Light and dark themes share the same visual hierarchy.
+
+Actions show animated progress tracks; unknown durations stay indeterminate. Cloud indexing uses actual indexed/pending/failed counts rather than a timer, so failures do not count as completion. Page navigation returns to the top, while ordinary registry/cloud updates preserve controls and do not replay page transitions. Optional automatic process refresh is quiet to avoid repeatedly shifting the list. Motion follows the operating system's reduced-motion preference, retaining static progress, visible focus and all actions. No animation library, new background timer, preference or schema migration was added. See the [motion walkthrough](docs/manual-testing-motion.md).
+
+## Current processes (0.6.2)
+
+Open **Current processes** above Settings to inspect Windows TCP listeners and UDP bound endpoints across IPv4/IPv6 and all interfaces. Search names, PIDs, paths or ports, filter protocol/interface, or switch to **User apps and listeners** to include eligible apps without listening ports. Each row shows the executable, PID, parent PID, start time and endpoints. **Preview** opens local TCP listeners in the default browser; **Use HTTPS for previews** switches the scheme. Not every TCP listener is a website. Copy endpoints or process details for troubleshooting.
+
+**Stop**, **Stop selected**, and **Stop all shown** review the exact owning processes before force termination. Bulk actions use the current filters across all pages and exclude protected processes. Stopping an owner closes all its ports and can lose unsaved work. ContextDock, its ancestors/helpers, Windows system processes, services and other sessions are protected; Windows may refuse other targets. Creation times are verified to avoid stopping a replacement process with a reused PID. Each result distinguishes confirmed exit from failure or unconfirmed termination. Child processes are not automatically stopped. No process is classified or stopped automatically as "lingering."
+
+Refresh is manual by default. Optional five-second polling stops when unchecked, while a stop review is open, when the page is hidden, or when navigating away. Preview HTTPS and selections are temporary controls that can be reversed; reopening the tab resets them. **Inspect startup entries** reads Run/RunOnce registrations and Startup folder item names; an entry may be disabled in Windows and is not proof of what launched an app. **Windows Startup apps** opens the system settings. Stopping a process does not disable startup, scheduled tasks, services or parent-app relaunching. This feature runs locally without a cloud key, elevation, persisted inventory or a new background service.
+
+See the [process diagnostics test walkthrough](docs/manual-testing-processes.md).
+
+## Moved or missing project folders (Milestone 6)
+
+Move or rename a project folder in Explorer, then open its existing ContextDock project and choose **Reassign folder**. Select the project folder at its new location, review the known/unchanged/changed/additional documents and exact missing paths, confirm the folder belongs to this project, then **Confirm reassignment**. The project ID, document histories, snapshots, saved chats, cloud mappings and tracking/archival preferences are retained. Reassignment changes the registration; it does not move files or combine registrations.
+
+Missing, inaccessible or replaced roots show **Folder lost — please reassign it**. This state persists across closing/reopening the app and stops project tracking and new cloud/AI work until explicit reassignment. Restoring the original location still requires selecting it through Reassign folder. Other projects, navigation and app shutdown remain available. Folder health is checked even with tracking off; a different directory occupying the old path is detected using its filesystem identity.
+
+Missing individual files remain listed with their original history. Restore them and **Refresh documents**. Selected missing/inaccessible files block syncing and new questions; saved chats remain readable once the folder is reassigned. After reassignment, opted-in tracking rechecks the new root; questions wait for local reconciliation and any changed versions to finish indexing. An already-sent network request may finish. Invalid/unreadable destinations, links/junctions, app-storage overlap, other current/retained project roots and stale reviews fail visibly. An empty or incorrect parent folder lists every known file as missing; review carefully before confirming.
+
+See the [Milestone 6 folder recovery walkthrough](docs/manual-testing-milestone-6.md). Schema 006 upgrades existing databases in place; do not downgrade to a pre-0.6.0 build afterward.
+
+## Changing your cloud selection (0.6.1)
+
+Unchecking a document family under **Advanced cloud settings** reviews and saves an explicit opt-out. All its indexed captures are removed from this project's store before unrelated uploads, including while uploads remain paused. Each removal checks ownership, the deletion receipt and remote absence; failures retain identifiers and show **Retry document removals**. New questions stay blocked until removals are verified. Pure deselection can be saved even if sources or the tested key are temporarily unavailable; actual cleanup still needs the authorized original account/key.
+
+Selecting the family again restores the captures allowed by the saved current/full-history policy in the same project store, reusing retained uploads. A previously removed individual version keeps its separate explicit exclusion. Turning **Cloud sync off** deletes all stores and uploads owned by this installation/project, including older owned stores. Re-enabling creates a fresh owned store and uploads the saved selection. An empty or ineligible saved selection requires review; the app does not silently select other documents.
+
+**Pause** and **automatic sync off** stop new upload work and retain cloud data; previously confirmed document removals may finish. Local tracking and archival have their own controls and retain captured history when stopped. See the [complete toggle/reversal audit and acceptance checks](docs/toggle-audit.md).
+
+## Ask project (0.6.1)
 
 Enter sends; Shift+Enter adds a new line. Sources show the original filename and capture number without passage previews. Follow-ups include up to six recent completed exchanges, bounded to 12,000 UTF-8 bytes; older messages stay saved locally.
 
@@ -35,7 +79,7 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.5.4_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 5; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run `ContextDock_0.6.3_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 6; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
 5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
@@ -129,8 +173,8 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.5.4_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.3_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
-See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 now presents simple cloud-backed questions and local chats; earlier analysis/baseline records are retained. Milestone 6 remains future production hardening: signing, storage management and automatic update delivery.
+See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 now presents simple cloud-backed questions and local chats; earlier analysis/baseline records are retained. Milestone 6 begins with persistent folder recovery and safe reassignment. Signing, storage management and automatic update delivery remain future work.

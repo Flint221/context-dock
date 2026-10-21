@@ -11,6 +11,17 @@ export interface Project {
   trackingEnabled: boolean;
   archiveEnabled: boolean;
   trackingRevision: number;
+  folderState: "ready" | "needs_reassignment";
+}
+export interface FolderPlan {
+  path: string;
+  previousPath: string;
+  found: number;
+  unchanged: number;
+  changed: number;
+  missing: string[];
+  additional: number;
+  token: string;
 }
 export interface Document {
   id: string;

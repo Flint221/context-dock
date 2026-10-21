@@ -107,7 +107,7 @@ fn run(f: &Fixture, request: &Request, api: &Mock) -> Value {
 fn ai_migration_preserves_schema_three_entities_cloud_settings_and_snapshots() {
     let mut f = Fixture::new();
     let req = f.pair();
-    f.r.db.execute_batch("DROP TRIGGER ai_baseline_immutable; DROP TRIGGER ai_baseline_retained; DROP TABLE ai_decisions; DROP TABLE ai_reports; DROP TABLE ai_current_baseline; DROP TABLE ai_baselines; PRAGMA user_version=3;").unwrap();
+    f.r.db.execute_batch("DROP TRIGGER ai_baseline_immutable; DROP TRIGGER ai_baseline_retained; DROP TABLE ai_decisions; DROP TABLE ai_reports; DROP TABLE ai_current_baseline; DROP TABLE ai_baselines; ALTER TABLE projects DROP COLUMN folder_state; ALTER TABLE projects DROP COLUMN folder_identity; ALTER TABLE projects DROP COLUMN folder_revision; PRAGMA user_version=3;").unwrap();
     f.r.db
         .execute(
             "UPDATE cloud_projects SET store_id='vs_synthetic',auto_sync=1 WHERE project_id=?1",

@@ -1,7 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Snapshot, Theme, TrackingView, Version } from "../types";
+import type {
+  Snapshot,
+  Theme,
+  TrackingView,
+  Version,
+  FolderPlan,
+} from "../types";
 import type { Comparison } from "../comparison";
 export const registry = {
   compare: (earlier: string, later: string) =>
@@ -35,6 +41,10 @@ export const registry = {
     invoke<string>("add_project", { name, path }),
   rename: (id: string, name: string) =>
     invoke<void>("rename_project", { id, name }),
+  previewFolder: (id: string, path: string) =>
+    invoke<FolderPlan>("preview_project_folder", { id, path }),
+  reassignFolder: (id: string, path: string, token: string) =>
+    invoke<void>("reassign_project_folder", { id, path, token }),
   remove: (id: string, retainCloud = false) =>
     invoke<void>("remove_project", { id, retainCloud }),
   refresh: (id: string) => invoke<void>("refresh_project", { id }),
