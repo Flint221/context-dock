@@ -187,3 +187,47 @@ it("retries local removal after successful cleanup without requesting stale clou
   await waitFor(() => expect(removed).toHaveBeenCalledOnce());
   expect(cloud.action).toHaveBeenCalledOnce();
 });
+it("closes and removes after verified cleanup even when the command reply was lost", async () => {
+  const user = userEvent.setup();
+  const close = vi.fn();
+  const removed = vi.fn();
+  vi.mocked(cloud.action).mockImplementation(async () => {
+    cleared();
+    throw new Error("Cleanup reply interrupted");
+  });
+  render(<RemoveProject project={project} close={close} removed={removed} />);
+  const confirm = await screen.findByRole("button", { name: "Remove project" });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", false);
+  expect(removed).toHaveBeenCalledOnce();
+});
+it("retains an incomplete cleanup for retry, then closes after cloud and registration removal verify", async () => {
+  const user = userEvent.setup();
+  const close = vi.fn();
+  const removed = vi.fn();
+  vi.mocked(cloud.action)
+    .mockImplementationOnce(async () => {
+      view.status = "cleanup_failed";
+      throw new Error(
+        "Could not delete uploaded File: request rejected (HTTP 400)",
+      );
+    })
+    .mockImplementationOnce(async () => {
+      cleared();
+    });
+  render(<RemoveProject project={project} close={close} removed={removed} />);
+  const confirm = await screen.findByRole("button", { name: "Remove project" });
+  await waitFor(() => expect(confirm).toBeEnabled());
+  await user.click(confirm);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Could not delete uploaded File",
+  );
+  expect(registry.remove).not.toHaveBeenCalled();
+  expect(close).not.toHaveBeenCalled();
+  await user.click(confirm);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", false);
+  expect(removed).toHaveBeenCalledOnce();
+});

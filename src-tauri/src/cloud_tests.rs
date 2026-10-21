@@ -25,6 +25,8 @@ struct Remote {
     ignore_association_delete: bool,
     bad_association_receipt: bool,
     extra_stores: Vec<Value>,
+    deny_file_content: bool,
+    vanish_store_on_listing: bool,
 }
 #[derive(Default)]
 struct Mock(RefCell<Remote>);
@@ -92,6 +94,11 @@ impl CloudApi for Mock {
             return Ok(r.extra_stores[index].clone());
         }
         if path.starts_with("/vector_stores/vs_test/files?") {
+            if r.vanish_store_on_listing {
+                r.store = None;
+                r.associations.clear();
+                return Err(missing());
+            }
             return Ok(json!({"data":r.associations,"has_more":false}));
         }
         if path == "/vector_stores/vs_test/files" && method == "POST" {
@@ -161,6 +168,9 @@ impl CloudApi for Mock {
         Ok(file)
     }
     fn content(&self, id: &str) -> std::result::Result<Vec<u8>, ApiError> {
+        if self.0.borrow().deny_file_content {
+            return Err(ApiError::local("OpenAI rejected this file or request. Check supported type, size and account limits."));
+        }
         self.0
             .borrow()
             .files
@@ -1689,6 +1699,107 @@ fn cleanup_confirm(f: &Fixture) -> Value {
     json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]})
 }
 #[test]
+fn project_removal_handles_missing_resources_without_downloading_assistants_files() {
+    for absent in ["none", "store", "all"] {
+        let mut f = Fixture::new();
+        let api = Mock::default();
+        f.enable();
+        f.sync(&api);
+        let original = fs::read(f.root.join("Master_Context.md")).unwrap();
+        let chat = crate::chat::create(&f.r, &f.id).unwrap();
+        {
+            let mut remote = api.0.borrow_mut();
+            remote.deny_file_content = true;
+            if absent != "none" {
+                remote.store = None;
+                remote.associations.clear();
+            }
+            if absent == "all" {
+                remote.files.clear();
+            }
+            remote.calls.clear();
+        }
+        cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+        cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+        f.r.remove_with_cloud_choice(&f.id, false).unwrap();
+        assert!(api.0.borrow().store.is_none());
+        assert!(api.0.borrow().files.is_empty());
+        assert!(f.r.snapshot().unwrap().projects.is_empty());
+        assert!(Registry::open(&f.r.store.join("test.db"))
+            .unwrap()
+            .snapshot()
+            .unwrap()
+            .projects
+            .is_empty());
+        assert_eq!(
+            fs::read(f.root.join("Master_Context.md")).unwrap(),
+            original
+        );
+        assert_eq!(
+            cloud::rows(
+                &f.r.db,
+                "SELECT id FROM document_versions WHERE document_id=?1",
+                &[&f.doc]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        assert_eq!(
+            cloud::rows(
+                &f.r.db,
+                "SELECT id FROM project_chats WHERE id=?1",
+                &[&s(&chat, "id")]
+            )
+            .unwrap()
+            .len(),
+            1
+        );
+        if absent == "all" {
+            assert!(!api.0.borrow().calls.iter().any(|c| c.starts_with("DELETE")));
+        }
+    }
+}
+#[test]
+fn cleanup_handles_store_disappearing_between_inventory_and_reference_check() {
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    api.0.borrow_mut().vanish_store_on_listing = true;
+    cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+    cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
+    assert!(api.0.borrow().store.is_none());
+    assert!(api.0.borrow().files.is_empty());
+    assert!(f.jobs().is_empty());
+}
+#[test]
+fn cleanup_refuses_mismatched_file_identity_without_any_delete() {
+    for (field, value) in [
+        ("id", json!("file-foreign")),
+        ("filename", json!("unrelated.md")),
+        ("bytes", json!(9999)),
+        ("purpose", json!("fine-tune")),
+    ] {
+        let mut f = Fixture::new();
+        let api = Mock::default();
+        f.enable();
+        f.sync(&api);
+        api.0.borrow_mut().files[0].0[field] = value;
+        cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
+        assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound")
+            .unwrap_err()
+            .contains("ownership"));
+        assert!(!api
+            .0
+            .borrow()
+            .calls
+            .iter()
+            .any(|call| call.starts_with("DELETE")));
+        assert!(!f.r.snapshot().unwrap().projects.is_empty());
+    }
+}
+#[test]
 fn explicit_cloud_cleanup_deletes_bucket_and_uploads_then_reenable_uploads_fresh() {
     let mut f = Fixture::new();
     let api = Mock::default();
@@ -1754,7 +1865,7 @@ fn acknowledged_but_unfinished_cloud_deletion_retains_references_and_can_retry()
     assert!(api.0.borrow().files.is_empty());
 }
 #[test]
-fn cleanup_checks_shared_references_integrity_scope_and_confirmation_before_deleting() {
+fn cleanup_checks_shared_references_metadata_scope_and_confirmation_before_deleting() {
     let mut f = Fixture::new();
     let api = Mock::default();
     f.enable();
@@ -1770,11 +1881,11 @@ fn cleanup_checks_shared_references_integrity_scope_and_confirmation_before_dele
         .contains("Another vector store"));
     assert!(!api.0.borrow().calls.iter().any(|c| c.starts_with("DELETE")));
     api.0.borrow_mut().shared_file = false;
-    api.0.borrow_mut().files[0].1 = b"tampered".to_vec();
+    api.0.borrow_mut().files[0].0["bytes"] = json!(9999);
     cloud_cleanup::begin(&f.r.db, &f.id, &cleanup_confirm(&f)).unwrap();
     assert!(cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound")
         .unwrap_err()
-        .contains("integrity"));
+        .contains("ownership"));
     assert!(!api.0.borrow().calls.iter().any(|c| c.starts_with("DELETE")));
 }
 #[test]

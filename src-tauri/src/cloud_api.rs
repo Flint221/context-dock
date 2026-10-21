@@ -108,7 +108,7 @@ impl OpenAi {
                 .clamp(0, 3600);
             let message = match status {401=>"OpenAI rejected the API key. Replace or test the saved key.",403=>"This key does not have permission for this OpenAI resource.",404=>"The remote resource is missing or inaccessible. Reconcile the project.",429=>"OpenAI rate or quota limit reached. Check billing; retry after the delay.",400|413|422=>"OpenAI rejected this file or request. Check supported type, size and account limits.",_=>"OpenAI returned an error. Reconcile interrupted operations before retrying."};
             return Err(ApiError {
-                message: message.into(),
+                message: format!("{message} (HTTP {status})"),
                 retry: status == 429 || (!mutation && status >= 500),
                 ambiguous: mutation && status >= 500,
                 missing: status == 404,

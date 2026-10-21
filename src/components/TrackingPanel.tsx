@@ -279,7 +279,7 @@ export function TrackingPanel({
             </p>
           )}
           {view.error && (
-            <div className="banner warning">
+            <div role="alert" className="banner error">
               <span>{view.error}</span>
             </div>
           )}
@@ -447,7 +447,7 @@ export function TrackingPanel({
                   <strong>
                     {op.kind} · {op.state}
                   </strong>
-                  <p>
+                  <p className={op.error ? "error" : undefined}>
                     {op.error || "Awaiting completion or project permission."}
                   </p>
                   <small>{date(op.createdAt)}</small>

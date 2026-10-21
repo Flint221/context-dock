@@ -759,7 +759,11 @@ header {
 .banner button {
   margin-left: auto;
 }
-.error {
+.error,
+[role="alert"],
+[role="alert"] > p,
+[role="alert"] > small,
+[role="alert"] > span {
   color: var(--error);
 }
 .warning {

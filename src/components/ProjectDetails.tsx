@@ -77,7 +77,7 @@ export function ProjectDetails({
         </section>
       </details>
       {project.scanError && !folderLost && (
-        <div className="banner warning">
+        <div role="alert" className="banner error">
           <AlertTriangle size={18} />
           <span>{project.scanError}</span>
         </div>

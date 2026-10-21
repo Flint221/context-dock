@@ -260,7 +260,11 @@ export function CloudPanel({
         message="Applying and checking cloud settings… Local tracking remains available."
         success={notice}
       />
-      {view?.error && <p role="status">{view.error}</p>}
+      {view?.error && (
+        <p role="status" className="error">
+          {view.error}
+        </p>
+      )}
       {view && !view.enabled && !view.started && (
         <div className="cloud-setup">
           <p>
@@ -831,7 +835,7 @@ export function CloudPanel({
                 Raw {bytes(job.rawBytes)} · indexed {bytes(job.usage_bytes)} ·{" "}
                 <code>{job.file_id ?? "No confirmed File ID"}</code>
               </p>
-              {job.error && <p>{job.error}</p>}
+              {job.error && <p className="error">{job.error}</p>}
               <div className="cloud-actions">
                 {["failed", "uncertain", "uploaded"].includes(job.state) && (
                   <button

@@ -6,7 +6,6 @@ use crate::{
 };
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 
 pub fn has_remote(db: &Connection, p: &Value) -> Result<bool> {
@@ -38,7 +37,7 @@ pub fn begin(db: &Connection, id: &str, payload: &Value) -> Result<()> {
 fn absent(api: &dyn CloudApi, path: &str) -> Result<()> {
     match api.request("GET",path,None) {
         Err(e) if e.missing => Ok(()),
-        Err(e) => Err(e.message),
+        Err(e) => Err(format!("Could not verify cloud resource absence: {}", e.message)),
         Ok(_) => Err("OpenAI still reports the resource exists. Cloud cleanup is incomplete; retry deletion.".into()),
     }
 }
@@ -46,7 +45,17 @@ fn erase(api: &dyn CloudApi, path: &str) -> Result<()> {
     match api.request("DELETE", path, None) {
         Ok(receipt) if receipt["deleted"] == true => {}
         Err(e) if e.missing => {}
-        Err(e) => return Err(e.message),
+        Err(e) => {
+            return Err(format!(
+                "Could not delete {}: {}",
+                if path.starts_with("/vector_stores/") {
+                    "vector store"
+                } else {
+                    "uploaded File"
+                },
+                e.message
+            ))
+        }
         Ok(_) => {
             return Err("OpenAI did not confirm deletion. Cloud cleanup is incomplete.".into())
         }
@@ -90,7 +99,8 @@ fn erase_owned(db: &mut Connection, id: &str, api: &dyn CloudApi, scope: &str) -
     }
     let install = cloud::install(db)?;
     let jobs = cloud::jobs(db, id)?;
-    let stores = cloud_api::list(api, "/vector_stores").map_err(|e| e.message)?;
+    let stores = cloud_api::list(api, "/vector_stores")
+        .map_err(|e| format!("Could not list vector stores during cleanup: {}", e.message))?;
     let mut owned: HashSet<String> = stores
         .iter()
         .filter(|v| v["metadata"]["contextdock"] == install && v["metadata"]["project"] == id)
@@ -101,12 +111,24 @@ fn erase_owned(db: &mut Connection, id: &str, api: &dyn CloudApi, scope: &str) -
             Ok(_) => {
                 owned.insert(s(&p, "store_id").into());
             }
-            Err(e) if e.missing => {}
-            Err(e) => return Err(e.message),
+            Err(e) if e.missing => {
+                owned.remove(s(&p, "store_id"));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Could not verify the project vector store: {}",
+                    e.message
+                ))
+            }
         }
     }
     // Recover uploads whose HTTP response was lost by their exact app-generated job filename.
-    let remote_files = cloud_api::list(api, "/files").map_err(|e| e.message)?;
+    let remote_files = cloud_api::list(api, "/files").map_err(|e| {
+        format!(
+            "Could not list uploaded Files during cleanup: {}",
+            e.message
+        )
+    })?;
     let mut files = Vec::new();
     for remote in remote_files {
         if let Some(job) = jobs.iter().find(|j| {
@@ -115,15 +137,30 @@ fn erase_owned(db: &mut Connection, id: &str, api: &dyn CloudApi, scope: &str) -
         }) {
             let file = s(&remote, "id");
             cloud_api::valid_id(file, "file").map_err(|e| e.message)?;
-            if s(job, "remote_name") != s(&remote, "filename")
-                || n(job, "rawBytes") != n(&remote, "bytes")
+            let metadata = match api.request("GET", &format!("/files/{file}"), None) {
+                Ok(metadata) => metadata,
+                Err(e) if e.missing => continue,
+                Err(e) => {
+                    return Err(format!(
+                        "Could not verify uploaded File metadata: {}",
+                        e.message
+                    ))
+                }
+            };
+            let version = cloud::version(db, s(job, "version_id"))?;
+            let ext = if version.kind == "word" { "docx" } else { "md" };
+            let expected = format!("cd_{install}_{id}_{}_{}.{ext}", version.id, s(job, "id"));
+            // Assistants-purpose uploads cannot reliably be downloaded. Their
+            // immutable identity is the scoped upload journal, opaque job name,
+            // File ID (when acknowledged), byte count and purpose, not a content GET.
+            if s(job, "remote_name") != expected
+                || s(&metadata, "id") != file
+                || (!s(job, "file_id").is_empty() && s(job, "file_id") != file)
+                || s(&metadata, "filename") != expected
+                || n(&metadata, "bytes") != version.size
+                || s(&metadata, "purpose") != "assistants"
             {
                 return Err("Uploaded File ownership mismatch. No cloud data was deleted.".into());
-            }
-            let bytes = api.content(file).map_err(|e| e.message)?;
-            let version = cloud::version(db, s(job, "version_id"))?;
-            if format!("{:x}", Sha256::digest(bytes)) != version.hash {
-                return Err("Uploaded File integrity mismatch. No cloud data was deleted.".into());
             }
             files.push(file.to_string());
         }
@@ -139,8 +176,19 @@ fn erase_owned(db: &mut Connection, id: &str, api: &dyn CloudApi, scope: &str) -
     for store in &stores {
         let store_id = s(store, "id");
         cloud_api::valid_id(store_id, "vs_").map_err(|e| e.message)?;
-        let associations = cloud_api::list(api, &format!("/vector_stores/{store_id}/files"))
-            .map_err(|e| e.message)?;
+        let associations = match cloud_api::list(api, &format!("/vector_stores/{store_id}/files")) {
+            Ok(associations) => associations,
+            Err(e) if e.missing => {
+                owned.remove(store_id);
+                continue;
+            }
+            Err(e) => {
+                return Err(format!(
+                    "Could not check vector store references: {}",
+                    e.message
+                ))
+            }
+        };
         if owned.contains(store_id) {
             for a in &associations {
                 if a["attributes"]["contextdock"] != install

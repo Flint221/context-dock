@@ -46,10 +46,21 @@ export function RemoveProject({
     setError("");
     try {
       if (!retain && hasCloudData(view)) {
-        await cloud.action(project.id, "delete_cloud", cleanupPayload(view));
+        let deletionError: unknown;
+        try {
+          await cloud.action(project.id, "delete_cloud", cleanupPayload(view));
+        } catch (e) {
+          deletionError = e;
+        }
+        // A command reply can be lost after deletion completed. Only the saved
+        // verified state can establish success; an error alone cannot do so.
         const cleared = await cloud.view(project.id);
-        verifyCloudDeleted(cleared);
         setView(cleared);
+        try {
+          verifyCloudDeleted(cleared);
+        } catch (e) {
+          throw deletionError ?? e;
+        }
       }
       await registry.remove(project.id, retain);
       const snapshot = await registry.snapshot();
