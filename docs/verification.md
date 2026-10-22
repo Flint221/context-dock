@@ -1,3 +1,15 @@
+# 0.9.1 - Filename versions and same-version cloud updates
+
+Local release checks passed: **206 native tests**, one existing intentionally ignored child fixture, and **138 frontend tests across 16 files**. TypeScript, ESLint, all-target Clippy with warnings denied, rustfmt, diff whitespace checks, production frontend compilation and Windows x64 NSIS packaging passed. Version/lockfile/config values agree at 0.9.1. Schema is now 011; application identity is unchanged.
+
+Feature commit `ce92599` is pushed to main. The implementation distinguishes authored filename versions from immutable save revisions, publishes the latest revision per filename version and keeps edited content current in both cloud policies. Regression coverage includes repeated Markdown/Word saves, timestamp-only changes, restart, identical-content filename bumps, content undo without changing authored version, lower-suffix review, valid DOCX media-only updates in both cloud modes, schema-10 metadata/cloud/snapshot preservation, migration rollback on invalid references and UI labels for high revision counters. See [filename-version behavior and acceptance checks](ContextDock_Filename_Versions_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.9.1_x64-setup.exe`, **4,499,350 bytes**, SHA-256 `572E25871A98E523A53E15F173B235CE11E4AF76C640E0A43CC4BCF3F1D80926`. File/product version is 0.9.1; the application binary PE machine is 8664 (x64). The artifact was built from pushed main and was not installed or launched against user data. No actual project files, application databases, backups, credentials or remote resources were changed by this implementation/testing. Existing projects are migrated, not reset; older schema-10 readers reject schema 011.
+
+The GitHub [Windows workflow for the feature commit](https://github.com/Flint221/context-dock/actions/runs/39857833951) was in progress when checked. The local results above are complete and do not claim a completed remote workflow or live provider acceptance.
+
+---
+
 # 0.9.0 - Project tabs, status overview and readable archives
 
 Local validation passed: **200 native tests**, one existing intentionally ignored child fixture, and **136 frontend tests across 16 files**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging passed. Package/lockfile, Cargo/lockfile and Tauri versions agree at 0.9.0. Schema 010 and application identity remain unchanged.
