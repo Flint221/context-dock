@@ -1,8 +1,18 @@
 # ContextDock
 
-ContextDock 0.6.5 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.7.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
-0.6.5 fixes project removal being blocked by a rejected uploaded-file download during cloud cleanup. Cleanup now verifies the scoped upload journal and file metadata without downloading the file, handles resources already absent or disappearing during cleanup, and retains deletion receipts/absence checks. The dialog also reads back verified cleanup after a lost command reply. Errors use red text throughout the interface; native API failures include HTTP status and cleanup-stage context. Install this version before retrying a removal that failed in 0.6.4.
+## Folder tree and saved exclusions (0.7.0)
+
+Open a project → **Folder structure and selection** to expand nested folders and choose folders or individual files. Checkboxes are drafts: **Save changes** applies them, and **Discard changes** restores the saved selection. Leaving the project or closing the app with a draft offers **Keep editing**, **Discard changes**, or **Save changes and continue**. A failed save keeps the draft open; closing during a save waits for its result.
+
+An excluded folder covers every descendant, including files discovered later, and survives restart. Selecting a parent again includes its descendants. Discovery still shows supported Markdown/Word files, including excluded files; saved exclusions stop new captures and exclude the affected versions from the project's cloud index. Local source files, snapshots, archives, version history and chats remain intact. Reassigning the project folder preserves relative exclusions.
+
+Saving removes affected cloud index associations before unrelated upload work and blocks new questions until removal is verified. Failed removals retain their identifiers and a retry action. Raw uploaded Files remain reusable under the existing retention policy. Including paths again follows the saved cloud selection/current-or-history policy without enabling tracking, enabling cloud sync, resuming paused uploads or overriding separate document/version opt-outs. Saved removals can finish while uploads are paused or cloud data was explicitly retained with sync off.
+
+See the [folder-selection acceptance walkthrough](docs/manual-testing-folder-selection.md). Schema 007 upgrades the registry in place and migrates legacy ignored-file choices; do not downgrade to an older application afterward.
+
+0.6.5 fixed project removal being blocked by a rejected uploaded-file download during cloud cleanup. Cleanup verifies the scoped upload journal and file metadata without downloading the file, handles resources already absent or disappearing during cleanup, and retains deletion receipts/absence checks. The dialog also reads back verified cleanup after a lost command reply. Errors use red text throughout the interface; native API failures include HTTP status and cleanup-stage context.
 
 
 ## Simplified local previews and final polish (0.6.4)
