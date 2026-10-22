@@ -179,11 +179,11 @@ Snapshots remain independent of installed executables and source folders. Back u
 Archive files live inside the registered project:
 
 ```text
-Old Context Files/<safe family name> - <document UUID>/
-  v1 - <safe original stem> - <operation UUID>.md
+Old Context Files/RAP Master Context/RAP_Master_Context_v5.md
+Old Context Files/RAP Master Context/Capture 3/RAP_Master_Context_v6.md
 ```
 
-UUID suffixes prevent collisions; exact original filenames remain in history metadata. Existing unrelated files in a pre-existing archive directory are preserved. `Old Context Files` is excluded case-insensitively from discovery and monitoring. Editing an archive cannot change its independent immutable snapshot; opening an edited archive location reports a hash conflict.
+Pending the next installer: new archives use readable family folders and keep exact original filenames, including author version numbers. Nested source folders are mirrored beneath `Old Context Files`. Snapshot copies use a `Capture N` subfolder to distinguish capture history from the filename's author version. Occupied or journal-reserved destinations use `Archive 2`, `Archive 3`, etc. subfolders without overwriting anything. Existing UUID archive receipts retain their recorded paths for safe recovery and restore. See [readable archive naming](docs/ContextDock_Archive_Names_v1.md). `Old Context Files` is excluded case-insensitively from discovery and monitoring. Editing an archive cannot change its independent immutable snapshot; opening an edited archive location reports a hash conflict.
 
 Unregistering hides the project and disables tracking/archival. It does **not** delete source files, archives, snapshots, or retained history metadata. Registering the same canonical folder again restores its stable project ID/history with tracking and archival off. No automatic archive/snapshot retention cleanup or storage-purge feature is implemented.
 

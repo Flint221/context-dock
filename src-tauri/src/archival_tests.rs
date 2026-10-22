@@ -80,6 +80,12 @@ fn archive_checkbox_round_trip_organizes_old_exports_and_restores_original_locat
     let review = f.r.archival_review(&f.project, true).unwrap();
     assert_eq!(review.items.len(), 2);
     assert!(review.items.iter().all(|i| i.problem.is_none()));
+    for item in &review.items {
+        assert_eq!(
+            item.to,
+            format!("Old Context Files/RAP Master Context/{}", item.from)
+        );
+    }
     assert!(f.root.join("RAP_Master_Context_v4.md").exists());
     assert!(!f.root.join("Old Context Files").exists());
     for _ in 0..3 {
@@ -292,9 +298,15 @@ fn foreign_archive_destination_is_preserved_and_opt_out_does_not_require_deletin
         fs::read_to_string(&destination).unwrap(),
         "unrelated archive file"
     );
-    assert!(
-        f.root.join("RAP_Master_Context_v4.md").exists()
-            || f.root.join("RAP_Master_Context_v5.md").exists()
+    assert!(!f.root.join("RAP_Master_Context_v4.md").exists());
+    assert!(!f.root.join("RAP_Master_Context_v5.md").exists());
+    assert_eq!(
+        fs::read_to_string(
+            f.root
+                .join("Old Context Files/RAP Master Context/Archive 2/RAP_Master_Context_v4.md")
+        )
+        .unwrap(),
+        "four"
     );
     f.apply(false);
     assert_eq!(
@@ -402,4 +414,144 @@ fn archival_opt_out_restores_sources_without_resuming_paused_tracking() {
     ] {
         assert_eq!(fs::read_to_string(f.root.join(name)).unwrap(), content);
     }
+}
+
+#[test]
+fn readable_archive_paths_preserve_nested_names_decimal_labels_and_reservations() {
+    let f = Fixture::new();
+    let path = |family: &str, relative: &str, capture, reserved: &[String]| {
+        crate::operations::archive_destination(
+            &f.r.db, &f.project, family, relative, capture, reserved,
+        )
+        .unwrap()
+    };
+    let original = "plans/RAP_Master_Context_v7.2.md";
+    let base = path("RAP Master Context", original, None, &[]);
+    assert_eq!(
+        base,
+        "Old Context Files/plans/RAP Master Context/RAP_Master_Context_v7.2.md"
+    );
+    assert_eq!(
+        path("RAP Master Context", original, None, &[base.to_uppercase()]),
+        "Old Context Files/plans/RAP Master Context/Archive 2/RAP_Master_Context_v7.2.md"
+    );
+    assert_eq!(
+        path("RAP Master Context", original, Some(3), &[]),
+        "Old Context Files/plans/RAP Master Context/Capture 3/RAP_Master_Context_v7.2.md"
+    );
+    let long_name = format!("RAP_{}_v12.3.docx", "Technical_".repeat(10));
+    assert_eq!(
+        PathBuf::from(path("RAP Technical", &long_name, None, &[]))
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        long_name
+    );
+    assert_eq!(
+        path("CON", "RAP_Notes_v1.md", None, &[]),
+        "Old Context Files/CON documents/RAP_Notes_v1.md"
+    );
+    assert!(crate::operations::archive_destination(
+        &f.r.db,
+        &f.project,
+        "RAP",
+        "../RAP_Notes_v1.md",
+        None,
+        &[]
+    )
+    .is_err());
+    // Even a temporarily missing archived file must not have its journal path reused.
+    let id = uuid::Uuid::new_v4().to_string();
+    f.r.db.execute("INSERT INTO operations(id,project_id,document_id,dedupe_key,kind,state,payload,created_at,updated_at) VALUES(?1,?2,?3,?1,'archive','done',?4,'now','now')", rusqlite::params![id,f.project,f.document,serde_json::json!({"destination":base}).to_string()]).unwrap();
+    assert!(path("RAP Master Context", original, None, &[]).contains("/Archive 2/"));
+    f.r.db
+        .execute("UPDATE operations SET state='restored' WHERE id=?1", [&id])
+        .unwrap();
+    assert_eq!(path("RAP Master Context", original, None, &[]), base);
+}
+
+#[test]
+fn readable_snapshot_copy_names_keep_author_version_separate_from_capture_sequence() {
+    let mut f = Fixture::new();
+    f.apply(true);
+    for contents in ["six edited once", "six edited twice"] {
+        fs::write(f.root.join("RAP_Master_Context_v6.md"), contents).unwrap();
+        f.scan();
+    }
+    for (capture, contents) in [(3, "six"), (4, "six edited once")] {
+        let archive = f.root.join(format!(
+            "Old Context Files/RAP Master Context/Capture {capture}/RAP_Master_Context_v6.md"
+        ));
+        assert_eq!(fs::read_to_string(archive).unwrap(), contents);
+    }
+    f.apply(false);
+    assert_eq!(
+        fs::read_to_string(f.root.join("RAP_Master_Context_v6.md")).unwrap(),
+        "six edited twice"
+    );
+    assert_eq!(f.r.versions(&f.document).unwrap().len(), 5);
+    assert!(f
+        .root
+        .join("Old Context Files/RAP Master Context/Capture 3/RAP_Master_Context_v6.md")
+        .exists());
+}
+
+#[test]
+fn legacy_uuid_archive_receipt_replays_and_restores_without_rewriting_its_path() {
+    let mut f = Fixture::new();
+    let versions = f.r.versions(&f.document).unwrap();
+    let older = versions
+        .iter()
+        .find(|v| v.source_name == "RAP_Master_Context_v4.md")
+        .unwrap();
+    let current = versions
+        .iter()
+        .find(|v| v.source_name == "RAP_Master_Context_v6.md")
+        .unwrap();
+    let source = |name: &str| -> String {
+        f.r.db
+            .query_row(
+                "SELECT id FROM source_files WHERE project_id=?1 AND name=?2",
+                rusqlite::params![f.project, name],
+                |r| r.get(0),
+            )
+            .unwrap()
+    };
+    let id = uuid::Uuid::new_v4().to_string();
+    let destination = format!(
+        "Old Context Files/RAP Master Context - {}/{} - RAP_Master_Context_v4.md",
+        f.document, id
+    );
+    let plan = crate::operations::ArchivePlan {
+        project: f.project.clone(),
+        document: f.document.clone(),
+        old_version: older.id.clone(),
+        new_version: current.id.clone(),
+        old_source: source("RAP_Master_Context_v4.md"),
+        new_source: source("RAP_Master_Context_v6.md"),
+        destination: destination.clone(),
+        temporary: "Old Context Files/.unused.tmp".into(),
+        mode: "move".into(),
+        old_identity: None,
+    };
+    f.r.db.execute("INSERT INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?1,'archive',?4,'now','now')",rusqlite::params![id,f.project,f.document,serde_json::to_string(&plan).unwrap()]).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE projects SET archive_enabled=1 WHERE id=?1",
+            [&f.project],
+        )
+        .unwrap();
+    assert!(f.r.recover_operations(&f.project, true).unwrap().is_empty());
+    assert_eq!(
+        fs::read_to_string(f.root.join(&destination)).unwrap(),
+        "four"
+    );
+    f.apply(false);
+    assert_eq!(
+        fs::read_to_string(f.root.join("RAP_Master_Context_v4.md")).unwrap(),
+        "four"
+    );
+    assert!(!f.root.join(destination).exists());
+    assert_eq!(f.r.versions(&f.document).unwrap().len(), 3);
 }

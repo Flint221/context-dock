@@ -1,6 +1,6 @@
 //! Reviewed reversible source moves; snapshot copies are never restored over working files.
 use crate::{
-    cloud, matching, models,
+    cloud, models,
     operations::ArchivePlan,
     registry::{error, Registry, Result},
     storage,
@@ -72,7 +72,7 @@ impl Registry {
         crate::folder_recovery::require_ready(&self.db, project)?;
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
-        let mut archives = Vec::new();
+        let mut archives: Vec<ArchivePlan> = Vec::new();
         let mut restores = Vec::new();
         let mut cancellations = Vec::new();
         let mut items = Vec::new();
@@ -124,6 +124,18 @@ impl Registry {
                     continue;
                 };
                 let old_mark = fingerprint(&mut facts, root, &old.relative);
+                let reserved = archives
+                    .iter()
+                    .map(|a| a.destination.clone())
+                    .collect::<Vec<_>>();
+                let destination = crate::operations::archive_destination(
+                    &self.db,
+                    project,
+                    &family,
+                    &old.relative,
+                    None,
+                    &reserved,
+                )?;
                 archives.push(ArchivePlan {
                     project: project.into(),
                     document: old.document_id.clone(),
@@ -131,13 +143,7 @@ impl Registry {
                     new_version: next,
                     old_source: old.id.clone(),
                     new_source: current,
-                    destination: format!(
-                        "Old Context Files/{} - {}/{} - {}",
-                        matching::safe_name(&family),
-                        old.document_id,
-                        old.id,
-                        old.name
-                    ),
+                    destination,
                     temporary: format!("Old Context Files/.unused-{}", old.id),
                     mode: "move".into(),
                     old_identity: old_mark["identity"].as_str().map(str::to_owned),

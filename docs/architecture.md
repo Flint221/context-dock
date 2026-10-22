@@ -331,7 +331,7 @@ Journal states are `pending`, `finalized`, `done`, or `blocked` (with an error).
 
 ## Archive protocol
 
-Archive destinations use `Old Context Files/<sanitized family> - <document UUID>/vN - <sanitized original stem> - <operation UUID>.<extension>`. Original filenames remain in metadata. All components are validated and parents are guarded against traversal and Windows reparse points. Existing directories may be used as containers, but unrelated files are never claimed, overwritten or cleaned up.
+Pending the next installer, new archive destinations use `Old Context Files/<original parent folders>/<sanitized family>/<exact original filename>`. Snapshot copies add `Capture N` before the original filename; N is the internal capture sequence, independent of an author's filename version. Collision handling adds `Archive 2`, `Archive 3`, etc. directories, preserving the original filename and extension. The shared planner checks existing filesystem entries, journal reservations and the current review batch case-insensitively. Historical UUID destinations remain valid and replay using their stored paths. Internal operation IDs and staging filenames still use UUIDs. No schema migration or existing archive rename is required. All components are validated and parents are guarded against traversal and Windows reparse points. Existing directories may be used as containers, but unrelated files are never claimed, overwritten or cleaned up.
 
 Both old/new snapshots must pass SHA-256 verification before an archive operation proceeds:
 
