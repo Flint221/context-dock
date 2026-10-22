@@ -1,3 +1,13 @@
+# 0.7.3 — Current filename version versus capture count
+
+October 22, 2026. **176 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **124 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied and diff whitespace checks pass. Versions agree at 0.7.3; schema 008 and application identity are unchanged.
+
+Native regression coverage imports distinct v2/v4/v6 filenames and checks tracking `currentLabel=v6`, `currentNumber=3`, `versionCount=3`, and unchanged numeric cloud readiness metadata. A refresh preserves snapshot IDs/numbers/hashes; editing the v6 source retains its label while increasing the capture sequence/count to four. Filename-label cases cover decimals, parentheses/case, trailing dates, leading zeroes and refusing unversioned/draft labels. A frontend regression verifies Current v6 and Versions 3 in the same row, the saved-capture tooltip and explicit Capture N fallback for unversioned filenames. Existing grouping, retained history, folder-selection and cloud tests remain green. Tests use disposable files/stores; no installed user data or cloud resources were changed. Native installed visual acceptance remains a user check; no re-import is required for the display update.
+
+Production frontend compilation and x64 NSIS packaging pass. Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.7.3_x64-setup.exe`, **4,418,463 bytes**, SHA-256 `15434BBB14F600E1AABC5F86BFB5E64EE1D374350F95093C845CBF08ABA4D5B7`. File/product version is 0.7.3. The installer was built but not run against user data. Main-branch CI is separate from these local checks.
+
+---
+
 # 0.7.2 — Ordered initial filename versions
 
 October 22, 2026. **174 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **123 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, x64 NSIS packaging and diff whitespace checks pass. Package/lockfile, Rust and Tauri versions agree at 0.7.2. Schema 008 adds ordered-import support; application identity remains `com.contextdock.desktop`. Older applications must not reopen the upgraded registry.
