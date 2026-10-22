@@ -1,3 +1,15 @@
+# 0.9.2 - Shared project overview and pending index verification
+
+Local release checks passed: **211 native tests**, one existing intentionally ignored child fixture, and **138 frontend tests across 16 files**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, diff whitespace checks, production frontend compilation and Windows x64 NSIS packaging passed. Package/lockfile, Cargo/lockfile and Tauri versions agree at 0.9.2. Schema 011 and application identity are unchanged.
+
+Feature commit `63365de` is pushed to main. The overview remains mounted and visible across all three project tabs, with the existing saved-state and navigation guards. Index attachment now distinguishes absent verification attributes from conflicting identities, retrieves incomplete responses and resumes bounded checks automatically against the same uploaded File. Reconciliation handles incomplete list responses; deletion/search remain blocked without complete ownership verification. Five new native regressions cover delayed 13 MiB illustrated Word verification, unrelated files progressing, restart, partial attributes, bounded verification, refusal of unsafe removal and conflicts in every immutable identity field. See [the investigation and acceptance record](ContextDock_DOCX_Indexing_v1.md).
+
+Read-only inspection of Boyd's source confirms 13,778,302 raw bytes, 14,743,413 expanded bytes, 670,146 body XML bytes, 50 ZIP entries, a largest entry of 3,112,531 bytes and a maximum expansion ratio of 24.05:1. These satisfy the existing raw/package/XML/entry/ratio limits. The application text now correctly lists 16 MiB raw, 4 MiB extracted text, 8 MiB body XML and 128 MiB expanded DOCX packages. The original failing provider response was not retained; saved activity confirms that the same File succeeded after manual retry, while optional-attribute regression fixtures establish the code defect and recovery behavior. No live provider re-upload or mutation was performed to reproduce it.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.9.2_x64-setup.exe`, **4,501,910 bytes**, SHA-256 `0F5422C7DC4843ED640444B1DD73067F7D079D314F859F55CF3019FF026C6A33`. File/product version is 0.9.2; application PE machine is 8664 (x64). The artifact was built from pushed main. It was not installed or launched against user data. Original application databases, project sources, snapshots, backups and cloud resources were not modified by this investigation or validation; registry evidence was read from separate copies. Local checks do not claim a completed GitHub workflow or installed authenticated acceptance.
+
+---
+
 # 0.9.1 - Filename versions and same-version cloud updates
 
 Local release checks passed: **206 native tests**, one existing intentionally ignored child fixture, and **138 frontend tests across 16 files**. TypeScript, ESLint, all-target Clippy with warnings denied, rustfmt, diff whitespace checks, production frontend compilation and Windows x64 NSIS packaging passed. Version/lockfile/config values agree at 0.9.1. Schema is now 011; application identity is unchanged.
