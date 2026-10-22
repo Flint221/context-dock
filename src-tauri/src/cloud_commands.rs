@@ -565,12 +565,14 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "stop_automatic" => {
-            db.execute("UPDATE cloud_projects SET auto_sync=0,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
+            // Compatibility for older clients: stopping automatic work is now
+            // a pause, so resuming cannot leave sync silently disabled.
+            db.execute("UPDATE cloud_projects SET auto_sync=1,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
             cloud::verify_flags(
                 db,
                 id,
                 &[
-                    ("auto_sync", 0),
+                    ("auto_sync", 1),
                     ("paused", 1),
                     ("sync_requested", 0),
                     ("delete_requested", 0),

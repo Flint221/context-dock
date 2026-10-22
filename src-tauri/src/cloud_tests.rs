@@ -1736,7 +1736,7 @@ fn confirmed_stop_controls_block_queued_work_without_credentials_and_keep_histor
         assert_eq!(n(&project, "paused"), 1);
         assert_eq!(n(&project, "delete_requested"), 0);
         if action == "stop_automatic" {
-            assert_eq!(n(&project, "auto_sync"), 0);
+            assert_eq!(n(&project, "auto_sync"), 1);
             assert_eq!(n(&project, "sync_requested"), 0);
             assert_eq!(n(&project, "enabled"), 1);
         } else {
