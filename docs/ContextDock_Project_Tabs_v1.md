@@ -13,3 +13,5 @@ Browser fixture verification used Edge with isolated in-memory registry/cloud/ch
 Manual acceptance after installation: open a project; scroll and switch all three tabs; check saved-selection and indexing counts; edit a folder checkbox and choose Keep editing, Save changes and continue, and Discard changes; type an AI question and switch tabs without sending it; verify paused/off/error statuses; check both themes and a narrow window; confirm readable archive naming after a reviewed archive operation.
 
 Schema 010 and application identity are unchanged. The installer also includes the previously validated unified folder selection and readable archive naming changes already on this branch.
+
+Release: feature commit `4acd2ba` was pushed and merged into main as `b3f56c5`. The 0.9.0 x64 NSIS installer was then built successfully from that merged tree and its version, size and SHA-256 were verified. See [the release verification record](verification.md). Installation was left to the user.

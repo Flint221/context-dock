@@ -1,3 +1,15 @@
+# 0.9.0 - Project tabs, status overview and readable archives
+
+Local validation passed: **200 native tests**, one existing intentionally ignored child fixture, and **136 frontend tests across 16 files**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging passed. Package/lockfile, Cargo/lockfile and Tauri versions agree at 0.9.0. Schema 010 and application identity remain unchanged.
+
+The feature commit `4acd2ba` was pushed to `codex/new-file-selection`, merged into main as `b3f56c5`, and pushed. The merged application source/config tree exactly matched the tested feature commit before packaging. Browser fixture checks and visual inspection covered Files/Cloud/AI separation, sticky header after scrolling, saved counts, draft protection and 1180x780 / 780x560 layouts. See [project workspace details](ContextDock_Project_Tabs_v1.md). Tests used isolated fixtures; no installed application acceptance or live authenticated cloud/API result is claimed.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.9.0_x64-setup.exe`, **4,506,424 bytes**, SHA-256 `A3500B67C5632B7E8FC935B6AD3E51745303019E31B0CD2733572545976D8E14`. File and product version are 0.9.0; packaged application PE machine is 8664 (x64). The installer was built from merged main and was not executed against user data. The temporary browser and preview server were stopped.
+
+The GitHub [Windows build for the merge](https://github.com/Flint221/context-dock/actions/runs/39853872822) was running when checked; frontend checks and rustfmt had passed, native compilation was still running. Local checks above are complete; this record does not claim a completed GitHub workflow result.
+
+---
+
 # 0.8.1 - Unified selection installer and authorized local reset
 
 October 22, 2026. Fresh checks pass: **197 native tests** plus the intentionally ignored child fixture, **131 frontend tests across 15 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging. Version/lockfile/config values agree at 0.8.1; supported schema is 010 and application identity is unchanged.
