@@ -1,3 +1,15 @@
+# 0.7.2 — Ordered initial filename versions
+
+October 22, 2026. **174 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **123 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, x64 NSIS packaging and diff whitespace checks pass. Package/lockfile, Rust and Tauri versions agree at 0.7.2. Schema 008 adds ordered-import support; application identity remains `com.contextdock.desktop`. Older applications must not reopen the upgraded registry.
+
+Six added native tests cover numeric initial ordering (v1/v2/v10), current-source choice, source/snapshot retention with archival enabled, later replacement association, independent folders/types/unrelated stems, decimal ordering, duplicate-rank ambiguity, selected-file exclusions, identical-byte deduplication, injected capture failure/restart recovery, restart between consent and planning, legacy remove/re-add repair, immutable earlier history IDs/bytes, explicit cloud re-selection and refusal of retained-cloud/complex-history repairs. The existing ambiguous-family regression now uses conflicting numeric ranks; a unique initial v1/v2 sequence is intentionally no longer ambiguous. Incomplete groups are checked as cloud-ineligible. All tests use temporary project/registry/snapshot stores; the user's installed project and cloud resources were not changed.
+
+Frontend coverage verifies the initialization explanation, existing selected-source/confirmation behavior, one active grouped family with access to earlier separate histories by their original document ID, and all existing tracking/history/folder-selection/cloud flows. Runtime import notices explain cases that remain separate. This release has automated component/native validation; it does not claim a native installed upgrade or authenticated cloud acceptance. Follow [the numbered-import walkthrough](manual-testing-numbered-import.md), particularly the retained-history and cloud-selection checks.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.7.2_x64-setup.exe`, **4,423,986 bytes**, SHA-256 `38EDE2280E65DC901E38CBE051032DF44851A77017ED085E4DA8C76CD78A4B74`. File/product version is 0.7.2. Built successfully but not run against user data. Implementation is pushed on `codex/folder-selection`; no main merge or GitHub CI result is claimed.
+
+---
+
 # 0.7.1 — Larger Word packages and independent sync failures
 
 October 22, 2026. **168 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **122 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, x64 NSIS packaging and diff whitespace checks pass. Versions agree at 0.7.1; schema 007 and application identity are unchanged. An overlapping native test invocation encountered a Windows executable lock; the final complete native test/Clippy/format sequence was rerun successfully.
