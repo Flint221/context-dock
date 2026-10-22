@@ -44,7 +44,7 @@ export interface PathRule {
 export interface PathSelectionView {
   revision: number;
   exclusions: PathRule[];
-  entries: { path: string; kind: "folder" | "file"; status: string }[];
+  entries: { path: string; kind: "folder" | "file"; status: string; new?: boolean }[];
   warnings: string[];
   cloudPending: number;
 }

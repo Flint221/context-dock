@@ -208,7 +208,7 @@ impl Registry {
         }
         let mut problems = self.finish_archival_intent(project)?;
         problems.extend(self.recover_operations(project, full)?);
-        let path_rules = crate::path_selection::rules(&self.db, project)?;
+        let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
         for sid in &ids {
@@ -224,6 +224,72 @@ impl Registry {
                     ))
                     .or_default() += 1;
             }
+        }
+        // Only explicitly new paths may inherit a tracked family's selection.
+        // Probe using the existing matcher before allowing capture; an excluded
+        // parent, ambiguous batch, or uncertain match remains excluded.
+        for sid in &ids {
+            let source = self.source(sid)?;
+            let path = crate::path_selection::normalized(&source.relative);
+            let is_new: bool = self
+                .db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM new_paths WHERE project_id=?1 AND path=?2)",
+                    params![project, path],
+                    |r| r.get(0),
+                )
+                .map_err(error)?;
+            if !is_new || source.status != "available" {
+                continue;
+            }
+            let without_file: Vec<_> = path_rules
+                .iter()
+                .filter(|r| !(r.kind == "file" && r.path == path))
+                .cloned()
+                .collect();
+            if !crate::path_selection::permits(&without_file, &path) {
+                continue;
+            }
+            let same_batch = ids
+                .iter()
+                .filter_map(|id| self.source(id).ok())
+                .filter(|s| {
+                    s.id != source.id
+                        && s.disposition == "discovered"
+                        && matching::parent_key(&s.relative)
+                            == matching::parent_key(&source.relative)
+                        && matching::stem(&s.name).normalized
+                            == matching::stem(&source.name).normalized
+                        && s.kind == source.kind
+                })
+                .count();
+            if same_batch != 0 {
+                continue;
+            }
+            let staged = match storage::stage(root, &source.relative, &self.store) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let candidate = self.match_candidates(&source, &staged.hash);
+            storage::discard_stage(&self.store, &staged.temporary)?;
+            let (matches, _, high) = candidate?;
+            if !high || matches.len() != 1 {
+                continue;
+            }
+            let tx = self.db.transaction().map_err(error)?;
+            tx.execute(
+                "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
+                params![project, path],
+            )
+            .map_err(error)?;
+            tx.execute(
+                "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                params![project, path],
+            )
+            .map_err(error)?;
+            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1", [project]).map_err(error)?;
+            tx.commit().map_err(error)?;
+            path_rules = crate::path_selection::rules(&self.db, project)?;
         }
         let mut retry = false;
         for sid in ids {

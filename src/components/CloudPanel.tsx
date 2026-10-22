@@ -21,7 +21,7 @@ import {
 import { OperationStatus } from "./OperationStatus";
 const initial: Draft = {
   enabled: true,
-  automatic: false,
+  automatic: true,
   mode: "current",
   documents: [],
   softLimit: 50 * 1024 * 1024,
@@ -31,7 +31,7 @@ function savedDraft(view: CloudView): Draft {
     enabled:
       !!view.enabled ||
       (view.store_state === "none" && view.status !== "cloud_deleted"),
-    automatic: !!view.auto_sync,
+    automatic: true,
     mode: view.mode,
     documents: view.families.filter((f) => f.selected).map((f) => f.id),
     softLimit: view.soft_limit,
@@ -296,7 +296,7 @@ export function CloudPanel({
         </div>
       )}
       <p>
-        Only explicitly selected, tracked document families can be uploaded.
+        Cloud sync follows the saved folder selection and uploads tracked documents automatically.
         Discovery alone never uploads files. Pausing stops the next request; an
         in-flight request may finish. Local tracking continues independently.
       </p>
@@ -330,7 +330,7 @@ export function CloudPanel({
             {date(view.last_sync)}
           </p>
           <fieldset disabled={busy}>
-            <legend>Project cloud selection</legend>
+            <legend>Project cloud settings</legend>
             {hasChanges && (
               <p role="status">
                 Unsaved cloud changes. Finish editing the upload limit to
@@ -344,15 +344,6 @@ export function CloudPanel({
                 onChange={(e) => edit({ enabled: e.target.checked })}
               />
               Enable cloud indexing for this project
-            </label>
-            <label className="cloud-check">
-              <input
-                type="checkbox"
-                checked={draft.automatic}
-                onChange={(e) => edit({ automatic: e.target.checked })}
-              />
-              Automatically sync newly captured versions while ContextDock is
-              open
             </label>
             <div className="cloud-form">
               <label>
@@ -407,39 +398,14 @@ export function CloudPanel({
             <div className="cloud-family-list">
               <p>
                 <strong>
-                  Documents to index · {draft.documents.length} selected
+                  Folder-selected tracked documents · {draft.documents.length} eligible
                 </strong>
               </p>
               {selectionMissing && (
-                <p>Select at least one eligible document below to continue.</p>
+                <p>Select files in the folder tree and enable tracking to continue.</p>
               )}
-              <button
-                type="button"
-                disabled={!view.families.some((f) => f.eligible)}
-                onClick={() =>
-                  edit({
-                    documents: view.families
-                      .filter((f) => f.eligible)
-                      .map((f) => f.id),
-                  })
-                }
-              >
-                Select all eligible documents
-              </button>
               {view.families.map((f) => (
-                <label className="cloud-family" key={f.id}>
-                  <input
-                    type="checkbox"
-                    disabled={!f.eligible && !f.selected}
-                    checked={draft.documents.includes(f.id)}
-                    onChange={(e) =>
-                      edit({
-                        documents: e.target.checked
-                          ? [...draft.documents, f.id]
-                          : draft.documents.filter((id) => id !== f.id),
-                      })
-                    }
-                  />
+                <div className="cloud-family" key={f.id}>
                   <span>
                     <strong>{f.name}</strong> · local v{f.currentNumber ?? "–"}{" "}
                     · cloud v{f.cloudNumber ?? "–"}
@@ -453,7 +419,7 @@ export function CloudPanel({
                           : "Resolve local tracking / ambiguity before upload"}
                     </small>
                   </span>
-                </label>
+                </div>
               ))}
             </div>
             <button

@@ -117,20 +117,11 @@ export function ProjectCloud({ project }: { project: string }) {
         throw new Error(
           "Enable document tracking below and capture a document first, then turn on Cloud sync.",
         );
-      const saved = view.families.filter((f) => f.selected);
-      if (
-        (view.selectionSaved || saved.length > 0) &&
-        (!saved.length || saved.some((f) => !f.eligible))
-      ) {
-        throw new Error(
-          "Your saved document selection is empty or needs review. Choose documents in Advanced cloud settings before enabling; no other documents were selected automatically.",
-        );
-      }
       const draft: Draft = {
         enabled: true,
         automatic: true,
         mode: view.mode,
-        documents: (saved.length ? saved : eligible).map((f) => f.id),
+        documents: eligible.map((f) => f.id),
         softLimit: view.soft_limit,
       };
       const plan = await cloud.action<Plan>(project, "preview", { draft });

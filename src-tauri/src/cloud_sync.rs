@@ -394,8 +394,17 @@ pub fn step(
             cloud::queue(db, id).map_err(local)?;
         }
         let jobs = cloud::jobs(db, id).map_err(local)?;
+        let tracking: bool = db
+            .query_row(
+                "SELECT tracking_enabled FROM projects WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(error)
+            .map_err(local)?;
         if let Some(j) = jobs.iter().find(|j| {
-            n(j, "desired") == 1
+            tracking
+                && n(j, "desired") == 1
                 && n(j, "next_at") <= chrono::Utc::now().timestamp()
                 && !["indexed", "removed", "purged", "failed", "uncertain"].contains(&s(j, "state"))
         }) {

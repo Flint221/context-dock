@@ -27,7 +27,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 9 {
+        if version > 10 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -71,7 +71,11 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/009_reversible_archival.sql"))
                 .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 9).map_err(error)?;
+        if version < 10 {
+            tx.execute_batch(include_str!("../migrations/010_unified_selection.sql"))
+                .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 10).map_err(error)?;
         tx.commit().map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
@@ -161,6 +165,14 @@ impl Registry {
             }
             Ok(scan) => {
                 let complete = scan.errors.is_empty();
+                let previously_scanned: bool = tx
+                    .query_row(
+                        "SELECT last_scan IS NOT NULL FROM projects WHERE id=?1",
+                        [id],
+                        |r| r.get(0),
+                    )
+                    .map_err(error)?;
+                let mut selection_changed = false;
                 tx.execute(
                     "UPDATE source_files SET status=?1 WHERE project_id=?2 AND status!='archived'",
                     params![if complete { "missing" } else { "unavailable" }, id],
@@ -183,7 +195,20 @@ impl Registry {
                         let name = crate::matching::stem(&f.name).display;
                         tx.execute("INSERT INTO documents(id,project_id,family_name,kind,active_source_id) VALUES(?1,?2,?3,?4,?5)",params![did,id,name,f.kind,sid]).map_err(error)?;
                         tx.execute("INSERT INTO source_files(id,project_id,document_id,name,relative_path,path_key,kind,size,modified_at,last_observed,status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,'available')",params![sid,id,did,f.name,f.relative,f.key,f.kind,f.size,f.modified,now]).map_err(error)?;
+                        if previously_scanned {
+                            let path = crate::path_selection::normalized(&f.relative);
+                            tx.execute("INSERT OR IGNORE INTO path_exclusions(project_id,path,kind) VALUES(?1,?2,'file')", params![id,path]).map_err(error)?;
+                            tx.execute(
+                                "INSERT OR IGNORE INTO new_paths(project_id,path) VALUES(?1,?2)",
+                                params![id, path],
+                            )
+                            .map_err(error)?;
+                            selection_changed = true;
+                        }
                     }
+                }
+                if selection_changed {
+                    tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1", [id]).map_err(error)?;
                 }
                 let message = if complete {
                     None

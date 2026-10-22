@@ -22,6 +22,7 @@ pub struct Entry {
     pub path: String,
     pub kind: String,
     pub status: String,
+    pub new: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,10 +155,11 @@ impl Registry {
                     path,
                     kind: "folder".into(),
                     status: "available".into(),
+                    new: false,
                 },
             );
         }
-        let sources=cloud::rows(&self.db,"SELECT relative_path,status FROM source_files WHERE project_id=?1 AND status!='archived'",&[&project])?;
+        let sources=cloud::rows(&self.db,"SELECT s.relative_path,s.status,EXISTS(SELECT 1 FROM new_paths n WHERE n.project_id=s.project_id AND n.path=lower(replace(s.relative_path,char(92),'/'))) is_new FROM source_files s WHERE s.project_id=?1 AND s.status!='archived'",&[&project])?;
         for s in sources {
             let path = cloud::s(&s, "relative_path").replace('\\', "/");
             entries.insert(
@@ -166,6 +168,7 @@ impl Registry {
                     path,
                     kind: "file".into(),
                     status: cloud::s(&s, "status").into(),
+                    new: cloud::n(&s, "is_new") == 1,
                 },
             );
         }
@@ -174,6 +177,7 @@ impl Registry {
                 path: rule.path.clone(),
                 kind: rule.kind.clone(),
                 status: "missing".into(),
+                new: false,
             });
         }
         Ok(View {
@@ -236,6 +240,24 @@ impl Registry {
             } else if !permits(&previous, path) && cloud::s(&source, "disposition") == "ignored" {
                 tx.execute("UPDATE source_files SET disposition=CASE WHEN last_hash IS NULL THEN 'discovered' ELSE 'tracked' END WHERE id=?1",[cloud::s(&source,"id")]).map_err(error)?;
                 tx.execute("UPDATE documents SET tracking_state=CASE WHEN current_version_id IS NULL THEN 'discovered' ELSE 'tracked' END WHERE id=?1",[cloud::s(&source,"document_id")]).map_err(error)?;
+            }
+        }
+        let mut pending = tx
+            .prepare("SELECT path FROM new_paths WHERE project_id=?1")
+            .map_err(error)?;
+        let paths = pending
+            .query_map([project], |r| r.get::<_, String>(0))
+            .map_err(error)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(error)?;
+        drop(pending);
+        for path in paths {
+            if permits(&next, &path) {
+                tx.execute(
+                    "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                    params![project, path],
+                )
+                .map_err(error)?;
             }
         }
         let blocked = blocked_versions(&tx, project)?;

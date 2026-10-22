@@ -61,6 +61,24 @@ impl<'a> ProjectApi<'a> {
             && cloud::selection_removal_request(&self.db, &self.project, method, path)
                 .map_err(|e| cloud_api::ApiError::local(&e))?;
         if !self.cleanup && !removal {
+            if method == "POST"
+                && (path == "/files"
+                    || (path.starts_with("/vector_stores/") && path.ends_with("/files")))
+            {
+                let enabled: bool = self
+                    .db
+                    .query_row(
+                        "SELECT tracking_enabled FROM projects WHERE id=?1",
+                        [&self.project],
+                        |r| r.get(0),
+                    )
+                    .map_err(|_| cloud_api::ApiError::local("Cannot verify tracking state."))?;
+                if !enabled {
+                    return Err(cloud_api::ApiError::local(
+                        "Cloud sync paused, disconnected or stopped before the next request.",
+                    ));
+                }
+            }
             if crate::path_selection::revision(&self.db, &self.project)
                 .map_err(|e| cloud_api::ApiError::local(&e))?
                 != self.path_revision
@@ -171,6 +189,16 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
         return Ok(n(p, "enabled") == 1 || removals.iter().any(|j| s(j, "phase") == "path_remove"));
     }
     if n(p, "enabled") != 1 {
+        return Ok(false);
+    }
+    let tracking: bool = db
+        .query_row(
+            "SELECT tracking_enabled FROM projects WHERE id=?1",
+            [s(p, "project_id")],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if !tracking {
         return Ok(false);
     }
     if crate::folder_recovery::require_ready(db, s(p, "project_id")).is_err() {

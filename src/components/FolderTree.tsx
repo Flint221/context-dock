@@ -40,6 +40,7 @@ interface Node {
   kind: "folder" | "file";
   children: Node[];
   status: string;
+  isNew: boolean;
 }
 function nodes(view: PathSelectionView): Node {
   const root: Node = {
@@ -48,9 +49,10 @@ function nodes(view: PathSelectionView): Node {
     kind: "folder",
     children: [],
     status: "available",
+    isNew: false,
   };
   const map = new Map<string, Node>([["", root]]);
-  const add = (path: string, kind: "folder" | "file", status: string): Node => {
+  const add = (path: string, kind: "folder" | "file", status: string, isNew = false): Node => {
     path = path.replaceAll("\\", "/");
     const id = key(path);
     const existing = map.get(id);
@@ -67,12 +69,13 @@ function nodes(view: PathSelectionView): Node {
       kind,
       children: [],
       status,
+      isNew,
     };
     map.set(id, node);
     parent.children.push(node);
     return node;
   };
-  view.entries.forEach((e) => add(e.path, e.kind, e.status));
+  view.entries.forEach((e) => add(e.path, e.kind, e.status, e.new));
   view.exclusions.forEach((e) => add(e.path, e.kind, "missing"));
   for (const node of map.values())
     node.children.sort(
@@ -143,6 +146,7 @@ function TreeRow({
           <span title={node.path}>{node.name}</span>
         </label>
         {!included && <span className="badge paused">Excluded</span>}
+        {node.isNew && <span className="badge warning">New</span>}
         {node.status !== "available" && node.path && (
           <span className="badge missing">{node.status}</span>
         )}
@@ -339,9 +343,8 @@ export function FolderTree({
         reuse after their index entries are removed.
       </p>
       <p>
-        Checked paths follow your existing Tracking and Cloud sync settings.
-        This does not enable either feature or override separate cloud document
-        opt-outs.
+        New documents are excluded until selected and saved. Checked paths
+        follow your Tracking and Cloud sync settings.
       </p>
       {error && <p role="alert">{error}</p>}
       {unavailable && (

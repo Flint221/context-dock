@@ -508,6 +508,25 @@ fn cloud_runtime_normalizes_windows_database_path_before_guarded_upload() {
     );
 }
 #[test]
+fn folder_selected_tracked_document_does_not_require_legacy_cloud_selection() {
+    let mut f = Fixture::new();
+    f.enable();
+    f.r.db
+        .execute("DELETE FROM cloud_documents WHERE project_id=?1", [&f.id])
+        .unwrap();
+    let draft = cloud::draft(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap();
+    assert_eq!(draft.documents, vec![f.doc.clone()]);
+    let api = Mock::default();
+    f.sync(&api);
+    assert_eq!(
+        f.jobs()
+            .iter()
+            .filter(|j| s(j, "state") == "indexed")
+            .count(),
+        1
+    );
+}
+#[test]
 fn migration_defaults_cloud_off_and_preserves_local_preferences() {
     let f = Fixture::new();
     let p = cloud::project(&f.r.db, &f.id).unwrap();
