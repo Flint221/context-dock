@@ -6,7 +6,7 @@ Tauri/React desktop shell, existing-folder registration, independent metadata di
 
 ## Implemented: Milestone 2 — Automatic document tracking and safe archival
 
-Opt-in per-project native watchers; selected independent initial histories; deterministic filename/date matching and explicit review; SHA-256 duplicate prevention; immutable per-document snapshots; separately authorized Old Context Files archival; persisted activity and recoverable operation journals; startup reconciliation; version history and verified location actions. Existing IDs/preferences migrate in place. See the manual testing and verification records for validation and remaining distribution checks.
+Opt-in per-project native watchers; selected initial histories with ordered grouping of clear numbered exports (0.7.2); deterministic filename/date matching and explicit review; SHA-256 duplicate prevention; immutable per-document snapshots; separately authorized Old Context Files archival; persisted activity and recoverable operation journals; startup reconciliation; version history and verified location actions. Existing IDs/preferences migrate in place. See the manual testing and verification records for validation and remaining distribution checks.
 
 ## Implemented: Milestone 3 — Local diff and history comparison
 

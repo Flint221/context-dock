@@ -26,6 +26,7 @@ mod extraction;
 mod folder_recovery;
 #[cfg(test)]
 mod folder_recovery_tests;
+mod initial_import;
 mod matching;
 mod models;
 mod monitor;
@@ -166,15 +167,21 @@ async fn tracking_view(
 #[tauri::command]
 async fn configure_tracking(
     state: tauri::State<'_, Store>,
+    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
     project: String,
     enabled: bool,
     archive: bool,
     selected: Vec<String>,
 ) -> Result<(), String> {
-    work(state.inner().clone(), move |r| {
-        r.configure_tracking(&project, enabled, archive, selected)
+    let store = state.inner().clone();
+    let gate = runtime.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
+        let mut registry = store.0.lock().map_err(|_| "Registry is unavailable.")?;
+        registry.configure_tracking(&project, enabled, archive, selected)
     })
     .await
+    .map_err(|e| format!("Tracking settings failed: {e}"))?
 }
 #[tauri::command]
 async fn resolve_match(

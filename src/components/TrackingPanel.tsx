@@ -164,7 +164,12 @@ export function TrackingPanel({
       (s) => s.status === "available" && s.disposition !== "superseded",
     ) || [];
   const family = view?.families.find((f) => f.id === history);
-  const captured = view?.families.filter((f) => f.versionCount > 0) || [];
+  const captured =
+    view?.families.filter(
+      (f) => f.versionCount > 0 && f.state !== "grouped_history",
+    ) || [];
+  const retainedHistories =
+    view?.families.filter((f) => f.state === "grouped_history") || [];
   return (
     <section className="panel tracking-panel">
       <div className="section-heading">
@@ -187,6 +192,11 @@ export function TrackingPanel({
       {error && (
         <p role="alert" className="error">
           {error}
+        </p>
+      )}
+      {view?.importNotice && (
+        <p className="banner warning" role="status">
+          {view.importNotice}
         </p>
       )}
       <OperationStatus
@@ -334,7 +344,7 @@ export function TrackingPanel({
             {captured.length === 0 ? (
               <p className="tracking-note">
                 No captured versions yet. Enable tracking and select files to
-                create their independent v1 snapshots.
+                import their document histories.
               </p>
             ) : (
               <>
@@ -393,6 +403,37 @@ export function TrackingPanel({
               </>
             )}
           </div>
+          {retainedHistories.length > 0 && (
+            <details className="family-section">
+              <summary>
+                Earlier separate histories ({retainedHistories.length})
+              </summary>
+              <p className="tracking-note">
+                These original snapshots were retained when numbered files were
+                grouped. Their IDs and history are unchanged. Regrouped families
+                need explicit selection again in Advanced cloud settings.
+              </p>
+              {retainedHistories.slice(0, limit).map((f) => (
+                <div className="toolbar-actions" key={f.id}>
+                  <span>
+                    {f.activeFilename || f.name} · {f.versionCount} retained
+                    version(s)
+                  </span>
+                  <button
+                    onClick={() => setHistory(f.id)}
+                    aria-label={`View earlier history of ${f.activeFilename || f.name}`}
+                  >
+                    View earlier history
+                  </button>
+                </div>
+              ))}
+              {retainedHistories.length > limit && (
+                <button onClick={() => setLimit((n) => n + 100)}>
+                  Show 100 more earlier histories
+                </button>
+              )}
+            </details>
+          )}
           {view.enabled &&
             view.sources.some(
               (s) =>
@@ -486,9 +527,11 @@ export function TrackingPanel({
           }}
         >
           <p>
-            Select files to capture as independent document families. Each
-            selected file starts at v1. Existing similarly named files will stay
-            separate, and initialization will not move them.
+            Select files to track. Clear numbered sequences such as
+            Report_v1.md, Report_v2.md and Report_v10.md in the same folder and
+            file type become one document family, imported in numeric order with
+            the newest export active. Unrelated or ambiguous names stay
+            separate. Initialization never moves your original files.
           </p>
           <p className="tracking-note">
             Unselected existing files are ignored for tracking until you include
@@ -616,7 +659,7 @@ export function TrackingPanel({
                 ? "Future replacements can move older sources into Old Context Files after verification. In-place edits archive a copy of the previous version. Your current document stays available."
                 : "Stop creating archives or moving replaced source files. Version tracking and existing archives are kept."
               : confirmation.enabled
-                ? "Resume watching this folder and capture changes made while tracking was off. Existing version history is kept."
+                ? "Resume watching this folder and capture changes made while tracking was off. Clear numbered exports saved as separate initial histories by older versions can be grouped when no cloud resources remain. Original histories stay available under Earlier separate histories; regrouped families require explicit cloud re-selection."
                 : "Stop capturing new document versions. Existing history, saved chats and documents are kept. Cloud sync will not receive uncaptured edits."}
           </p>
           {error && <p role="alert">{error}</p>}

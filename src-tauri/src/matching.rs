@@ -48,6 +48,25 @@ pub fn parent_key(relative: &str) -> String {
             .unwrap_or(""),
     )
 }
+/// Explicit numeric export order; dates/ambiguous labels are not guessed.
+pub fn version_order(name: &str) -> Option<Vec<u64>> {
+    static VERSION: OnceLock<Regex> = OnceLock::new();
+    let pattern = VERSION.get_or_init(|| {
+        Regex::new(r"(?i)(?:^|[\s_-])v(?:ersion)?[\s_-]*(\d+(?:\.\d+)*)\)?$")
+            .expect("constant version pattern")
+    });
+    let raw = Path::new(name).file_stem()?.to_str()?;
+    let captures = pattern.captures(raw)?;
+    let mut order = captures[1]
+        .split('.')
+        .map(str::parse)
+        .collect::<std::result::Result<Vec<u64>, _>>()
+        .ok()?;
+    while order.len() > 1 && order.last() == Some(&0) {
+        order.pop();
+    }
+    Some(order)
+}
 pub fn safe_name(value: &str) -> String {
     let value: String = value
         .chars()

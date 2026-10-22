@@ -64,7 +64,7 @@ impl Registry {
             tx.execute("INSERT OR IGNORE INTO path_exclusions SELECT project_id,lower(replace(relative_path,char(92),'/')),'file' FROM source_files WHERE project_id=?1 AND disposition='ignored'",[project]).map_err(error)?;
             tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         }
-        tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 THEN 1 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
+        tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 AND tracking_initialized=0 THEN 2 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
         tx.commit().map_err(error)?;
         self.verify_tracking_settings(project, enabled, archive)?;
         self.activity(
@@ -81,9 +81,19 @@ impl Registry {
             },
         )?;
         if enabled && !initialized {
-            // Existing files are explicitly initialized as independent families. Never group or move them here.
+            let selected_ids: Vec<_> = selected.iter().cloned().collect();
+            let grouped = self.prepare_initial_groups(project, &selected_ids, false)?;
+            self.db
+                .execute(
+                    "UPDATE projects SET tracking_initialized=1 WHERE id=?1",
+                    [project],
+                )
+                .map_err(error)?;
             let mut problems = vec![];
             for sid in selected {
+                if grouped.contains(&sid) {
+                    continue;
+                }
                 let source = self.source(&sid)?;
                 self.db
                     .execute(
@@ -102,8 +112,11 @@ impl Registry {
                     problems.push(e);
                 }
             }
+            problems.extend(self.recover_operations(project, true)?);
             self.set_tracking_error(project, &problems)?;
         } else if enabled && !was_enabled {
+            let ids = self.source_ids(project)?;
+            self.prepare_initial_groups(project, &ids, true)?;
             self.reconcile(project, "startup_reconciliation", &HashSet::new(), true)?;
         } else if enabled && archive {
             let errors = self.recover_operations(project, true)?;
@@ -165,6 +178,24 @@ impl Registry {
             self.activity(project,"folder_unavailable","Watched folder is missing or inaccessible. History is retained; reconnect the drive or refresh after access is restored.")?;
             return Ok(false);
         }
+        let preparing: bool = self
+            .db
+            .query_row(
+                "SELECT tracking_initialized=2 FROM projects WHERE id=?1",
+                [project],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if preparing {
+            let ids = self.source_ids(project)?;
+            self.prepare_initial_groups(project, &ids, false)?;
+            self.db
+                .execute(
+                    "UPDATE projects SET tracking_initialized=1 WHERE id=?1",
+                    [project],
+                )
+                .map_err(error)?;
+        }
         let mut problems = self.recover_operations(project, full)?;
         let path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
@@ -186,6 +217,10 @@ impl Registry {
         let mut retry = false;
         for sid in ids {
             let source = self.source(&sid)?;
+            let importing: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE document_id=?1 AND kind='initial_import' AND state!='done')",[&source.document_id],|r|r.get(0)).map_err(error)?;
+            if importing {
+                continue;
+            }
             if !crate::path_selection::permits(&path_rules, &source.relative) {
                 continue;
             }

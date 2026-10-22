@@ -95,6 +95,7 @@ export interface PendingOperation {
   createdAt: string;
 }
 export interface TrackingView {
+  importNotice?: string | null;
   enabled: boolean;
   archiveEnabled: boolean;
   initialized: boolean;

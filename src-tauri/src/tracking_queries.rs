@@ -83,7 +83,7 @@ impl Registry {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(error)?;
-        let mut q=self.db.prepare("SELECT d.id,d.family_name,d.kind,d.tracking_state,d.active_source_id,s.name,s.status,v.number,(SELECT COUNT(*) FROM document_versions h WHERE h.document_id=d.id),(SELECT MAX(captured_at) FROM document_versions h WHERE h.document_id=d.id),EXISTS(SELECT 1 FROM pending_matches m JOIN source_files f ON f.id=m.source_id WHERE f.document_id=d.id) FROM documents d LEFT JOIN source_files s ON s.id=d.active_source_id LEFT JOIN document_versions v ON v.id=d.current_version_id WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT d.id,d.family_name,d.kind,d.tracking_state,d.active_source_id,COALESCE(s.name,(SELECT source_name FROM document_versions WHERE id=d.current_version_id)),s.status,v.number,(SELECT COUNT(*) FROM document_versions h WHERE h.document_id=d.id),(SELECT MAX(captured_at) FROM document_versions h WHERE h.document_id=d.id),EXISTS(SELECT 1 FROM pending_matches m JOIN source_files f ON f.id=m.source_id WHERE f.document_id=d.id) FROM documents d LEFT JOIN source_files s ON s.id=d.active_source_id LEFT JOIN document_versions v ON v.id=d.current_version_id WHERE d.project_id=?1 AND (d.merged_into IS NULL OR d.tracking_state='grouped_history') ORDER BY d.family_name COLLATE NOCASE").map_err(error)?;
         let families = q
             .query_map([project], |r| {
                 Ok(Family {
@@ -162,6 +162,15 @@ impl Registry {
             .map_err(error)?;
         let path_rules = crate::path_selection::rules(&self.db, project)?;
         Ok(TrackingView {
+            import_notice: self
+                .db
+                .query_row(
+                    "SELECT message FROM initial_import_notices WHERE project_id=?1",
+                    [project],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(error)?,
             enabled,
             archive_enabled,
             initialized,

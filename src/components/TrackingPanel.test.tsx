@@ -90,6 +90,9 @@ it("initializes only selected sources with archival off by default", async () =>
   );
   const dialog = within(screen.getByRole("dialog"));
   expect(
+    dialog.getByText(/one document family, imported in numeric order/),
+  ).toBeInTheDocument();
+  expect(
     dialog.getByRole("checkbox", { name: /Also enable automatic archival/ }),
   ).not.toBeChecked();
   await user.click(
@@ -155,6 +158,49 @@ it("requires a separate archival toggle and retains history controls when tracki
   expect(
     screen.getByRole("button", { name: "View history" }),
   ).toBeInTheDocument();
+});
+it("keeps prior separate histories accessible without counting them as active families", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  const family = {
+    id: "combined",
+    name: "Report",
+    kind: "markdown",
+    state: "tracked",
+    activeSourceId: "s2",
+    activeFilename: "Report_v2.md",
+    sourceStatus: "available",
+    currentNumber: 2,
+    versionCount: 2,
+    lastCaptured: null,
+    needsReview: false,
+  };
+  view.families = [
+    family,
+    {
+      ...family,
+      id: "original",
+      state: "grouped_history",
+      activeSourceId: null,
+      activeFilename: null,
+      currentNumber: 1,
+      versionCount: 1,
+    },
+  ];
+  vi.mocked(registry.versions).mockResolvedValue([]);
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  expect(await screen.findByText("Report_v2.md")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "View history" })).toHaveLength(
+    1,
+  );
+  await user.click(screen.getByText("Earlier separate histories (1)"));
+  await user.click(
+    screen.getByRole("button", { name: "View earlier history of Report" }),
+  );
+  await waitFor(() =>
+    expect(registry.versions).toHaveBeenCalledWith("original"),
+  );
 });
 it("holds ambiguous files for an explicit family selection", async () => {
   view.enabled = true;

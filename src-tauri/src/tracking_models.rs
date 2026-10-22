@@ -53,6 +53,7 @@ pub struct PendingOperation {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TrackingView {
+    pub import_notice: Option<String>,
     pub enabled: bool,
     pub archive_enabled: bool,
     pub initialized: bool,

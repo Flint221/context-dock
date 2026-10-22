@@ -528,6 +528,7 @@ impl Registry {
                 }
             }
             let result = match kind.as_str() {
+                "initial_import" => self.finish_initial_import(&id, &payload),
                 "capture" => serde_json::from_str::<CapturePlan>(&payload)
                     .map_err(|e| e.to_string())
                     .and_then(|p| self.finish_capture(&id, &p, state == "finalized")),

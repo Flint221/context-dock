@@ -1,12 +1,18 @@
 # ContextDock
 
-ContextDock 0.7.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.7.2 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 ## Larger Word packages and independent sync failures (0.7.1)
 
 The old 4 MiB unpacked-DOCX cloud screen is removed. Word packages now use the existing 128 MiB expanded-package bound, with the existing 16 MiB raw snapshot, configured soft-upload size, 8 MiB body XML, 4 MiB extracted body text and ZIP entry/ratio limits still enforced. The expanded package includes images and other parts; its byte size is not a token count. Provider indexing can still reject a supported local package.
 
 Upload/index failures now identify the original relative path, version and reason. They stay on the individual job while other files continue syncing. Retry/backoff remains per file; failures stay visible, and **Sync now** explicitly retries failed/uncertain jobs. Shared project/account/ownership failures still stop unsafe work. Questions still wait for the selected current versions to be ready. If a previous build already stopped this project on the old error, use **Sync now** after upgrading.
+
+## Initial numbered document families (0.7.2)
+
+**Enable tracking → Capture selected and enable** now groups clear numeric exports such as `CottonTrax_Architecture_v1.md` and `_v2.md` into one family. Imports run in numeric order (`v2` before `v10`), and the highest export becomes the active source. Folder and file type must match; unrelated stems, duplicate equivalent version numbers and dates-only names remain separate. History numbers count distinct captured bytes, so identical exports reuse a snapshot and filename suffix gaps do not create missing capture numbers. Original filenames remain visible in history. Initial imports never move sources, even with archival enabled.
+
+Removing a project keeps its local history. After re-adding the same folder, **Resume tracking** can repair the old separate-initial-history layout when each member is an unchanged single initial snapshot and no cloud resources remain. Prior snapshot/version IDs, metadata and bytes remain accessible under **Earlier separate histories**; regrouped families need explicit cloud selection again. Edited/multi-version/manual histories or retained cloud resources are preserved separately with a visible explanation. You can also stop/resume tracking after deleting project cloud data instead of removing the registration. Ordered imports resume safely after interruption. See [the acceptance walkthrough](docs/manual-testing-numbered-import.md). Schema 008 prevents older builds from reopening an import-aware registry; do not downgrade after upgrading.
 
 ## Folder tree and saved exclusions (0.7.0)
 
@@ -82,7 +88,7 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 ## Implemented through Milestone 4
 
 - Dashboard, project registration, metadata discovery/search, rename, clipboard paths, Explorer locations, non-destructive unregistration, and light/dark/system themes.
-- Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; each starts its own independent v1 history. Initialization never moves existing files or groups similarly named historical exports.
+- Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; clear numbered exports with the same normalized name, folder and type form one ordered history. Unrelated/ambiguous files start independent histories. Initialization never moves existing files.
 - Native filesystem monitoring while the app is running, debounced writes, bounded retries for unstable/locked files, and startup reconciliation of missed changes.
 - SHA-256-verified immutable local snapshots, independent version numbering, duplicate-content prevention, and remembered manual associations.
 - Conservative matching of trailing version/date filenames within the same directory. Ambiguous matches and duplicate copies go to **Needs Review** for assignment, independent tracking, or ignore.
@@ -123,7 +129,7 @@ Settings shows raw indexed snapshot bytes separately from last measured OpenAI i
 
 ## First tracking workflow
 
-Register a folder using **Add project**, a display name, and **Browse**. On its detail screen choose **Enable tracking…**, select initial files, and click **Capture selected and enable**. Initially selected files are independent families, even when their names look related. Unselected existing files remain discoverable but are ignored until you choose **Track independently**.
+Register a folder using **Add project**, a display name, and **Browse**. On its detail screen choose **Enable tracking…**, select initial files, and click **Capture selected and enable**. Clear numbered initial exports are grouped in numeric filename order, with the highest export active. Ambiguous suffixes, dates-only names, different folders and different types remain separate. Unselected files require inclusion and Save in the folder tree before tracking.
 
 The separate **Enable automatic archival of replaced source files** checkbox authorizes archival for future replacements. New unrelated files become independent families automatically. Exact tracked paths remain associated with their family. A unique, normalized version/date stem in the same folder can match automatically; conflicting candidates, different workstream folders and live duplicate copies require review. Assigning a pending file remembers its normalized name and directory association for future exports.
 

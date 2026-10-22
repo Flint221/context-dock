@@ -4,6 +4,7 @@ use crate::{
     registry::Registry,
     storage,
 };
+use rusqlite::params;
 use std::{collections::HashSet, fs, path::PathBuf};
 use tempfile::{tempdir, TempDir};
 #[test]
@@ -206,6 +207,296 @@ fn independent_initial_versions_same_path_archival_and_duplicate_hashes() {
         1
     );
 }
+
+#[test]
+fn initial_numbered_exports_group_in_numeric_order_without_moving_sources() {
+    let mut f = Fixture::new(&[
+        ("CottonTrax_Architecture_v10.md", "ten"),
+        ("CottonTrax_Architecture_v2.md", "two"),
+        ("CottonTrax_Architecture_v1.md", "one"),
+        ("CottonTrax_Architecture_Audit_v1.md", "audit"),
+        ("nested/CottonTrax_Architecture_v3.md", "other"),
+        ("CottonTrax_Architecture_v4.docx", "word"),
+    ]);
+    f.enable(true);
+    let id = f.document("CottonTrax_Architecture_v1.md");
+    assert_eq!(f.document("CottonTrax_Architecture_v2.md"), id);
+    assert_eq!(f.document("CottonTrax_Architecture_v10.md"), id);
+    let versions = f.r.versions(&id).unwrap();
+    assert_eq!(
+        versions
+            .iter()
+            .map(|v| v.source_name.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "CottonTrax_Architecture_v10.md",
+            "CottonTrax_Architecture_v2.md",
+            "CottonTrax_Architecture_v1.md"
+        ]
+    );
+    assert!(versions[0].current);
+    assert_eq!(versions[0].number, 3);
+    assert_eq!(
+        fs::read_to_string(&versions[2].snapshot_path).unwrap(),
+        "one"
+    );
+    assert!(!f.root.join("Old Context Files").exists());
+    assert_eq!(
+        f.r.tracking_view(&f.project)
+            .unwrap()
+            .families
+            .iter()
+            .filter(|f| f.version_count > 0)
+            .count(),
+        4
+    );
+    for (name, bytes) in [
+        ("CottonTrax_Architecture_v1.md", "one"),
+        ("CottonTrax_Architecture_v2.md", "two"),
+        ("CottonTrax_Architecture_v10.md", "ten"),
+    ] {
+        assert_eq!(fs::read_to_string(f.root.join(name)).unwrap(), bytes);
+    }
+    f.scan();
+    f.scan();
+    assert_eq!(f.count(&id), 3);
+    fs::write(f.root.join("CottonTrax_Architecture_v11.md"), "eleven").unwrap();
+    f.scan();
+    assert_eq!(f.document("CottonTrax_Architecture_v11.md"), id);
+    assert_eq!(f.count(&id), 4);
+}
+
+#[test]
+fn initial_grouping_respects_selection_ambiguity_and_identical_bytes() {
+    let mut f = Fixture::new(&[
+        ("Report_v1.md", "same"),
+        ("Report_v2.md", "same"),
+        ("Report_v3.md", "excluded"),
+        ("Notes_v1.md", "a"),
+        ("Notes_v01.md", "b"),
+        ("Dated_2026-10-01.md", "c"),
+        ("Dated_2026-10-02.md", "d"),
+        ("Decimal_v1.10.md", "ten"),
+        ("Decimal_v1.2.md", "two"),
+    ]);
+    let ids =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .filter(|s| s.name != "Report_v3.md")
+            .map(|s| s.id.clone())
+            .collect();
+    f.r.configure_tracking(&f.project, true, false, ids)
+        .unwrap();
+    assert_eq!(f.document("Report_v1.md"), f.document("Report_v2.md"));
+    assert_eq!(f.count(&f.document("Report_v1.md")), 1);
+    assert_eq!(
+        f.r.tracking_view(&f.project)
+            .unwrap()
+            .families
+            .iter()
+            .find(|x| x.id == f.document("Report_v1.md"))
+            .unwrap()
+            .active_filename
+            .as_deref(),
+        Some("Report_v2.md")
+    );
+    assert_eq!(f.count(&f.document("Report_v3.md")), 0);
+    assert_ne!(f.document("Notes_v1.md"), f.document("Notes_v01.md"));
+    assert_ne!(
+        f.document("Dated_2026-10-01.md"),
+        f.document("Dated_2026-10-02.md")
+    );
+    let decimal = f.document("Decimal_v1.2.md");
+    assert_eq!(f.document("Decimal_v1.10.md"), decimal);
+    assert_eq!(
+        f.r.versions(&decimal).unwrap()[0].source_name,
+        "Decimal_v1.10.md"
+    );
+}
+
+#[test]
+fn interrupted_numbered_import_recovers_order_after_restart_without_duplicate_captures() {
+    let mut f = Fixture::new(&[
+        ("Report_v1.md", "one"),
+        ("Report_v2.md", "two"),
+        ("Report_v3.md", "three"),
+        ("Other.md", "other"),
+    ]);
+    f.r.db.execute_batch("CREATE TRIGGER fail_import BEFORE INSERT ON document_versions WHEN NEW.number=2 BEGIN SELECT RAISE(FAIL,'injected import failure'); END;").unwrap();
+    let ids = f.r.source_ids(&f.project).unwrap();
+    f.r.configure_tracking(&f.project, true, true, ids).unwrap();
+    let id = f.document("Report_v1.md");
+    assert_eq!(f.count(&id), 1);
+    assert_eq!(f.count(&f.document("Other.md")), 1);
+    let view = f.r.tracking_view(&f.project).unwrap();
+    assert!(view.error.is_some());
+    assert!(view.operations.iter().any(|o| o.kind == "initial_import"));
+    assert_eq!(
+        crate::cloud::families(&f.r.db, &f.project)
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == id)
+            .unwrap()["eligible"],
+        0
+    );
+    f.r.db.execute_batch("DROP TRIGGER fail_import;").unwrap();
+    let db = f.r.store.join("registry.db");
+    f.r = Registry::open(&db).unwrap();
+    f.scan();
+    f.scan();
+    let versions = f.r.versions(&id).unwrap();
+    assert_eq!(
+        versions
+            .iter()
+            .map(|v| v.source_name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Report_v3.md", "Report_v2.md", "Report_v1.md"]
+    );
+    assert!(f.r.tracking_view(&f.project).unwrap().operations.is_empty());
+    assert!(!f.root.join("Old Context Files").exists());
+}
+
+fn initialize_legacy_separate(f: &mut Fixture) {
+    f.r.db
+        .execute(
+            "UPDATE projects SET tracking_enabled=1,tracking_initialized=1",
+            [],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE source_files SET disposition='tracked'", [])
+        .unwrap();
+    let ids = f.r.source_ids(&f.project).unwrap();
+    for id in ids {
+        let source = f.r.source(&id).unwrap();
+        let root = PathBuf::from(f.r.path(&f.project).unwrap());
+        let stage = crate::storage::stage(&root, &source.relative, &f.r.store).unwrap();
+        f.r.capture(&source, stage, "initial_tracking", false)
+            .unwrap();
+    }
+}
+
+#[test]
+fn restart_between_tracking_consent_and_import_planning_still_groups_in_order() {
+    let mut f = Fixture::new(&[
+        ("Report_v1.md", "one"),
+        ("Report_v2.md", "two"),
+        ("Other.md", "other"),
+    ]);
+    f.r.db
+        .execute(
+            "UPDATE projects SET tracking_enabled=1,tracking_initialized=2",
+            [],
+        )
+        .unwrap();
+    f.r.db.execute("UPDATE source_files SET disposition=CASE WHEN name='Other.md' THEN 'ignored' ELSE 'tracked' END",[]).unwrap();
+    let db = f.r.store.join("registry.db");
+    f.r = Registry::open(&db).unwrap();
+    f.scan();
+    let id = f.document("Report_v1.md");
+    assert_eq!(f.document("Report_v2.md"), id);
+    assert_eq!(f.count(&id), 2);
+    assert_eq!(f.r.versions(&id).unwrap()[0].source_name, "Report_v2.md");
+    assert_eq!(f.count(&f.document("Other.md")), 0);
+}
+
+#[test]
+fn readded_legacy_project_regroups_simple_exports_but_retains_original_history_ids_and_bytes() {
+    let mut f = Fixture::new(&[("Report_v1.md", "one"), ("Report_v2.md", "two")]);
+    initialize_legacy_separate(&mut f);
+    let old = f.document("Report_v2.md");
+    let old_version = f.r.versions(&old).unwrap().remove(0);
+    f.r.db
+        .execute(
+            "INSERT INTO cloud_documents(project_id,document_id) VALUES(?1,?2)",
+            params![f.project, old],
+        )
+        .unwrap();
+    f.r.remove_with_cloud_choice(&f.project, false).unwrap();
+    assert_eq!(
+        f.r.add("Restored", f.root.to_str().unwrap()).unwrap(),
+        f.project
+    );
+    f.enable(true);
+    let target = f.document("Report_v1.md");
+    assert_eq!(f.document("Report_v2.md"), target);
+    assert_eq!(f.count(&target), 2);
+    let retained = f.r.versions(&old).unwrap().remove(0);
+    assert_eq!(retained.id, old_version.id);
+    assert_eq!(retained.sha256, old_version.sha256);
+    assert_eq!(retained.number, old_version.number);
+    assert_eq!(fs::read_to_string(retained.snapshot_path).unwrap(), "two");
+    let view = f.r.tracking_view(&f.project).unwrap();
+    assert_eq!(
+        view.families
+            .iter()
+            .filter(|f| f.state == "grouped_history")
+            .count(),
+        1
+    );
+    assert_eq!(
+        view.families
+            .iter()
+            .filter(|f| f.state != "grouped_history" && f.version_count > 0)
+            .count(),
+        1
+    );
+    assert_eq!(
+        f.r.db
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_documents WHERE project_id=?1",
+                [&f.project],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    assert!(!f.root.join("Old Context Files").exists());
+    f.scan();
+    assert_eq!(f.count(&target), 2);
+}
+
+#[test]
+fn retained_cloud_or_complex_histories_are_not_silently_regrouped() {
+    for cloud in [false, true] {
+        let mut f = Fixture::new(&[("Report_v1.md", "one"), ("Report_v2.md", "two")]);
+        initialize_legacy_separate(&mut f);
+        if cloud {
+            f.r.db
+                .execute(
+                    "UPDATE cloud_projects SET store_id='vs_retained',store_state='linked'",
+                    [],
+                )
+                .unwrap();
+        } else {
+            fs::write(f.root.join("Report_v1.md"), "edited").unwrap();
+            f.scan();
+        }
+        let first = f.document("Report_v1.md");
+        let second = f.document("Report_v2.md");
+        f.r.configure_tracking(&f.project, false, false, vec![])
+            .unwrap();
+        f.enable(false);
+        assert_eq!(f.document("Report_v1.md"), first);
+        assert_eq!(f.document("Report_v2.md"), second);
+        assert_ne!(first, second);
+        assert!(f
+            .r
+            .tracking_view(&f.project)
+            .unwrap()
+            .activity
+            .iter()
+            .any(|a| a.kind == "import_review"));
+        assert!(f
+            .r
+            .tracking_view(&f.project)
+            .unwrap()
+            .import_notice
+            .is_some());
+    }
+}
 #[test]
 fn confident_new_filename_archives_previous_source_and_retains_family_id() {
     let mut f = Fixture::new(&[("Master_Context_2026-10-08_v1.md", "one")]);
@@ -234,7 +525,7 @@ fn confident_new_filename_archives_previous_source_and_retains_family_id() {
 fn ambiguous_families_and_other_directories_require_review_and_manual_associations_persist() {
     let mut f = Fixture::new(&[
         ("Design_Notes_v1.md", "first"),
-        ("Design_Notes_2026-10-01_v2.md", "second"),
+        ("Design_Notes_2026-10-01_v1.md", "second"),
     ]);
     f.enable(true);
     let id = f.document("Design_Notes_v1.md");
