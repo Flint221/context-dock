@@ -909,8 +909,9 @@ export function CloudPanel({
           </p>
           {destruction.action === "remove" ? (
             <p>
-              Remove this version's vector-store association and exclude it from
-              future synchronization? The uploaded File remains in OpenAI.
+              Remove this version's vector-store association? Versions required
+              by the saved folder selection and version policy cannot be removed
+              here. The uploaded File remains in OpenAI.
             </p>
           ) : (
             <>

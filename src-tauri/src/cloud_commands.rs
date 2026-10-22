@@ -680,6 +680,12 @@ pub fn action_impl(
             if s(&job, "file_id").is_empty() {
                 return Err("No known remote association for this version.".into());
             }
+            if cloud::desired(db, id, &cloud::draft(db, &p)?)?
+                .iter()
+                .any(|v| v.id == version)
+            {
+                return Err("This version follows the saved folder selection. Exclude its file in the folder tree or change the version policy before removing it from the index.".into());
+            }
             let tx = db.transaction().map_err(error)?;
             tx.execute(
                 "INSERT OR IGNORE INTO cloud_exclusions VALUES(?1,?2)",

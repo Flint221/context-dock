@@ -631,6 +631,51 @@ fn folder_selected_tracked_document_does_not_require_legacy_cloud_selection() {
     );
 }
 #[test]
+fn legacy_version_opt_out_cannot_remove_folder_selected_version() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let version = s(&f.jobs()[0], "version_id").to_owned();
+    f.r.db
+        .execute(
+            "INSERT INTO cloud_exclusions VALUES(?1,?2)",
+            params![f.id, version],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET desired=0,phase='remove',state='removing'",
+            [],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    api.0.borrow_mut().calls.clear();
+    for _ in 0..5 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|call| call.starts_with("DELETE ") || call == "UPLOAD"));
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    let err = cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "remove",
+        &json!({"version":version,"confirm":true}),
+    )
+    .unwrap_err();
+    assert!(err.contains("saved folder selection"));
+}
+
+#[test]
 fn legacy_cloud_list_cannot_bypass_source_validation() {
     let mut f = Fixture::new();
     f.enable();

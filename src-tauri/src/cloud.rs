@@ -145,7 +145,7 @@ fn desired_selection(
         return Err("Choose a valid mode and a soft limit between 1 byte and 512 MiB.".into());
     }
     let eligibility = if check_sources { ELIGIBLE } else { "1=1" };
-    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {eligibility} AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=d.project_id AND e.version_id=v.id) ORDER BY d.id,v.number")).map_err(error)?;
+    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {eligibility} ORDER BY d.id,v.number")).map_err(error)?;
     let versions = q
         .query_map([id], |r| {
             Ok(CloudVersion {
@@ -410,7 +410,7 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
     tx.execute("UPDATE cloud_jobs SET desired=0 WHERE project_id=?1", [id])
         .map_err(error)?;
     for v in wanted {
-        tx.execute("UPDATE cloud_jobs SET phase=CASE WHEN file_id IS NOT NULL THEN 'attach' ELSE phase END,state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' ELSE state END,desired=1,next_at=0,error=NULL WHERE project_id=?1 AND version_id=?2 AND phase IN ('selection_remove','path_remove')", params![id,v.id]).map_err(error)?;
+        tx.execute("UPDATE cloud_jobs SET phase=CASE WHEN file_id IS NOT NULL THEN 'attach' ELSE phase END,state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' ELSE state END,desired=1,next_at=0,error=NULL WHERE project_id=?1 AND version_id=?2 AND phase IN ('selection_remove','path_remove','remove')", params![id,v.id]).map_err(error)?;
         let job = uuid::Uuid::new_v4().to_string();
         let ext = if v.kind == "word" { "docx" } else { "md" };
         tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,state=CASE WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;

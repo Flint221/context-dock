@@ -397,13 +397,13 @@ pub fn step(
             execute(db,"UPDATE cloud_projects SET sync_requested=0,status='ready',error=NULL WHERE project_id=?1",&[&id])?;
             return Ok(());
         }
+        if n(&p, "auto_sync") == 1 || n(&p, "sync_requested") == 1 {
+            cloud::queue(db, id).map_err(local)?;
+        }
         if let Some(job) = cloud::jobs(db, id).map_err(local)?.iter().find(|j| {
             s(j, "phase") == "remove" && s(j, "state") != "removed" && s(j, "state") != "purged"
         }) {
             return detach(db, &p, job, api);
-        }
-        if n(&p, "auto_sync") == 1 || n(&p, "sync_requested") == 1 {
-            cloud::queue(db, id).map_err(local)?;
         }
         let jobs = cloud::jobs(db, id).map_err(local)?;
         let tracking: bool = db
