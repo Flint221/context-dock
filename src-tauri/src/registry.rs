@@ -27,7 +27,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 6 {
+        if version > 7 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -59,7 +59,11 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/006_folder_recovery.sql"))
                 .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 6).map_err(error)?;
+        if version < 7 {
+            tx.execute_batch(include_str!("../migrations/007_path_selection.sql"))
+                .map_err(error)?;
+        }
+        tx.pragma_update(None, "user_version", 7).map_err(error)?;
         tx.commit().map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;

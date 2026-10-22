@@ -13,6 +13,7 @@ import type { Project, Document } from "../types";
 import { date, displayPath } from "../format";
 import { Documents } from "./Documents";
 import { ProjectFolder } from "./ProjectFolder";
+import { FolderTree } from "./FolderTree";
 export function ProjectDetails({
   changed,
   project,
@@ -109,6 +110,12 @@ export function ProjectDetails({
           </button>
         </div>
       </div>
+      <FolderTree
+        key={`paths:${project.id}`}
+        project={project.id}
+        changed={changed}
+        unavailable={folderLost}
+      />
       {!folderLost && (
         <ProjectCloud
           key={`cloud:${project.id}:${project.path}`}

@@ -78,7 +78,7 @@ pub fn delete(r: &Registry, p: &str, id: &str) -> Result<()> {
 pub fn authorize(db: &Connection, p: &str, scope: &str) -> Result<String> {
     crate::folder_recovery::require_ready(db, p)?;
     if !cloud::selection_removals(db, p)?.is_empty() {
-        return Err("Document opt-out removals are not yet verified. Finish or retry them before asking questions.".into());
+        return Err("Folder exclusions and document opt-out removals are not yet verified. Finish or retry them before asking questions.".into());
     }
     let project = cloud::project(db, p)?;
     let connected:i64=db.query_row("SELECT COUNT(*) FROM cloud_connection WHERE singleton=1 AND status='connected' AND scope=?1",[scope],|r|r.get(0)).map_err(error)?;

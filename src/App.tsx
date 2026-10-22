@@ -30,8 +30,18 @@ import { Modal } from "./components/Modal";
 import { CurrentProcesses } from "./components/CurrentProcesses";
 import { OperationStatus } from "./components/OperationStatus";
 import { version } from "../package.json";
+import { UnsavedChanges } from "./UnsavedChanges";
+import { useUnsavedChanges } from "./draftGuard";
 type Page = "dashboard" | "projects" | "processes" | "settings";
 export default function App() {
+  return (
+    <UnsavedChanges>
+      <Workspace />
+    </UnsavedChanges>
+  );
+}
+function Workspace() {
+  const guard = useUnsavedChanges();
   const [page, setPage] = useState<Page>("dashboard");
   const [data, setData] = useState<Snapshot>({
     projects: [],
@@ -112,9 +122,11 @@ export default function App() {
   }
   const project = data.projects.find((p) => p.id === selected);
   async function showProject(p: Project) {
-    setPage("projects");
-    setSelected(p.id);
-    await run(() => registry.refresh(p.id));
+    guard.request(() => {
+      setPage("projects");
+      setSelected(p.id);
+      void run(() => registry.refresh(p.id));
+    });
   }
 
   return (
@@ -142,10 +154,12 @@ export default function App() {
               key={id}
               aria-current={page === id ? "page" : undefined}
               className={page === id ? "active" : ""}
-              onClick={() => {
-                setPage(id);
-                setSelected(null);
-              }}
+              onClick={() =>
+                guard.request(() => {
+                  setPage(id);
+                  setSelected(null);
+                })
+              }
             >
               <Icon size={18} />
               {label}
@@ -234,7 +248,7 @@ export default function App() {
                 <button
                   className="primary"
                   disabled={busy || !loaded}
-                  onClick={() => setAdding(true)}
+                  onClick={() => guard.request(() => setAdding(true))}
                 >
                   <Plus size={17} /> Add project
                 </button>
@@ -269,7 +283,7 @@ export default function App() {
                   (d) => d.projectId === project.id,
                 )}
                 busy={busy}
-                back={() => setSelected(null)}
+                back={() => guard.request(() => setSelected(null))}
                 copy={() =>
                   void run(
                     () =>
@@ -282,7 +296,7 @@ export default function App() {
                   setName(project.name);
                   setEditing("rename");
                 }}
-                remove={() => setEditing("remove")}
+                remove={() => guard.request(() => setEditing("remove"))}
                 refresh={() =>
                   void run(
                     () => registry.refresh(project.id),

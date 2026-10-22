@@ -37,6 +37,17 @@ export interface Document {
   status: string;
 }
 export type Theme = "system" | "light" | "dark";
+export interface PathRule {
+  path: string;
+  kind: "folder" | "file";
+}
+export interface PathSelectionView {
+  revision: number;
+  exclusions: PathRule[];
+  entries: { path: string; kind: "folder" | "file"; status: string }[];
+  warnings: string[];
+  cloudPending: number;
+}
 export interface Snapshot {
   projects: Project[];
   documents: Document[];

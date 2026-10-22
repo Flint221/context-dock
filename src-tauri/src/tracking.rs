@@ -34,7 +34,10 @@ impl Registry {
         let selected: HashSet<String> = selected.into_iter().collect();
         for id in &selected {
             let s = self.source(id)?;
-            if s.project_id != project || s.status != "available" {
+            if s.project_id != project
+                || s.status != "available"
+                || !crate::path_selection::allowed(&self.db, project, &s.relative)?
+            {
                 return Err("Select available documents from this project only.".into());
             }
         }
@@ -58,6 +61,8 @@ impl Registry {
                 .map_err(error)?;
                 tx.execute("UPDATE documents SET tracking_state='tracked' WHERE id=(SELECT document_id FROM source_files WHERE id=?1)",[sid]).map_err(error)?;
             }
+            tx.execute("INSERT OR IGNORE INTO path_exclusions SELECT project_id,lower(replace(relative_path,char(92),'/')),'file' FROM source_files WHERE project_id=?1 AND disposition='ignored'",[project]).map_err(error)?;
+            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         }
         tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 THEN 1 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
         tx.commit().map_err(error)?;
@@ -161,11 +166,14 @@ impl Registry {
             return Ok(false);
         }
         let mut problems = self.recover_operations(project, full)?;
+        let path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
         for sid in &ids {
             let s = self.source(sid)?;
-            if s.disposition == "discovered" {
+            if s.disposition == "discovered"
+                && crate::path_selection::permits(&path_rules, &s.relative)
+            {
                 *incoming
                     .entry((
                         matching::parent_key(&s.relative),
@@ -178,6 +186,9 @@ impl Registry {
         let mut retry = false;
         for sid in ids {
             let source = self.source(&sid)?;
+            if !crate::path_selection::permits(&path_rules, &source.relative) {
+                continue;
+            }
             if source.disposition == "ignored" || source.disposition == "archived" {
                 continue;
             }
@@ -347,6 +358,7 @@ impl Registry {
         Ok(())
     }
     fn match_candidates(&self, source: &Source, hash: &str) -> Result<(Vec<String>, String, bool)> {
+        let blocked = crate::path_selection::blocked_documents(&self.db, &source.project_id)?;
         let stem = matching::stem(&source.name);
         let parent = matching::parent_key(&source.relative);
         let mut q=self.db.prepare("SELECT DISTINCT a.document_id FROM document_aliases a JOIN documents d ON d.id=a.document_id WHERE a.project_id=?1 AND a.parent_key=?2 AND a.stem=?3 AND a.kind=?4 AND d.merged_into IS NULL AND d.tracking_state='tracked'").map_err(error)?;
@@ -357,7 +369,10 @@ impl Registry {
             )
             .map_err(error)?
             .collect::<std::result::Result<Vec<String>, _>>()
-            .map_err(error)?;
+            .map_err(error)?
+            .into_iter()
+            .filter(|id| !blocked.contains(id))
+            .collect::<Vec<_>>();
         if !aliases.is_empty() {
             return Ok((
                 aliases,
@@ -373,7 +388,10 @@ impl Registry {
             )
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(error)?;
+            .map_err(error)?
+            .into_iter()
+            .filter(|(id, _)| !blocked.contains(id))
+            .collect::<Vec<_>>();
         if !duplicates.is_empty() {
             let relocated = duplicates.len() == 1 && duplicates[0].1.as_deref() == Some("missing");
             return Ok((duplicates.into_iter().map(|(id,_)|id).collect(),"Identical preserved content at another path: possible relocation or duplicate. No new content version is needed.".into(),relocated));
@@ -396,6 +414,9 @@ impl Registry {
         let mut matches = vec![];
         let mut high = false;
         for (id, name, relative) in rows {
+            if blocked.contains(&id) {
+                continue;
+            }
             let other = matching::stem(&name);
             if !stem.normalized.is_empty() && stem.normalized == other.normalized {
                 high = matching::parent_key(&relative) == parent
@@ -435,6 +456,15 @@ impl Registry {
             return Err("Source is outside this project.".into());
         }
         if action == "ignore" {
+            if crate::path_selection::allowed(&self.db, project, &source.relative)? {
+                let mut rules = crate::path_selection::rules(&self.db, project)?;
+                rules.push(crate::path_selection::Rule {
+                    path: source.relative.clone(),
+                    kind: "file".into(),
+                });
+                let revision = crate::path_selection::revision(&self.db, project)?;
+                self.save_path_selection(project, revision, rules)?;
+            }
             self.db
                 .execute(
                     "UPDATE source_files SET disposition='ignored' WHERE id=?1",
@@ -455,6 +485,9 @@ impl Registry {
             )?;
             return Ok(());
         }
+        if !crate::path_selection::allowed(&self.db, project, &source.relative)? {
+            return Err("This file is excluded by the saved folder selection. Include it in the folder tree and save first.".into());
+        }
         let (enabled, archive, _) = self.tracking_flags(project)?;
         if !enabled {
             return Err("Enable tracking before assigning or capturing a document.".into());
@@ -464,6 +497,12 @@ impl Registry {
         let target = match action {
             "assign" => {
                 let target = target.ok_or("Choose a document family.")?;
+                if crate::path_selection::blocked_documents(&self.db, project)?.contains(&target) {
+                    storage::discard_stage(&self.store, &stage.temporary)?;
+                    return Err(
+                        "Include the target family's folder before assigning this file.".into(),
+                    );
+                }
                 let valid:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM documents WHERE id=?1 AND project_id=?2 AND kind=?3 AND merged_into IS NULL AND tracking_state='tracked')",params![target,project,source.kind],|r|r.get(0)).map_err(error)?;
                 if !valid {
                     storage::discard_stage(&self.store, &stage.temporary)?;

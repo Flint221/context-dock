@@ -18,6 +18,8 @@ vi.mock("./services/registry", () => ({
     pickFolder: vi.fn(),
     subscribe: vi.fn(),
     tracking: vi.fn(),
+    paths: vi.fn(),
+    savePaths: vi.fn(),
   },
 }));
 vi.mock("./cloud", async (original) => ({
@@ -140,6 +142,14 @@ it("does not let an older registry read dismiss a newer folder-loss state", asyn
   ).toBeInTheDocument();
 });
 beforeEach(() => {
+  vi.mocked(registry.paths).mockResolvedValue({
+    revision: 0,
+    exclusions: [],
+    entries: [],
+    warnings: [],
+    cloudPending: 0,
+  });
+  vi.mocked(registry.savePaths).mockResolvedValue(undefined);
   vi.clearAllMocks();
   vi.mocked(cloud.subscribe).mockResolvedValue(() => {});
   vi.mocked(cloud.connection).mockResolvedValue({
@@ -191,6 +201,67 @@ beforeEach(() => {
   vi.mocked(registry.snapshot).mockImplementation(async () =>
     structuredClone(state),
   );
+});
+it("guards real sidebar navigation and reloads saved folder rules on returning to the project", async () => {
+  const user = userEvent.setup();
+  state.projects = [
+    {
+      id: "p-tree",
+      name: "Tree project",
+      path: "C:\\Fixtures\\Tree",
+      createdAt: "",
+      status: "available",
+      lastScan: null,
+      scanError: null,
+      documentCount: 0,
+      latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
+      trackingRevision: 0,
+      folderState: "ready",
+    },
+  ];
+  let paths = {
+    revision: 0,
+    exclusions: [] as import("./types").PathRule[],
+    entries: [{ path: "Drafts", kind: "folder" as const, status: "available" }],
+    warnings: [],
+    cloudPending: 0,
+  };
+  vi.mocked(registry.paths).mockImplementation(async () =>
+    structuredClone(paths),
+  );
+  vi.mocked(registry.savePaths).mockImplementation(async (_p, rev, rules) => {
+    paths = { ...paths, revision: rev + 1, exclusions: rules };
+  });
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /^Tree project C:/ }),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", { name: "Include Drafts" }),
+    ).toBeEnabled(),
+  );
+  await user.click(screen.getByRole("checkbox", { name: "Include Drafts" }));
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    screen.getByRole("dialog", { name: "Unsaved folder selection" }),
+  ).toBeInTheDocument();
+  expect(registry.savePaths).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Save changes and continue" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Settings" }),
+  ).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /^Projects/ }));
+  await user.click(
+    await screen.findByRole("button", { name: /^Tree project C:/ }),
+  );
+  expect(
+    await screen.findByRole("checkbox", { name: "Include Drafts" }),
+  ).not.toBeChecked();
 });
 it("registers a real picker selection and opens its discovered documents", async () => {
   const user = userEvent.setup();
@@ -282,7 +353,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.6.5 · Milestone 6")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.7.0")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();

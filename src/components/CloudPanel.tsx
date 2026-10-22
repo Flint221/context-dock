@@ -317,7 +317,7 @@ export function CloudPanel({
               Removals can run while uploads remain paused; restore the tested
               original key or retry after a failure.
               <button
-                disabled={busy || !view.enabled}
+                disabled={busy || !view.selectionRemovalPending}
                 onClick={() => action("retry_selection_removals")}
               >
                 Retry document removals
@@ -446,9 +446,11 @@ export function CloudPanel({
                     <small>
                       {f.versionCount} captured · {bytes(f.rawBytes)} total raw
                       ·{" "}
-                      {f.eligible
-                        ? "Eligible"
-                        : "Resolve local tracking / ambiguity before upload"}
+                      {f.pathExcluded
+                        ? "Excluded by saved folder selection"
+                        : f.eligible
+                          ? "Eligible"
+                          : "Resolve local tracking / ambiguity before upload"}
                     </small>
                   </span>
                 </label>

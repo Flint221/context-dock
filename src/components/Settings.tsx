@@ -41,7 +41,7 @@ export function SettingsView({
         <ShieldCheck size={23} />
         <div>
           <h2>About ContextDock</h2>
-          <p>Version {version} · Milestone 6</p>
+          <p>Version {version}</p>
           <p>
             Discovery reads file metadata. Opt-in tracking captures immutable
             local snapshots. Separately enabled archival preserves older sources

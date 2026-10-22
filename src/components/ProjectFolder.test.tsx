@@ -20,6 +20,9 @@ vi.mock("./ProjectCloud", () => ({
 vi.mock("./TrackingPanel", () => ({
   TrackingPanel: () => <div>Project tracking work</div>,
 }));
+vi.mock("./FolderTree", () => ({
+  FolderTree: () => <div>Folder selection</div>,
+}));
 
 const original: Project = {
   id: "project-id",

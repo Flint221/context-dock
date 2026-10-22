@@ -669,6 +669,10 @@ fn initialization_can_ignore_existing_files_and_word_lock_files_are_not_document
             .unwrap()
             .id
             .clone();
+    assert!(f.r.resolve_match(&f.project, &source, "new", None).is_err());
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(&f.project, revision, vec![])
+        .unwrap();
     f.r.resolve_match(&f.project, &source, "new", None).unwrap();
     assert_eq!(f.count(&ignored), 1);
 }

@@ -1699,6 +1699,210 @@ fn cleanup_confirm(f: &Fixture) -> Value {
     json!({"confirm":true,"storeId":p["store_id"],"confirmation":p["store_name"]})
 }
 #[test]
+fn saved_path_removal_can_finish_on_retained_cloud_data_without_enabling_uploads() {
+    use crate::path_selection::{self, Rule};
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "disconnect",
+        &json!({"retainCloud":true}),
+    )
+    .unwrap();
+    let revision = path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![Rule {
+            path: String::new(),
+            kind: "folder".into(),
+        }],
+    )
+    .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(p["enabled"], 0);
+    assert!(cloud_commands::needed(&f.r.db, &p).unwrap());
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap();
+    let job = &cloud::selection_removals(&f.r.db, &f.id).unwrap()[0];
+    assert!(guard
+        .request(
+            "GET",
+            &format!(
+                "/vector_stores/{}/files/{}",
+                s(&p, "store_id"),
+                s(job, "file_id")
+            ),
+            None
+        )
+        .is_ok());
+    assert!(guard.upload("blocked.md", b"never sent".to_vec()).is_err());
+    api.0.borrow_mut().ignore_association_delete = true;
+    f.step(&api);
+    assert_eq!(
+        cloud::project(&f.r.db, &f.id).unwrap()["status"],
+        "selection_removal_failed"
+    );
+    api.0.borrow_mut().ignore_association_delete = false;
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "retry_selection_removals",
+        &json!({}),
+    )
+    .unwrap();
+    f.step(&api);
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(p["enabled"], 0);
+    assert_eq!(p["paused"], 1);
+    assert!(!cloud_commands::needed(&f.r.db, &p).unwrap());
+}
+#[test]
+fn saved_folder_exclusion_removes_from_index_while_paused_and_reinclude_reuses_owned_store() {
+    use crate::path_selection::{self, Rule};
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    fs::create_dir_all(f.root.join("Drafts/Nested")).unwrap();
+    fs::write(f.root.join("Drafts/Nested/notes.md"), "nested notes").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    let nested =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.name == "notes.md")
+            .unwrap()
+            .document_id
+            .clone();
+    let mut draft = f.draft();
+    draft.documents.push(nested.clone());
+    f.apply(draft);
+    f.sync(&api);
+    let store = cloud::project(&f.r.db, &f.id).unwrap()["store_id"].clone();
+    let uploaded = api.0.borrow().files.len();
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=1,auto_sync=0", [])
+        .unwrap();
+    let revision = path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![Rule {
+            path: "Drafts".into(),
+            kind: "folder".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
+    // An old upload guard cannot continue with the pre-save selection.
+    assert!(guard.upload("not-sent.md", b"not sent".to_vec()).is_err());
+    let removals = cloud::selection_removals(&f.r.db, &f.id).unwrap();
+    let current_guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap();
+    let endpoint = format!(
+        "/vector_stores/{}/files/{}",
+        store.as_str().unwrap(),
+        s(&removals[0], "file_id")
+    );
+    assert!(current_guard.request("GET", &endpoint, None).is_ok());
+    api.0.borrow_mut().ignore_association_delete = true;
+    f.step(&api);
+    assert_eq!(
+        cloud::project(&f.r.db, &f.id).unwrap()["status"],
+        "selection_removal_failed"
+    );
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    api.0.borrow_mut().ignore_association_delete = false;
+    cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "retry_selection_removals",
+        &json!({}),
+    )
+    .unwrap();
+    f.step(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(api.0.borrow().files.len(), uploaded);
+    assert_eq!(f.r.versions(&nested).unwrap().len(), 1);
+    assert_eq!(cloud::project(&f.r.db, &f.id).unwrap()["paused"], 1);
+    // The saved cloud selection is retained; re-inclusion uses its previous store/policy.
+    let revision = path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET paused=0", [])
+        .unwrap();
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(api.0.borrow().files.len(), uploaded);
+    assert_eq!(cloud::project(&f.r.db, &f.id).unwrap()["store_id"], store);
+}
+#[test]
+fn path_exclusions_filter_historical_versions_and_block_questions_until_cloud_removal_verifies() {
+    use crate::path_selection::{self, Rule};
+    let mut f = Fixture::new();
+    let api = Mock::default();
+    f.enable();
+    f.sync(&api);
+    f.edit();
+    let mut draft = f.draft();
+    draft.mode = "history".into();
+    f.apply(draft);
+    f.sync(&api);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    let revision = path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![Rule {
+            path: String::new(),
+            kind: "folder".into(),
+        }],
+    )
+    .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert!(
+        cloud::desired(&f.r.db, &f.id, &cloud::draft(&f.r.db, &p).unwrap())
+            .unwrap()
+            .is_empty()
+    );
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound")
+        .unwrap_err()
+        .contains("exclusions"));
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 2);
+    f.sync(&api);
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+    assert_eq!(api.0.borrow().files.len(), 2);
+}
+#[test]
 fn project_removal_handles_missing_resources_without_downloading_assistants_files() {
     for absent in ["none", "store", "all"] {
         let mut f = Fixture::new();

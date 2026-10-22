@@ -295,7 +295,10 @@ pub fn step(
     let p = cloud::project(db, id)?;
     // Saved document opt-outs can only GET/DELETE their owned associations, including
     // while ordinary uploads are paused or the source folder is unavailable.
-    if n(&p, "enabled") == 1
+    if (n(&p, "enabled") == 1
+        || cloud::selection_removals(db, id)?
+            .iter()
+            .any(|j| s(j, "phase") == "path_remove"))
         && s(&p, "scope") == key_scope
         && !["cleanup_pending", "cleanup_failed"].contains(&s(&p, "status"))
         && n(&p, "next_at") <= chrono::Utc::now().timestamp()
@@ -311,7 +314,7 @@ pub fn step(
             let Ok(current) = cloud::project(db, id) else {
                 return Ok(());
             };
-            if n(&current, "enabled") != 1
+            if n(&current, "enabled") != n(&p, "enabled")
                 || n(&current, "revision") != n(&p, "revision")
                 || ["cleanup_pending", "cleanup_failed"].contains(&s(&current, "status"))
             {

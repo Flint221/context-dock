@@ -65,6 +65,16 @@ fn enqueue_archive(
     let (Some(previous), Some(old_source)) = (previous, old_source) else {
         return Ok(());
     };
+    let old_path: String = db
+        .query_row(
+            "SELECT relative_path FROM source_files WHERE id=?1",
+            [old_source],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if !crate::path_selection::allowed(db, project, &old_path)? {
+        return Ok(());
+    }
     if previous == next {
         return Ok(());
     }
@@ -156,6 +166,10 @@ impl Registry {
         reason: &str,
         may_archive: bool,
     ) -> Result<()> {
+        if !crate::path_selection::allowed(&self.db, &source.project_id, &source.relative)? {
+            storage::discard_stage(&self.store, &staged.temporary)?;
+            return Err("File capture is paused by the saved folder selection.".into());
+        }
         let (previous, old_source): (Option<String>, Option<String>) = self
             .db
             .query_row(
@@ -482,6 +496,36 @@ impl Registry {
         for (id, kind, payload, state) in ops {
             if kind == "archive" && !self.tracking_flags(project)?.1 {
                 continue;
+            }
+            let value: serde_json::Value =
+                serde_json::from_str(&payload).map_err(|_| "Invalid pending operation.")?;
+            if kind == "capture"
+                && !crate::path_selection::allowed(
+                    &self.db,
+                    project,
+                    value["relative"]
+                        .as_str()
+                        .ok_or("Capture path is missing.")?,
+                )?
+            {
+                continue;
+            }
+            if kind == "archive" {
+                let old = self.source(
+                    value["old_source"]
+                        .as_str()
+                        .ok_or("Archive source is missing.")?,
+                )?;
+                let new = self.source(
+                    value["new_source"]
+                        .as_str()
+                        .ok_or("Archive replacement is missing.")?,
+                )?;
+                if !crate::path_selection::allowed(&self.db, project, &old.relative)?
+                    || !crate::path_selection::allowed(&self.db, project, &new.relative)?
+                {
+                    continue;
+                }
             }
             let result = match kind.as_str() {
                 "capture" => serde_json::from_str::<CapturePlan>(&payload)

@@ -30,6 +30,9 @@ mod matching;
 mod models;
 mod monitor;
 mod operations;
+mod path_selection;
+#[cfg(test)]
+mod path_selection_tests;
 mod processes;
 mod registry;
 mod scanner;
@@ -176,15 +179,21 @@ async fn configure_tracking(
 #[tauri::command]
 async fn resolve_match(
     state: tauri::State<'_, Store>,
+    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
     project: String,
     source: String,
     action: String,
     target: Option<String>,
 ) -> Result<(), String> {
-    work(state.inner().clone(), move |r| {
-        r.resolve_match(&project, &source, &action, target)
+    let store = state.inner().clone();
+    let gate = runtime.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
+        let mut registry = store.0.lock().map_err(|_| "Registry is unavailable.")?;
+        registry.resolve_match(&project, &source, &action, target)
     })
     .await
+    .map_err(|e| format!("Document selection failed: {e}"))?
 }
 #[tauri::command]
 async fn document_versions(
@@ -274,6 +283,47 @@ fn open_location(path: &str) -> Result<(), String> {
 struct SessionLock {
     _file: std::fs::File,
 }
+#[tauri::command]
+async fn path_selection_view(
+    state: tauri::State<'_, Store>,
+    project: String,
+) -> Result<path_selection::View, String> {
+    work(state.inner().clone(), move |r| r.path_selection(&project)).await
+}
+#[tauri::command]
+async fn save_path_selection(
+    state: tauri::State<'_, Store>,
+    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
+    app: tauri::AppHandle,
+    project: String,
+    revision: i64,
+    exclusions: Vec<path_selection::Rule>,
+) -> Result<(), String> {
+    let gate = runtime.gate.clone();
+    let store = state.inner().clone();
+    let id = project.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
+        let mut r = store.0.lock().map_err(|_| "Registry is unavailable.")?;
+        r.save_path_selection(&id, revision, exclusions)?;
+        // Reconcile admitted sources only. An error after persistence is shown
+        // by the tracking panel; it must not turn a saved draft into an unsaved one.
+        if let Err(e) = r.reconcile(
+            &id,
+            "path_selection",
+            &std::collections::HashSet::new(),
+            true,
+        ) {
+            let _ = r.set_tracking_error(&id, &[e]);
+        }
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|e| format!("Folder selection failed: {e}"))??;
+    let _ = app.emit("registry-changed", &project);
+    let _ = app.emit("cloud-changed", &project);
+    Ok(())
+}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -319,6 +369,8 @@ pub fn run() {
             cloud_commands::cloud_key,
             cloud_commands::cloud_action,
             snapshot,
+            path_selection_view,
+            save_path_selection,
             add_project,
             rename_project,
             preview_project_folder,

@@ -120,6 +120,33 @@ pub fn scan(root: &Path) -> Result<Scan, String> {
     }
     Ok(scan)
 }
+pub fn folders(root: &Path) -> Result<(Vec<String>, Vec<String>), String> {
+    fs::read_dir(root).map_err(|_| "The project folder cannot be read.")?;
+    let mut folders = vec![String::new()];
+    let mut warnings = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| !excluded(e))
+    {
+        match entry {
+            Ok(e) if e.depth() > 0 && e.file_type().is_dir() => {
+                if folders.len() >= 20_000 {
+                    return Err(
+                        "Folder tree exceeds 20,000 directories. Choose a smaller project root."
+                            .into(),
+                    );
+                }
+                if let Some(p) = e.path().strip_prefix(root).ok().and_then(|p| p.to_str()) {
+                    folders.push(p.replace('\\', "/"));
+                }
+            }
+            Err(e) => warnings.push(e.to_string()),
+            _ => {}
+        }
+    }
+    Ok((folders, warnings))
+}
 #[cfg(windows)]
 pub fn explorer_path(path: &str) -> String {
     if let Some(unc) = path.strip_prefix(r"\\?\UNC\") {

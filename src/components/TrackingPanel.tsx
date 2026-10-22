@@ -491,9 +491,9 @@ export function TrackingPanel({
             separate, and initialization will not move them.
           </p>
           <p className="tracking-note">
-            Unselected existing files are ignored for tracking until you
-            explicitly choose Track independently. New unrelated files added
-            later are tracked automatically.
+            Unselected existing files are ignored for tracking until you include
+            them and Save changes in the folder tree. New unrelated files added
+            later are tracked automatically unless their folder is excluded.
           </p>
           <div className="selection-actions">
             <button

@@ -71,7 +71,16 @@ pub fn activity(db: &Connection, id: &str, kind: &str, message: &str) -> Result<
 }
 const ELIGIBLE:&str="d.tracking_state='tracked' AND d.merged_into IS NULL AND d.current_version_id IS NOT NULL AND d.kind IN ('markdown','word') AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files sf ON sf.id=m.source_id WHERE sf.document_id=d.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))";
 pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])
+    let mut families=rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])?;
+    let blocked = crate::path_selection::blocked_documents(db, id)?;
+    for family in &mut families {
+        let excluded = blocked.contains(s(family, "id"));
+        family["pathExcluded"] = json!(excluded as i64);
+        if excluded {
+            family["eligible"] = json!(0);
+        }
+    }
+    Ok(families)
 }
 pub fn desired(db: &Connection, id: &str, draft: &CloudDraft) -> Result<Vec<CloudVersion>> {
     desired_selection(db, id, draft, true)
@@ -82,6 +91,8 @@ fn desired_selection(
     draft: &CloudDraft,
     check_sources: bool,
 ) -> Result<Vec<CloudVersion>> {
+    let blocked = crate::path_selection::blocked_versions(db, id)?;
+    let path_rules = crate::path_selection::rules(db, id)?;
     if check_sources {
         crate::folder_recovery::require_ready(db, id)?;
     }
@@ -91,6 +102,9 @@ fn desired_selection(
     for document in draft.documents.iter().filter(|_| check_sources) {
         let source:Option<(String,String,Option<i64>)>=db.query_row("SELECT s.relative_path,s.status,s.hashed_size FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(error)?;
         if let Some((relative, status, hashed_size)) = source {
+            if !crate::path_selection::permits(&path_rules, &relative) {
+                continue;
+            }
             if status != "available"
                 || storage::checked(Path::new(&root), &relative, false)
                     .and_then(|p| storage::locked_read(&p.path, false))
@@ -110,9 +124,10 @@ fn desired_selection(
     }
     let families = families(db, id)?;
     if draft.documents.iter().any(|d| {
-        !families
-            .iter()
-            .any(|f| s(f, "id") == d && (!check_sources || n(f, "eligible") == 1))
+        !families.iter().any(|f| {
+            s(f, "id") == d
+                && (!check_sources || n(f, "eligible") == 1 || n(f, "pathExcluded") == 1)
+        })
     }) {
         return Err(
             "Selection includes an ineligible or unrelated document. Resolve local tracking first."
@@ -139,7 +154,11 @@ fn desired_selection(
         .map_err(error)?;
     Ok(versions
         .into_iter()
-        .filter(|v| draft.documents.contains(&v.document) && (draft.mode == "history" || v.current))
+        .filter(|v| {
+            !blocked.contains(&v.id)
+                && draft.documents.contains(&v.document)
+                && (draft.mode == "history" || v.current)
+        })
         .collect())
 }
 pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
@@ -287,7 +306,8 @@ pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
     rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
 }
 pub fn selection_removals(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 AND j.phase='selection_remove' AND j.state NOT IN ('removed','purged') AND j.desired=0 AND NOT EXISTS(SELECT 1 FROM cloud_documents c WHERE c.project_id=j.project_id AND c.document_id=j.document_id) ORDER BY j.id",&[&id])
+    let blocked = crate::path_selection::blocked_versions(db, id)?;
+    Ok(rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName,EXISTS(SELECT 1 FROM cloud_documents c WHERE c.project_id=j.project_id AND c.document_id=j.document_id) selected FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 AND j.phase IN ('selection_remove','path_remove') AND j.state NOT IN ('removed','purged') AND j.desired=0 ORDER BY j.id",&[&id])?.into_iter().filter(|j|n(j,"selected")==0 || blocked.contains(s(j,"version_id"))).collect())
 }
 /// Only the exact GET/DELETE routes needed to complete saved document opt-outs.
 pub fn selection_removal_request(

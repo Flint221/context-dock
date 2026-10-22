@@ -837,6 +837,89 @@ header {
 .table-scroll {
   overflow-x: auto;
 }
+.folder-selection {
+  padding: 22px;
+  margin-bottom: 24px;
+}
+.folder-selection h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.folder-selection > p {
+  font-size: 14px;
+  margin: 12px 0;
+}
+.folder-tree {
+  max-height: 520px;
+  overflow: auto;
+  padding: 8px;
+  margin: 18px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.folder-tree,
+.folder-tree ul {
+  list-style: none;
+}
+.folder-tree ul {
+  padding-left: 26px;
+  margin: 0;
+}
+.folder-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.folder-tree-row:hover {
+  background: var(--soft);
+}
+.folder-tree-row label {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 9px;
+  min-width: 120px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.folder-tree-row input {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin: 0;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.folder-tree-row label span {
+  overflow-wrap: anywhere;
+}
+.folder-tree-row label svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.folder-tree-row.excluded label {
+  color: var(--muted);
+}
+.folder-tree-row .tree-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  min-height: 32px;
+  padding: 4px;
+  flex-shrink: 0;
+}
+.tree-empty {
+  padding: 8px 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
 table {
   border-collapse: collapse;
   width: 100%;

@@ -7,9 +7,15 @@ import type {
   TrackingView,
   Version,
   FolderPlan,
+  PathRule,
+  PathSelectionView,
 } from "../types";
 import type { Comparison } from "../comparison";
 export const registry = {
+  paths: (project: string) =>
+    invoke<PathSelectionView>("path_selection_view", { project }),
+  savePaths: (project: string, revision: number, exclusions: PathRule[]) =>
+    invoke<void>("save_path_selection", { project, revision, exclusions }),
   compare: (earlier: string, later: string) =>
     invoke<Comparison>("compare_versions", { earlier, later }),
   subscribe: (changed: () => void) =>

@@ -26,6 +26,7 @@ pub struct ProjectApi<'a> {
     stop: Arc<AtomicBool>,
     cleanup: bool,
     folder_revision: i64,
+    path_revision: i64,
 }
 impl<'a> ProjectApi<'a> {
     pub fn new(
@@ -43,6 +44,7 @@ impl<'a> ProjectApi<'a> {
                 |r| r.get(0),
             )
             .map_err(error)?;
+        let path_revision = crate::path_selection::revision(&db, project)?;
         Ok(Self {
             api,
             db,
@@ -51,6 +53,7 @@ impl<'a> ProjectApi<'a> {
             stop,
             cleanup: false,
             folder_revision,
+            path_revision,
         })
     }
     fn check(&self, method: &str, path: &str) -> std::result::Result<(), cloud_api::ApiError> {
@@ -58,6 +61,14 @@ impl<'a> ProjectApi<'a> {
             && cloud::selection_removal_request(&self.db, &self.project, method, path)
                 .map_err(|e| cloud_api::ApiError::local(&e))?;
         if !self.cleanup && !removal {
+            if crate::path_selection::revision(&self.db, &self.project)
+                .map_err(|e| cloud_api::ApiError::local(&e))?
+                != self.path_revision
+            {
+                return Err(cloud_api::ApiError::local(
+                    "Folder selection changed. No further upload or attachment was sent.",
+                ));
+            }
             crate::folder_recovery::require_ready(&self.db, &self.project)
                 .map_err(|e| cloud_api::ApiError::local(&e))?;
             let revision: i64 = self
@@ -76,7 +87,7 @@ impl<'a> ProjectApi<'a> {
                 ));
             }
         }
-        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND c.enabled=1 AND p.removed_at IS NULL AND ((?3=0 AND c.status NOT IN ('cleanup_pending','cleanup_failed') AND (c.paused=0 OR c.delete_requested=1 OR ?4=1)) OR (?3=1 AND c.paused=1 AND c.status='cleanup_pending')) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope,self.cleanup as i64,removal as i64],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
+        let active:i64=self.db.query_row("SELECT COUNT(*) FROM cloud_projects c JOIN projects p ON p.id=c.project_id JOIN cloud_connection k ON k.singleton=1 WHERE c.project_id=?1 AND (c.enabled=1 OR (?4=1 AND c.paused=1)) AND p.removed_at IS NULL AND ((?3=0 AND c.status NOT IN ('cleanup_pending','cleanup_failed') AND (c.paused=0 OR c.delete_requested=1 OR ?4=1)) OR (?3=1 AND c.paused=1 AND c.status='cleanup_pending')) AND c.scope=?2 AND k.scope=?2 AND k.status='connected'",params![self.project,self.scope,self.cleanup as i64,removal as i64],|r|r.get(0)).map_err(|_|cloud_api::ApiError::local("Cloud authorization state could not be checked."))?;
         if active != 1 || self.stop.load(Ordering::Relaxed) {
             return Err(cloud_api::ApiError::local(
                 "Cloud sync paused, disconnected or stopped before the next request.",
@@ -127,7 +138,7 @@ impl CloudApi for ProjectApi<'_> {
 }
 pub struct CloudRuntime {
     path: PathBuf,
-    gate: Arc<Mutex<()>>,
+    pub(crate) gate: Arc<Mutex<()>>,
     stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
@@ -149,16 +160,18 @@ fn current_api(db: &Connection) -> Result<(OpenAi, String)> {
     Ok((OpenAi::new(&key)?, scope))
 }
 pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
-    if n(p, "enabled") != 1 || n(p, "next_at") > chrono::Utc::now().timestamp() {
+    if n(p, "next_at") > chrono::Utc::now().timestamp() {
         return Ok(false);
     }
-    if n(p, "delete_requested") == 1 {
+    if n(p, "enabled") == 1 && n(p, "delete_requested") == 1 {
         return Ok(true);
     }
-    if !cloud::selection_removals(db, s(p, "project_id"))?.is_empty()
-        && !["cleanup_pending", "cleanup_failed"].contains(&s(p, "status"))
-    {
-        return Ok(true);
+    let removals = cloud::selection_removals(db, s(p, "project_id"))?;
+    if !removals.is_empty() && !["cleanup_pending", "cleanup_failed"].contains(&s(p, "status")) {
+        return Ok(n(p, "enabled") == 1 || removals.iter().any(|j| s(j, "phase") == "path_remove"));
+    }
+    if n(p, "enabled") != 1 {
+        return Ok(false);
     }
     if crate::folder_recovery::require_ready(db, s(p, "project_id")).is_err() {
         return Ok(false);
@@ -238,7 +251,7 @@ impl CloudRuntime {
             let mut cursor=0usize;
             while !worker_stop.load(Ordering::Relaxed) {
                 if let Ok(_guard)=worker_gate.try_lock() {
-                    if let Ok(projects)=cloud::rows(&db,"SELECT c.* FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE p.removed_at IS NULL AND c.enabled=1",&[]) {
+                    if let Ok(projects)=cloud::rows(&db,"SELECT c.* FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE p.removed_at IS NULL AND (c.enabled=1 OR EXISTS(SELECT 1 FROM cloud_jobs j WHERE j.project_id=c.project_id AND j.phase='path_remove' AND j.state NOT IN ('removed','purged')))",&[]) {
                         for offset in 0..projects.len() {
                             let index=(cursor+offset)%projects.len();let p=&projects[index];
                             if needed(&db,p).unwrap_or(false) {
@@ -501,7 +514,8 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "retry_selection_removals" => {
-            if n(&p, "enabled") != 1 {
+            let removals = cloud::selection_removals(db, id)?;
+            if n(&p, "enabled") != 1 && !removals.iter().any(|j| s(j, "phase") == "path_remove") {
                 return Err("Cloud sync is off. Use confirmed project cloud cleanup to remove retained remote data.".into());
             }
             if cloud::selection_removals(db, id)?.is_empty() {

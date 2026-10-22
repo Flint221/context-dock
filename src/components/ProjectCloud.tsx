@@ -84,6 +84,9 @@ export function ProjectCloud({ project }: { project: string }) {
   const retained = !!view && !enabled && hasCloudData(view);
   const indexedTotal = view ? view.indexed + view.pending + view.failed : 0;
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
+  const pathsExcluded = !!view?.families.some(
+    (f) => f.selected && f.pathExcluded,
+  );
   const ready =
     enabled &&
     view?.localReady !== false &&
@@ -101,9 +104,11 @@ export function ProjectCloud({ project }: { project: string }) {
         ? "Save and test your OpenAI key in Settings to connect."
         : view.error
           ? view.error
-          : selected.length === 0
-            ? "Enable version tracking and select documents for cloud sync."
-            : "Your documents are syncing. Questions unlock when the current versions are ready.";
+          : pathsExcluded && selected.length === 0
+            ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
+            : selected.length === 0
+              ? "Enable version tracking and select documents for cloud sync."
+              : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;
     void run(async () => {
@@ -150,7 +155,9 @@ export function ProjectCloud({ project }: { project: string }) {
                     : enabled
                       ? ready
                         ? "On · Documents ready for questions"
-                        : "On · Preparing your documents"
+                        : pathsExcluded && selected.length === 0
+                          ? "On · Selected paths excluded"
+                          : "On · Preparing your documents"
                       : "Off · Local version history"}
             </p>
           </div>
@@ -200,6 +207,25 @@ export function ProjectCloud({ project }: { project: string }) {
         )}
         {error && !setup && !stop && <p role="alert">{error}</p>}
         {view?.error && <p role="alert">{view.error}</p>}
+        {!!view?.selectionRemovalPending && (
+          <div className="banner warning">
+            <span>
+              {view.selectionRemovalPending} excluded index entries await
+              verified removal. Local exclusion is already saved.
+            </span>
+            <button
+              disabled={busy || advancedBusy}
+              onClick={() =>
+                void run(async () => {
+                  await cloud.action(project, "retry_selection_removals");
+                  await load();
+                })
+              }
+            >
+              Retry index removals
+            </button>
+          </div>
+        )}
         <OperationStatus
           busy={busy || advancedBusy}
           message="Saving and checking cloud status…"

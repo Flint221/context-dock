@@ -16,6 +16,7 @@ export interface Plan {
   storeName: string;
 }
 export interface Family {
+  pathExcluded?: number;
   id: string;
   name: string;
   eligible: number;

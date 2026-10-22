@@ -160,6 +160,7 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
+        let path_rules = crate::path_selection::rules(&self.db, project)?;
         Ok(TrackingView {
             enabled,
             archive_enabled,
@@ -167,8 +168,14 @@ impl Registry {
             watch_status,
             error: problem,
             families,
-            sources,
-            reviews,
+            sources: sources
+                .into_iter()
+                .filter(|s| crate::path_selection::permits(&path_rules, &s.relative_path))
+                .collect(),
+            reviews: reviews
+                .into_iter()
+                .filter(|s| crate::path_selection::permits(&path_rules, &s.relative_path))
+                .collect(),
             activity,
             operations,
         })
