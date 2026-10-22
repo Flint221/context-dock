@@ -1,4 +1,4 @@
-# Unified folder/cloud eligibility — 0.8.1
+# Unified folder/cloud eligibility - 0.8.1
 
 Schema 010 adds new_paths and enables automatic syncing for already-enabled cloud projects while retaining paused state and resource identities. Saved folder exclusions control local capture and desired cloud versions. Legacy cloud_documents/cloud_exclusions records are retained for compatibility but no longer independently override saved folder choices. Discovery after the first scan creates explicit exclusions and New markers; saving inclusion clears the marker. Confident single-family inheritance binds the staged-byte match before admitting a path, respects excluded parents and leaves uncertain batches excluded.
 

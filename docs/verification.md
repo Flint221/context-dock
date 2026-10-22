@@ -1,3 +1,13 @@
+# 0.8.1 - Unified selection installer and authorized local reset
+
+October 22, 2026. Fresh checks pass: **197 native tests** plus the intentionally ignored child fixture, **131 frontend tests across 15 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging. Version/lockfile/config values agree at 0.8.1; supported schema is 010 and application identity is unchanged.
+
+The user's explicitly authorized fresh local reset is complete: 29 schema-10 tables, integrity ok, no foreign-key errors, zero projects/documents/cloud jobs and cloud disconnected. The original DB/WAL/SHM were preserved twice in a newly verified backup. All 57 snapshots remain in place and backed up; known source/archive hashes and the earlier backup are unchanged. No app GUI, installation or real re-upload was performed. See [the reset and preservation record](ContextDock_Local_Reset_v1.md) and [the preceding investigation](ContextDock_DB_Investigation_v1.md). Resetting is an account-specific backend action, not automatic installer behavior.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.8.1_x64-setup.exe`, **4,495,604 bytes**, SHA-256 `AAEE6F98804B63871E5AFFFF497E33AE2798A833CCC36C5199022802E8F4F4F7`. File/product version is 0.8.1. No installed acceptance, main merge or GitHub CI result is claimed.
+
+---
+
 # 0.8.0 — Reviewed reversible archival
 
 October 22, 2026. **187 native tests pass**, plus one intentionally ignored child-fixture entry invoked by its parent test. **127 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging pass. Package/lockfile, Rust and Tauri versions agree at 0.8.0. Schema 009 records durable archive intents and rejects older readers; application identity remains com.contextdock.desktop.
