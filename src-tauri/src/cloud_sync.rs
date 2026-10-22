@@ -404,9 +404,22 @@ pub fn step(
             } else {
                 attach(db, &p, j, api)
             };
-            if let Err(e) = result {
+            if let Err(mut e) = result {
+                if e.message
+                    == "Cloud sync paused, disconnected or stopped before the next request."
+                {
+                    return Err(e);
+                }
+                e.message = format!(
+                    "{} (version {}): {} Other files can continue syncing.",
+                    s(j, "sourcePath"),
+                    n(j, "number"),
+                    e.message
+                );
                 job_failure(db, j, &e)?;
-                return Err(e);
+                log(db, id, &e.message)?;
+                // Backoff/failure belongs to this file, not the entire project.
+                return Ok(());
             }
             return Ok(());
         }
@@ -444,6 +457,12 @@ pub fn step(
                 }
             }
             execute(db,"UPDATE cloud_projects SET sync_requested=0,status='up_to_date',last_sync=?2,error=NULL,attempts=0 WHERE project_id=?1",&[&id,&models::now()])?;
+        } else if jobs
+            .iter()
+            .filter(|j| n(j, "desired") == 1)
+            .all(|j| matches!(s(j, "state"), "indexed" | "failed" | "uncertain"))
+        {
+            execute(db,"UPDATE cloud_projects SET sync_requested=0,status='file_errors',last_sync=?2,error=NULL WHERE project_id=?1",&[&id,&models::now()])?;
         }
         Ok(())
     })();

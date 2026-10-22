@@ -303,7 +303,7 @@ pub fn verify_flags(db: &Connection, id: &str, expected: &[(&str, i64)]) -> Resu
     Ok(())
 }
 pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
+    rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.source_relative sourcePath,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 ORDER BY d.family_name,v.number",&[&id])
 }
 pub fn selection_removals(db: &Connection, id: &str) -> Result<Vec<Value>> {
     let blocked = crate::path_selection::blocked_versions(db, id)?;
@@ -361,6 +361,11 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
         }
     }
     let js = jobs(db, id)?;
+    if p["error"].is_null() {
+        if let Some(job) = js.iter().find(|j| !s(j, "error").is_empty()) {
+            p["error"] = job["error"].clone();
+        }
+    }
     p["selectionSaved"] = json!(!s(&p, "scope").is_empty());
     p["selectionRemovalPending"] = json!(selection_removals(db, id)?.len());
     let local = desired(db, id, &draft(db, &p)?);
@@ -413,7 +418,7 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
 }
 pub fn verified(root: &Path, v: &CloudVersion, limit: i64) -> Result<Vec<u8>> {
     if v.size <= 0 || v.size > limit || v.size as usize > extraction::MAX_SNAPSHOT {
-        return Err("Snapshot exceeds the configured soft limit or the 16 MiB application safety limit (empty files are unsupported).".into());
+        return Err(format!("Snapshot is {} bytes; cloud uploads require a nonempty file within the configured {}-byte limit and the 16 MiB application limit. No bytes uploaded.", v.size, limit));
     }
     let path = storage::checked(root, &v.snapshot, false)?;
     let file = storage::locked_read(&path.path, false)?;
@@ -425,17 +430,9 @@ pub fn verified(root: &Path, v: &CloudVersion, limit: i64) -> Result<Vec<u8>> {
         return Err("Snapshot integrity verification failed. No bytes uploaded.".into());
     }
     extraction::extract(&bytes, &v.kind)?;
-    // Bound all DOCX XML, including parts omitted by the local text extractor.
-    if v.kind == "word" {
-        let archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes))
-            .map_err(|_| "Invalid DOCX snapshot")?;
-        let xml = archive.decompressed_size().unwrap_or(u128::MAX);
-        if xml > 4 * 1024 * 1024 {
-            return Err(
-                "DOCX expanded content exceeds the conservative token-screening limit.".into(),
-            );
-        }
-    }
+    // Extraction already validates the 128 MiB expanded package, entry/ratio,
+    // body XML and extracted-text limits. Package bytes include images and are
+    // not a token count; do not impose the former 4 MiB package screen here.
     Ok(bytes)
 }
 pub fn version(db: &Connection, id: &str) -> Result<CloudVersion> {

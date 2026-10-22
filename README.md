@@ -1,6 +1,12 @@
 # ContextDock
 
-ContextDock 0.7.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.7.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+
+## Larger Word packages and independent sync failures (0.7.1)
+
+The old 4 MiB unpacked-DOCX cloud screen is removed. Word packages now use the existing 128 MiB expanded-package bound, with the existing 16 MiB raw snapshot, configured soft-upload size, 8 MiB body XML, 4 MiB extracted body text and ZIP entry/ratio limits still enforced. The expanded package includes images and other parts; its byte size is not a token count. Provider indexing can still reject a supported local package.
+
+Upload/index failures now identify the original relative path, version and reason. They stay on the individual job while other files continue syncing. Retry/backoff remains per file; failures stay visible, and **Sync now** explicitly retries failed/uncertain jobs. Shared project/account/ownership failures still stop unsafe work. Questions still wait for the selected current versions to be ready. If a previous build already stopped this project on the old error, use **Sync now** after upgrading.
 
 ## Folder tree and saved exclusions (0.7.0)
 
@@ -113,7 +119,7 @@ Use Sync Now, Pause/Resume and Retry/Reconcile for control. Current-only replace
 
 **Remove project** asks whether to delete cloud data (default) or explicitly retain it in OpenAI. With deletion selected, the registration stays available until cloud cleanup succeeds. Local source files, snapshots, history and chats remain on this computer. Retained remote data may continue to incur storage charges; re-register the same folder to recover its mappings for later cleanup. Global OpenAI disconnect requires active projects to be cleaned first, or removed with an explicit retain choice. Uninstalling cannot delete remote resources. Cleanup only targets this installation/project's owned resources and verified upload identities; shared files, mismatched ownership, inaccessible resources and failed verification remain visible errors. No authenticated cleanup is performed automatically on upgrade.
 
-Settings shows raw indexed snapshot bytes separately from last measured OpenAI index usage and links to [usage](https://platform.openai.com/usage), [billing](https://platform.openai.com/settings/organization/billing/overview) and [current pricing](https://developers.openai.com/api/docs/pricing). Parsed/indexed bytes differ from file size; account allowances may be shared. The soft upload-size limit is not a dollar spending cap and indexing is not guaranteed free. Application upload bounds are 16 MiB raw and 4 MiB extracted text/expanded DOCX; provider type/token limits also apply. Follow [the installed-app walkthrough](docs/manual-testing-milestone-4.md) for exact samples, 14 tests, recovery and cleanup. Live API/upgrade behavior requires user acceptance testing.
+Settings shows raw indexed snapshot bytes separately from last measured OpenAI index usage and links to [usage](https://platform.openai.com/usage), [billing](https://platform.openai.com/settings/organization/billing/overview) and [current pricing](https://developers.openai.com/api/docs/pricing). Parsed/indexed bytes differ from file size; account allowances may be shared. The soft upload-size limit is not a dollar spending cap and indexing is not guaranteed free. Application upload bounds are 16 MiB raw, 4 MiB extracted text, 8 MiB DOCX body XML and 128 MiB expanded DOCX package; provider type/token limits also apply. Follow [the installed-app walkthrough](docs/manual-testing-milestone-4.md) for exact samples, 14 tests, recovery and cleanup. Live API/upgrade behavior requires user acceptance testing.
 
 ## First tracking workflow
 

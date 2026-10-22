@@ -19,6 +19,23 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("shows a file-specific failure while other versions are still syncing", async () => {
+  connected();
+  view.pending = 2;
+  view.failed = 1;
+  view.error =
+    "Drafts/Large.docx (version 2): DOCX body XML exceeds the 8 MiB limit. Other files can continue syncing.";
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByText("On · Some files need attention"),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Drafts/Large.docx (version 2)",
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent("8 MiB limit");
+  expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});
 it("updates measured indexing progress from backend counts and never counts failures as indexed", async () => {
   connected();
   view.indexed = 2;

@@ -183,13 +183,6 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
         return Ok(true);
     }
     let jobs = cloud::jobs(db, s(p, "project_id"))?;
-    if n(p, "sync_requested") == 1
-        && !jobs.iter().any(|j| {
-            s(j, "state") == "indexing" && n(j, "next_at") > chrono::Utc::now().timestamp()
-        })
-    {
-        return Ok(true);
-    }
     if jobs.iter().any(|j| {
         n(j, "next_at") <= chrono::Utc::now().timestamp()
             && !matches!(
@@ -199,7 +192,7 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     }) {
         return Ok(true);
     }
-    if n(p, "auto_sync") == 1 && n(p, "started") == 1 {
+    if (n(p, "auto_sync") == 1 || n(p, "sync_requested") == 1) && n(p, "started") == 1 {
         let wanted = match cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?) {
             Ok(wanted) => wanted,
             Err(_) => return Ok(true),
@@ -207,19 +200,38 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
         if wanted.iter().any(|v| {
             !jobs.iter().any(|j| {
                 s(j, "version_id") == v.id
-                    && s(j, "state") == "indexed"
-                    && j["remote_current"].as_i64().map(|x| x == 1) == Some(v.current)
+                    && !matches!(s(j, "state"), "removed" | "purged")
+                    && (s(j, "state") != "indexed"
+                        || j["remote_current"].as_i64().map(|x| x == 1) == Some(v.current))
             })
-        }) || jobs.iter().any(|j| {
+        }) || (wanted.iter().all(|v| {
+            jobs.iter()
+                .any(|j| s(j, "version_id") == v.id && s(j, "state") == "indexed")
+        }) && jobs.iter().any(|j| {
             s(j, "state") == "indexed" && !wanted.iter().any(|v| v.id == s(j, "version_id"))
-        }) {
+        })) {
+            return Ok(true);
+        }
+        if n(p, "sync_requested") == 1
+            && jobs
+                .iter()
+                .filter(|j| n(j, "desired") == 1)
+                .all(|j| matches!(s(j, "state"), "indexed" | "failed" | "uncertain"))
+        {
             return Ok(true);
         }
         // Periodic verification only for projects explicitly opted into automatic cloud traffic.
-        if p["last_sync"]
-            .as_str()
-            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-            .is_none_or(|t| chrono::Utc::now().timestamp() - t.timestamp() > 900)
+        if n(p, "auto_sync") == 1
+            && jobs.iter().all(|j| {
+                matches!(
+                    s(j, "state"),
+                    "indexed" | "failed" | "uncertain" | "removed" | "purged"
+                )
+            })
+            && p["last_sync"]
+                .as_str()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .is_none_or(|t| chrono::Utc::now().timestamp() - t.timestamp() > 900)
         {
             db.execute(
                 "UPDATE cloud_projects SET reconcile_requested=1 WHERE project_id=?1",

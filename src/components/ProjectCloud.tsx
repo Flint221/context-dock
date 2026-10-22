@@ -155,9 +155,11 @@ export function ProjectCloud({ project }: { project: string }) {
                     : enabled
                       ? ready
                         ? "On · Documents ready for questions"
-                        : pathsExcluded && selected.length === 0
-                          ? "On · Selected paths excluded"
-                          : "On · Preparing your documents"
+                        : view.failed > 0
+                          ? "On · Some files need attention"
+                          : pathsExcluded && selected.length === 0
+                            ? "On · Selected paths excluded"
+                            : "On · Preparing your documents"
                       : "Off · Local version history"}
             </p>
           </div>

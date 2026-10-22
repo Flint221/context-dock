@@ -197,6 +197,150 @@ struct Fixture {
     doc: String,
 }
 
+fn word_package(media_size: usize) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+    zip.start_file("word/document.xml", options).unwrap();
+    zip.write_all(br#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Large illustrated document</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+    zip.start_file("word/media/image.png", options).unwrap();
+    zip.write_all(&vec![42; media_size]).unwrap();
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn larger_word_allowance_retains_expanded_package_safety_boundary() {
+    let mut bytes = word_package(1);
+    // Declare an oversized media entry without allocating a huge test fixture.
+    let central = bytes.windows(4).rposition(|w| w == b"PK\x01\x02").unwrap();
+    bytes[central + 24..central + 28].copy_from_slice(&(129_u32 * 1024 * 1024).to_le_bytes());
+    assert!(crate::extraction::extract(&bytes, "word")
+        .unwrap_err()
+        .contains("128 MiB expanded-package"));
+}
+
+#[test]
+fn file_backoff_does_not_schedule_a_busy_loop_with_automatic_sync() {
+    let mut f = Fixture::new();
+    let mut draft = f.draft();
+    draft.automatic = true;
+    f.apply(draft);
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET paused=0,started=1,sync_requested=1",
+            [],
+        )
+        .unwrap();
+    let api = Mock::default();
+    f.step(&api);
+    cloud::queue(&mut f.r.db, &f.id).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET next_at=?1",
+            [chrono::Utc::now().timestamp() + 120],
+        )
+        .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert!(!cloud_commands::needed(&f.r.db, &p).unwrap());
+    f.r.db
+        .execute("UPDATE cloud_jobs SET next_at=0", [])
+        .unwrap();
+    assert!(cloud_commands::needed(&f.r.db, &p).unwrap());
+}
+
+#[test]
+fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_local_bytes() {
+    let mut f = Fixture::new();
+    let bytes = word_package(5 * 1024 * 1024);
+    fs::write(f.root.join("Illustrated.docx"), &bytes).unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    let doc =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .into_iter()
+            .find(|d| d.name == "Illustrated.docx")
+            .unwrap()
+            .document_id;
+    let mut draft = f.draft();
+    draft.documents.push(doc.clone());
+    f.apply(draft);
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET paused=0,started=1,sync_requested=1",
+            [],
+        )
+        .unwrap();
+    let api = Mock::default();
+    for _ in 0..12 {
+        f.step(&api);
+    }
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexed"));
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert!(api.0.borrow().files.iter().any(|(_, b)| b == &bytes));
+    assert_eq!(fs::read(f.root.join("Illustrated.docx")).unwrap(), bytes);
+    assert_eq!(f.r.versions(&doc).unwrap().len(), 1);
+}
+
+#[test]
+fn bad_word_reports_path_and_reason_while_other_files_finish_without_retry_loop() {
+    let mut f = Fixture::new();
+    fs::create_dir(f.root.join("Drafts")).unwrap();
+    let bad = b"This is not a DOCX ZIP";
+    fs::write(f.root.join("Drafts/Bad.docx"), bad).unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    let doc =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .into_iter()
+            .find(|d| d.name == "Bad.docx")
+            .unwrap()
+            .document_id;
+    let mut draft = f.draft();
+    draft.automatic = true;
+    draft.documents.push(doc.clone());
+    f.apply(draft);
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET paused=0,started=1,sync_requested=1",
+            [],
+        )
+        .unwrap();
+    let api = Mock::default();
+    for _ in 0..12 {
+        f.step(&api);
+    }
+    let jobs = f.jobs();
+    let failed = jobs.iter().find(|j| s(j, "document_id") == doc).unwrap();
+    assert_eq!(s(failed, "state"), "failed");
+    assert!(
+        s(failed, "error").contains("Drafts\\Bad.docx")
+            || s(failed, "error").contains("Drafts/Bad.docx")
+    );
+    assert!(s(failed, "error").contains("version 1"));
+    assert!(s(failed, "error").contains("end directory is missing"));
+    assert_eq!(
+        s(
+            jobs.iter().find(|j| s(j, "document_id") == f.doc).unwrap(),
+            "state"
+        ),
+        "indexed"
+    );
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert!(s(&view, "error").contains("Bad.docx"));
+    assert_eq!(view["indexed"], 1);
+    assert_eq!(view["failed"], 1);
+    assert_eq!(n(&view, "next_at"), 0);
+    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    assert_eq!(fs::read(f.root.join("Drafts/Bad.docx")).unwrap(), bad);
+    assert_eq!(f.r.versions(&doc).unwrap().len(), 1);
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound").is_err());
+}
+
 #[test]
 fn missing_selected_source_blocks_queued_uploads_and_recovers_without_losing_cloud_identity() {
     let mut f = Fixture::new();
