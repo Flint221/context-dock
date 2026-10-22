@@ -77,9 +77,10 @@ it("places Current processes above Settings and opens it independently of projec
   render(<App />);
   const nav = screen.getByRole("navigation", { name: "Main navigation" });
   const buttons = within(nav).getAllByRole("button");
-  expect(buttons[2]).toHaveTextContent("Current processes");
-  expect(buttons[3]).toHaveTextContent("Settings");
-  await user.click(buttons[2]);
+  expect(buttons[2]).toHaveTextContent("Pending approvals");
+  expect(buttons[3]).toHaveTextContent("Current processes");
+  expect(buttons[4]).toHaveTextContent("Settings");
+  await user.click(buttons[3]);
   expect(
     await screen.findByRole("button", { name: "Refresh processes" }),
   ).toBeInTheDocument();
@@ -87,7 +88,7 @@ it("places Current processes above Settings and opens it independently of projec
   expect(
     screen.queryByRole("button", { name: "Add project" }),
   ).not.toBeInTheDocument();
-  await user.click(buttons[3]);
+  await user.click(buttons[4]);
   expect(
     screen.queryByRole("button", { name: "Refresh processes" }),
   ).not.toBeInTheDocument();
@@ -353,7 +354,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.9.2")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.10.0")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();

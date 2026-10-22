@@ -194,6 +194,15 @@ impl Registry {
         expected: i64,
         input: Vec<Rule>,
     ) -> Result<()> {
+        self.save_selection_review(project, expected, input, None)
+    }
+    pub(crate) fn save_selection_review(
+        &mut self,
+        project: &str,
+        expected: i64,
+        input: Vec<Rule>,
+        review: Option<(&str, &[String])>,
+    ) -> Result<()> {
         self.path(project)?;
         crate::folder_recovery::require_ready(&self.db, project)?;
         let next = validate(input)?;
@@ -284,6 +293,25 @@ impl Registry {
             return Err("Cloud selection revision could not be verified. No changes saved.".into());
         }
         tx.execute("INSERT INTO tracking_activity(id,project_id,kind,message,created_at) VALUES(?1,?2,'path_selection','Folder/file selection saved. Excluded paths stop capture and leave the cloud index; local history is retained.',?3)",params![uuid::Uuid::new_v4().to_string(),project,models::now()]).map_err(error)?;
+        if let Some((action, paths)) = review {
+            if cloud::n(&p, "auto_sync") == 0 {
+                // Review grants path permission; it must not manufacture a Sync
+                // request for a project whose upload policy is manual.
+                tx.execute(
+                    "UPDATE cloud_projects SET sync_requested=?2 WHERE project_id=?1",
+                    params![project, cloud::n(&p, "sync_requested")],
+                )
+                .map_err(error)?;
+            }
+            for path in paths {
+                tx.execute("INSERT INTO review_decisions VALUES(?1,?2,?3,?4) ON CONFLICT(project_id,path) DO UPDATE SET decision=excluded.decision,decided_at=excluded.decided_at", params![project,path,action,models::now()]).map_err(error)?;
+                tx.execute(
+                    "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                    params![project, path],
+                )
+                .map_err(error)?;
+            }
+        }
         tx.commit().map_err(error)
     }
 }

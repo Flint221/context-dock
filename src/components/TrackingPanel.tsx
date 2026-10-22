@@ -276,8 +276,9 @@ export function TrackingPanel({
             <div>
               <strong>Automatic tracking</strong>
               <p>
-                Runs while ContextDock is open; changes made while closed are
-                reconciled on launch or resume.
+                Runs while ContextDock is running, including in the system tray.
+                Changes made after fully exiting are reconciled on launch or
+                resume.
               </p>
             </div>
             <button

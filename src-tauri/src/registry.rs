@@ -24,10 +24,10 @@ impl Registry {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 11 {
+        if version > 12 {
             return Err("This database requires a newer ContextDock version.".into());
         }
-        if version < 11 {
+        if version < 12 {
             db.pragma_update(None, "foreign_keys", false)
                 .map_err(error)?;
         }
@@ -37,7 +37,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 11 {
+        if version > 12 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -89,6 +89,10 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/011_save_revisions.sql"))
                 .map_err(error)?;
         }
+        if version < 12 {
+            tx.execute_batch(include_str!("../migrations/012_desktop_review.sql"))
+                .map_err(error)?;
+        }
         let invalid: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
@@ -99,7 +103,7 @@ impl Registry {
         if invalid {
             return Err("Registry migration found invalid history references. No migration changes were committed.".into());
         }
-        tx.pragma_update(None, "user_version", 11).map_err(error)?;
+        tx.pragma_update(None, "user_version", 12).map_err(error)?;
         tx.commit().map_err(error)?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(error)?;

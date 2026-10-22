@@ -2,6 +2,7 @@ import { Moon, ShieldCheck } from "lucide-react";
 import type { Theme } from "../types";
 import { version } from "../../package.json";
 import { OpenAIConnection } from "./OpenAIConnection";
+import { DesktopSettings } from "./DesktopSettings";
 export function SettingsView({
   theme,
   busy,
@@ -13,6 +14,7 @@ export function SettingsView({
 }) {
   return (
     <>
+      <DesktopSettings />
       <OpenAIConnection />
       <section className="panel settings">
         <Moon size={23} />
@@ -51,7 +53,8 @@ export function SettingsView({
             Registrations, history and preferences use per-user SQLite storage.
             Snapshot bytes remain in application data across upgrades and
             project removal. Monitoring operates only while ContextDock is
-            running. Chats are also saved locally in the app database. Cloud
+            running, including in the system tray. Use Exit in the tray menu to
+            fully quit. Chats are also saved locally in the app database. Cloud
             sync enables OpenAI uploads and project questions; turning it off
             blocks new AI requests and keeps local history available. No
             telemetry.

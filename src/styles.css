@@ -1,4 +1,91 @@
 @import "tailwindcss";
+.shutdown-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: #0009;
+  padding: 24px;
+}
+.shutdown-overlay .panel {
+  max-width: 520px;
+  padding: 28px;
+}
+.shutdown-overlay progress {
+  width: 100%;
+  margin-top: 18px;
+}
+.error-text {
+  color: var(--error);
+  overflow-wrap: anywhere;
+}
+.desktop-settings .desktop-toggle {
+  display: flex;
+  flex-direction: row;
+  gap: 12px;
+  align-items: center;
+  max-width: none;
+  cursor: pointer;
+}
+.desktop-toggle input,
+.approval-table input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+.desktop-settings h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 26px;
+}
+.pending-inbox .banner {
+  flex-wrap: wrap;
+}
+.approval-group {
+  padding: 24px;
+  margin-bottom: 22px;
+}
+.approval-group[data-highlighted="true"] {
+  border-color: var(--accent);
+}
+.approval-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+.approval-heading > div {
+  flex: 1;
+  min-width: 210px;
+}
+.approval-heading p {
+  color: var(--muted);
+  margin: 4px 0;
+}
+.approval-table {
+  overflow-x: auto;
+  margin-bottom: 20px;
+}
+.approval-table table {
+  min-width: 580px;
+  width: 100%;
+}
+.approval-table td:nth-child(2) {
+  overflow-wrap: anywhere;
+  max-width: 460px;
+}
+.approval-group .toolbar-actions {
+  flex-wrap: wrap;
+}
+.review-paths {
+  max-height: 230px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+}
 :root {
   font-family: "Segoe UI", system-ui, sans-serif;
   color: #252b36;

@@ -9,6 +9,7 @@ import {
 import {
   AlertTriangle,
   Activity,
+  Inbox,
   Check,
   Folder,
   FolderOpen,
@@ -31,9 +32,11 @@ import { Modal } from "./components/Modal";
 import { CurrentProcesses } from "./components/CurrentProcesses";
 import { OperationStatus } from "./components/OperationStatus";
 import { version } from "../package.json";
+import { desktop, type DesktopStatus } from "./services/desktop";
+import { PendingApprovals } from "./components/PendingApprovals";
 import { UnsavedChanges } from "./UnsavedChanges";
 import { useUnsavedChanges } from "./draftGuard";
-type Page = "dashboard" | "projects" | "processes" | "settings";
+type Page = "dashboard" | "projects" | "review" | "processes" | "settings";
 export default function App() {
   return (
     <UnsavedChanges>
@@ -58,6 +61,64 @@ function Workspace() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [stopping, setStopping] = useState(false);
+  const [desktopStatus, setDesktopStatus] = useState<DesktopStatus | null>(
+    null,
+  );
+  const [reviewProject, setReviewProject] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    const stops: (() => void)[] = [];
+    const read = () =>
+      void desktop
+        .read()
+        .then((v) => {
+          if (active) setDesktopStatus(v);
+        })
+        .catch((e) => {
+          if (active) setError(String(e));
+        });
+    read();
+    const keep = (s: () => void) => {
+      if (active) stops.push(s);
+      else s();
+    };
+    desktop
+      .onStopping(() => setStopping(true))
+      .then(keep)
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    desktop
+      .subscribe(read)
+      .then(keep)
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    desktop
+      .onRoute((route) => {
+        if (!active) return;
+        guard.request(() => {
+          if (route.page === "project" && route.project) {
+            setSelected(route.project);
+            setPage("projects");
+            setProjectTab("cloud");
+          } else {
+            setPage(route.page === "settings" ? "settings" : "review");
+            setReviewProject(route.project);
+            setSelected(null);
+          }
+        });
+      })
+      .then(keep)
+      .catch((e) => {
+        if (active) setError(String(e));
+      });
+    return () => {
+      active = false;
+      stops.forEach((s) => s());
+    };
+  }, [guard]);
   const route = `${page}:${page === "projects" ? (selected ?? "list") : ""}`;
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -133,335 +194,392 @@ function Workspace() {
   }
 
   return (
-    <div className="app-shell">
-      <aside>
-        <div className="brand">
-          <span className="brand-icon">
-            <img src="/contextdock.svg" alt="" width={37} height={37} />
-          </span>
-          <div>
-            ContextDock<small>PROJECT WORKSPACE</small>
+    <>
+      <div className="app-shell" inert={stopping}>
+        <aside>
+          <div className="brand">
+            <span className="brand-icon">
+              <img src="/contextdock.svg" alt="" width={37} height={37} />
+            </span>
+            <div>
+              ContextDock<small>PROJECT WORKSPACE</small>
+            </div>
           </div>
-        </div>
-        <div className="nav-label">WORKSPACE</div>
-        <nav aria-label="Main navigation">
-          {(
-            [
-              { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
-              { id: "projects", label: "Projects", Icon: Folder },
-              { id: "processes", label: "Current processes", Icon: Activity },
-              { id: "settings", label: "Settings", Icon: Settings },
-            ] as const
-          ).map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              aria-current={page === id ? "page" : undefined}
-              className={page === id ? "active" : ""}
-              onClick={() =>
-                guard.request(() => {
-                  setPage(id);
-                  setSelected(null);
-                })
-              }
-            >
-              <Icon size={18} />
-              {label}
-              {id === "projects" && (
-                <span className="nav-count">{data.projects.length}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-footer">
-          <ShieldCheck size={17} />
-          <span>
-            Local by design<small>Local history, optional cloud AI.</small>
-          </span>
-        </div>
-      </aside>
-      <main>
-        <header
-          className={
-            project && page === "projects" ? "project-header" : undefined
-          }
-        >
-          {project && page === "projects" ? (
-            <>
-              <div className="project-header-name" title={project.name}>
-                <Folder size={20} />
-                <h1>{project.name}</h1>
-              </div>
-              <ProjectTabs
-                tab={projectTab}
-                select={(tab) => {
-                  if (tab !== projectTab)
-                    guard.request(() => {
-                      setProjectTab(tab);
-                      window.scrollTo({ top: 0, behavior: "instant" });
-                    });
-                }}
-              />
-            </>
-          ) : (
-            <div className="breadcrumb">
-              Workspace <span>/</span>{" "}
-              {page === "dashboard"
-                ? "Dashboard"
-                : page === "settings"
-                  ? "Settings"
-                  : page === "processes"
-                    ? "Current processes"
-                    : "Projects"}
-              {project && page === "projects" && (
-                <>
-                  {" "}
-                  <span>/</span> {project.name}
-                </>
-              )}
-            </div>
-          )}
-          <span className="local-label">
-            <span /> Offline ready
-          </span>
-        </header>
-        <div className="content">
-          {error && (
-            <div role="alert" className="banner error">
-              <AlertTriangle size={18} />
-              <span>{error}</span>
-              <button onClick={() => void run(load)}>Retry</button>
-            </div>
-          )}
-          {notice && (
-            <div role="status" className="banner">
-              <Check size={16} />
-              {notice}
-            </div>
-          )}
-          <OperationStatus busy={busy} message="Reading local metadata…" />
-          <div className="page-scene" key={route}>
-            {!(page === "projects" && project) && (
-              <div className="page-heading">
-                <div>
-                  <div className="eyebrow">
-                    {page === "processes"
-                      ? "LOCAL ACTIVITY, AT A GLANCE"
-                      : page === "settings"
-                        ? "MAKE YOURSELF AT HOME"
-                        : "YOUR DOCUMENTATION, CONNECTED"}
-                  </div>
-                  <h1>
-                    {page === "dashboard"
-                      ? "Workspace overview"
-                      : page === "settings"
-                        ? "Settings"
-                        : page === "processes"
-                          ? "Current processes"
-                          : project?.name || "Projects"}
-                  </h1>
-                  <p>
-                    {page === "dashboard"
-                      ? "A clear view of your projects and the documents behind them."
-                      : page === "settings"
-                        ? "Make ContextDock feel at home."
-                        : page === "processes"
-                          ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
-                          : project
-                            ? "Track document history and ask about your synced files."
-                            : "Existing folders. Independent documents. One place to find them."}
-                  </p>
-                </div>
-                {(page === "dashboard" || page === "projects") && (
-                  <button
-                    className="primary"
-                    disabled={busy || !loaded}
-                    onClick={() => guard.request(() => setAdding(true))}
-                  >
-                    <Plus size={17} /> Add project
-                  </button>
-                )}
-              </div>
-            )}
-            {page === "processes" ? (
-              <CurrentProcesses />
-            ) : !loaded ? (
-              <section className="panel empty">
-                <h2>
-                  {error
-                    ? "Unable to load your workspace"
-                    : "Opening your local workspace…"}
-                </h2>
-                <p>
-                  {error
-                    ? "Use Retry above to reconnect to the application."
-                    : "Loading saved project registrations."}
-                </p>
-              </section>
-            ) : page === "settings" ? (
-              <SettingsView
-                theme={data.theme}
-                busy={busy}
-                changeTheme={(theme) => void run(() => registry.theme(theme))}
-              />
-            ) : page === "projects" && project ? (
-              <ProjectDetails
-                key={project.id}
-                tab={projectTab}
-                project={project}
-                changed={load}
-                documents={data.documents.filter(
-                  (d) => d.projectId === project.id,
-                )}
-                busy={busy}
-                back={() => guard.request(() => setSelected(null))}
-                copy={() =>
-                  void run(
-                    () =>
-                      navigator.clipboard.writeText(displayPath(project.path)),
-                    "Folder path copied.",
-                  )
+          <div className="nav-label">WORKSPACE</div>
+          <nav aria-label="Main navigation">
+            {(
+              [
+                { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+                { id: "projects", label: "Projects", Icon: Folder },
+                { id: "review", label: "Pending approvals", Icon: Inbox },
+                { id: "processes", label: "Current processes", Icon: Activity },
+                { id: "settings", label: "Settings", Icon: Settings },
+              ] as const
+            ).map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                aria-current={page === id ? "page" : undefined}
+                className={page === id ? "active" : ""}
+                onClick={() =>
+                  guard.request(() => {
+                    setPage(id);
+                    setSelected(null);
+                  })
                 }
-                open={() => void run(() => registry.open(project.id))}
-                rename={() => {
-                  setName(project.name);
-                  setEditing("rename");
-                }}
-                remove={() => guard.request(() => setEditing("remove"))}
-                refresh={() =>
-                  void run(
-                    () => registry.refresh(project.id),
-                    "Document metadata refreshed.",
-                  )
-                }
-              />
-            ) : data.projects.length === 0 ? (
-              <section className="panel empty welcome">
-                <span className="welcome-icon">
-                  <FolderOpen size={36} />
-                </span>
-                <h2>A home for your project documentation</h2>
-                <p>
-                  Register an existing folder with a name you recognize.
-                  <br />
-                  ContextDock finds its Markdown and Word documents, while your
-                  files stay exactly where they are.
-                </p>
-                <button className="primary" onClick={() => setAdding(true)}>
-                  <Plus size={17} />
-                  Add your first project
-                </button>
-                <small>
-                  Read-only discovery · Local storage · No account needed
-                </small>
-              </section>
-            ) : page === "projects" ? (
-              <Projects
-                projects={data.projects}
-                busy={busy}
-                showProject={showProject}
-              />
-            ) : (
-              <Dashboard
-                data={data}
-                busy={busy}
-                showProject={showProject}
-                viewAll={() => {
-                  setPage("projects");
-                  setSelected(null);
-                }}
-              />
-            )}
+              >
+                <Icon size={18} />
+                {label}
+                {id === "projects" && (
+                  <span className="nav-count">{data.projects.length}</span>
+                )}
+                {id === "review" && (
+                  <span className="nav-count">
+                    {desktopStatus?.pending ?? 0}
+                  </span>
+                )}
+              </button>
+            ))}
+          </nav>
+          <div className="sidebar-footer">
+            <ShieldCheck size={17} />
+            <span>
+              Local by design<small>Local history, optional cloud AI.</small>
+            </span>
           </div>
-        </div>
-        <footer>
-          <span>ContextDock {version}</span>
-          <span>Local snapshots · Source archival only when enabled</span>
-        </footer>
-      </main>
-      {adding && (
-        <AddProject
-          close={() => setAdding(false)}
-          save={async (n, p) => {
-            setBusy(true);
-            try {
-              const id = await registry.add(n, p);
-              await load();
-              setSelected(id);
-              setProjectTab("files");
-              setPage("projects");
-            } finally {
-              setBusy(false);
+        </aside>
+        <main>
+          <header
+            className={
+              project && page === "projects" ? "project-header" : undefined
             }
-          }}
-        />
-      )}
-      {editing === "remove" && project && (
-        <RemoveProject
-          project={project}
-          close={() => setEditing(null)}
-          removed={(snapshot) => {
-            // Reuse the verified removal readback; an older read must not restore it.
-            readSequence.current += 1;
-            setData(snapshot);
-            setLoaded(true);
-            setPage("projects");
-            setSelected(null);
-            setEditing(null);
-            setError("");
-            setNotice(
-              "Project removed. Local files and captured history retained.",
-            );
-          }}
-        />
-      )}
-      {editing === "rename" && project && (
-        <Modal
-          title="Rename project"
-          close={() => {
-            if (!busy) setEditing(null);
-          }}
-        >
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void run(async () => {
-                await registry.rename(project.id, name);
-                setEditing(null);
-              });
-            }}
           >
-            <label>
-              Project name
-              <input
-                autoFocus
-                data-autofocus
-                required
-                maxLength={120}
-                value={name}
-                disabled={busy}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            {error && (
-              <p role="alert" className="error">
-                {error}
+            {project && page === "projects" ? (
+              <>
+                <div className="project-header-name" title={project.name}>
+                  <Folder size={20} />
+                  <h1>{project.name}</h1>
+                </div>
+                <ProjectTabs
+                  tab={projectTab}
+                  select={(tab) => {
+                    if (tab !== projectTab)
+                      guard.request(() => {
+                        setProjectTab(tab);
+                        window.scrollTo({ top: 0, behavior: "instant" });
+                      });
+                  }}
+                />
+              </>
+            ) : (
+              <div className="breadcrumb">
+                Workspace <span>/</span>{" "}
+                {page === "dashboard"
+                  ? "Dashboard"
+                  : page === "settings"
+                    ? "Settings"
+                    : page === "review"
+                      ? "Pending approvals"
+                      : page === "processes"
+                        ? "Current processes"
+                        : "Projects"}
+                {project && page === "projects" && (
+                  <>
+                    {" "}
+                    <span>/</span> {project.name}
+                  </>
+                )}
+              </div>
+            )}
+            <span className="local-label">
+              <span /> Offline ready
+            </span>
+          </header>
+          <div className="content">
+            {desktopStatus?.uploadsPaused && (
+              <div role="status" className="banner warning">
+                Background uploads are paused. Tracking, indexing checks and
+                confirmed removals continue.
+                <button
+                  onClick={() =>
+                    void desktop
+                      .setting("uploadsPaused", false)
+                      .catch((e) => setError(String(e)))
+                  }
+                >
+                  Resume uploads
+                </button>
+              </div>
+            )}
+            {desktopStatus?.error && (
+              <p role="alert" className="error-text">
+                {desktopStatus.error}
               </p>
             )}
-            <div className="actions">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => setEditing(null)}
-              >
-                Cancel
-              </button>
-              <button disabled={busy || !name.trim()} className="primary">
-                {busy ? "Saving…" : "Save name"}
-              </button>
+            {error && (
+              <div role="alert" className="banner error">
+                <AlertTriangle size={18} />
+                <span>{error}</span>
+                <button onClick={() => void run(load)}>Retry</button>
+              </div>
+            )}
+            {notice && (
+              <div role="status" className="banner">
+                <Check size={16} />
+                {notice}
+              </div>
+            )}
+            <OperationStatus busy={busy} message="Reading local metadata…" />
+            <div className="page-scene" key={route}>
+              {!(page === "projects" && project) && (
+                <div className="page-heading">
+                  <div>
+                    <div className="eyebrow">
+                      {page === "processes"
+                        ? "LOCAL ACTIVITY, AT A GLANCE"
+                        : page === "settings"
+                          ? "MAKE YOURSELF AT HOME"
+                          : "YOUR DOCUMENTATION, CONNECTED"}
+                    </div>
+                    <h1>
+                      {page === "dashboard"
+                        ? "Workspace overview"
+                        : page === "settings"
+                          ? "Settings"
+                          : page === "review"
+                            ? "Pending approvals"
+                            : page === "processes"
+                              ? "Current processes"
+                              : project?.name || "Projects"}
+                    </h1>
+                    <p>
+                      {page === "dashboard"
+                        ? "A clear view of your projects and the documents behind them."
+                        : page === "settings"
+                          ? "Make ContextDock feel at home."
+                          : page === "review"
+                            ? "Review new files before they join tracking and cloud indexing."
+                            : page === "processes"
+                              ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
+                              : project
+                                ? "Track document history and ask about your synced files."
+                                : "Existing folders. Independent documents. One place to find them."}
+                    </p>
+                  </div>
+                  {(page === "dashboard" || page === "projects") && (
+                    <button
+                      className="primary"
+                      disabled={busy || !loaded}
+                      onClick={() => guard.request(() => setAdding(true))}
+                    >
+                      <Plus size={17} /> Add project
+                    </button>
+                  )}
+                </div>
+              )}
+              {page === "processes" ? (
+                <CurrentProcesses />
+              ) : !loaded ? (
+                <section className="panel empty">
+                  <h2>
+                    {error
+                      ? "Unable to load your workspace"
+                      : "Opening your local workspace…"}
+                  </h2>
+                  <p>
+                    {error
+                      ? "Use Retry above to reconnect to the application."
+                      : "Loading saved project registrations."}
+                  </p>
+                </section>
+              ) : page === "review" ? (
+                <PendingApprovals
+                  project={reviewProject}
+                  openProject={(id) => {
+                    setSelected(id);
+                    setPage("projects");
+                    setProjectTab("files");
+                  }}
+                />
+              ) : page === "settings" ? (
+                <SettingsView
+                  theme={data.theme}
+                  busy={busy}
+                  changeTheme={(theme) => void run(() => registry.theme(theme))}
+                />
+              ) : page === "projects" && project ? (
+                <ProjectDetails
+                  key={project.id}
+                  tab={projectTab}
+                  project={project}
+                  changed={load}
+                  documents={data.documents.filter(
+                    (d) => d.projectId === project.id,
+                  )}
+                  busy={busy}
+                  back={() => guard.request(() => setSelected(null))}
+                  copy={() =>
+                    void run(
+                      () =>
+                        navigator.clipboard.writeText(
+                          displayPath(project.path),
+                        ),
+                      "Folder path copied.",
+                    )
+                  }
+                  open={() => void run(() => registry.open(project.id))}
+                  rename={() => {
+                    setName(project.name);
+                    setEditing("rename");
+                  }}
+                  remove={() => guard.request(() => setEditing("remove"))}
+                  refresh={() =>
+                    void run(
+                      () => registry.refresh(project.id),
+                      "Document metadata refreshed.",
+                    )
+                  }
+                />
+              ) : data.projects.length === 0 ? (
+                <section className="panel empty welcome">
+                  <span className="welcome-icon">
+                    <FolderOpen size={36} />
+                  </span>
+                  <h2>A home for your project documentation</h2>
+                  <p>
+                    Register an existing folder with a name you recognize.
+                    <br />
+                    ContextDock finds its Markdown and Word documents, while
+                    your files stay exactly where they are.
+                  </p>
+                  <button className="primary" onClick={() => setAdding(true)}>
+                    <Plus size={17} />
+                    Add your first project
+                  </button>
+                  <small>
+                    Read-only discovery · Local storage · No account needed
+                  </small>
+                </section>
+              ) : page === "projects" ? (
+                <Projects
+                  projects={data.projects}
+                  busy={busy}
+                  showProject={showProject}
+                />
+              ) : (
+                <Dashboard
+                  data={data}
+                  busy={busy}
+                  showProject={showProject}
+                  viewAll={() => {
+                    setPage("projects");
+                    setSelected(null);
+                  }}
+                />
+              )}
             </div>
-          </form>
-        </Modal>
+          </div>
+          <footer>
+            <span>ContextDock {version}</span>
+            <span>Local snapshots · Source archival only when enabled</span>
+          </footer>
+        </main>
+        {adding && (
+          <AddProject
+            close={() => setAdding(false)}
+            save={async (n, p) => {
+              setBusy(true);
+              try {
+                const id = await registry.add(n, p);
+                await load();
+                setSelected(id);
+                setProjectTab("files");
+                setPage("projects");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
+        )}
+        {editing === "remove" && project && (
+          <RemoveProject
+            project={project}
+            close={() => setEditing(null)}
+            removed={(snapshot) => {
+              // Reuse the verified removal readback; an older read must not restore it.
+              readSequence.current += 1;
+              setData(snapshot);
+              setLoaded(true);
+              setPage("projects");
+              setSelected(null);
+              setEditing(null);
+              setError("");
+              setNotice(
+                "Project removed. Local files and captured history retained.",
+              );
+            }}
+          />
+        )}
+        {editing === "rename" && project && (
+          <Modal
+            title="Rename project"
+            close={() => {
+              if (!busy) setEditing(null);
+            }}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void run(async () => {
+                  await registry.rename(project.id, name);
+                  setEditing(null);
+                });
+              }}
+            >
+              <label>
+                Project name
+                <input
+                  autoFocus
+                  data-autofocus
+                  required
+                  maxLength={120}
+                  value={name}
+                  disabled={busy}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              {error && (
+                <p role="alert" className="error">
+                  {error}
+                </p>
+              )}
+              <div className="actions">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setEditing(null)}
+                >
+                  Cancel
+                </button>
+                <button disabled={busy || !name.trim()} className="primary">
+                  {busy ? "Saving…" : "Save name"}
+                </button>
+              </div>
+            </form>
+          </Modal>
+        )}
+      </div>
+      {stopping && (
+        <div className="shutdown-overlay" role="status" aria-live="polite">
+          <section className="panel">
+            <h2>Finishing background work…</h2>
+            <p>
+              Waiting for the current operation to finish safely before exiting.
+              Pending work will resume next time.
+            </p>
+            <progress aria-label="Finishing background work" />
+          </section>
+        </div>
       )}
-    </div>
+    </>
   );
 }

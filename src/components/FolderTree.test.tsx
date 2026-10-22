@@ -22,7 +22,7 @@ vi.mock("../services/desktop", () => ({
   desktop: { native: vi.fn(() => false), listenClose: vi.fn(), exit: vi.fn() },
 }));
 let saved: PathSelectionView;
-let closeWindow: () => void;
+let closeWindow: (action?: string) => void;
 const changed = vi.fn(async () => {});
 beforeEach(() => {
   vi.clearAllMocks();
@@ -221,6 +221,19 @@ it("intercepts window close, keeps the window open on failed save, and allows ve
   );
   await waitFor(() => expect(desktop.exit).toHaveBeenCalledOnce());
   expect(saved.exclusions).toHaveLength(1);
+});
+it("routes tray Exit through unsaved protection and preserves the exit action", async () => {
+  const user = await ready();
+  await user.click(screen.getByRole("checkbox", { name: "Include Drafts" }));
+  act(() => closeWindow("exit"));
+  expect(desktop.exit).not.toHaveBeenCalled();
+  await user.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Discard changes",
+    }),
+  );
+  await waitFor(() => expect(desktop.exit).toHaveBeenCalledWith("exit"));
+  expect(saved.exclusions).toEqual([]);
 });
 it("does not exit while a save is in flight and can leave after it completes", async () => {
   const user = await ready();

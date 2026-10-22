@@ -1397,6 +1397,82 @@ fn upload_does_not_imply_indexed_until_remote_processing_completes() {
     assert_eq!(s(&f.jobs()[0], "state"), "indexed");
 }
 #[test]
+fn global_upload_pause_survives_restart_and_resume_preserves_project_settings() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    crate::review::set_preference(&f.r.db, "desktop.uploads_paused", true).unwrap();
+    let before = cloud::project(&f.r.db, &f.id).unwrap();
+    f.sync(&api);
+    assert!(api.0.borrow().calls.is_empty());
+    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    assert!(crate::desktop::uploads_paused(&f.r.db));
+    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    crate::review::set_preference(&f.r.db, "desktop.uploads_paused", false).unwrap();
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    let after = cloud::project(&f.r.db, &f.id).unwrap();
+    for key in ["enabled", "paused", "auto_sync", "started"] {
+        assert_eq!(after[key], before[key]);
+    }
+}
+#[test]
+fn global_pause_allows_existing_index_polls_and_confirmed_document_removal() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().processing = true;
+    f.sync(&api);
+    crate::review::set_preference(&f.r.db, "desktop.uploads_paused", true).unwrap();
+    api.0.borrow_mut().calls.clear();
+    api.0.borrow_mut().associations[0]["status"] = json!("completed");
+    f.r.db
+        .execute("UPDATE cloud_jobs SET next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    assert!(api.0.borrow().calls.iter().all(|c| c.starts_with("GET ")));
+    f.exclude_file("Master_Context.md");
+    f.sync(&api);
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(crate::desktop::uploads_paused(&f.r.db));
+}
+#[test]
+fn approving_new_paths_respects_manual_cloud_sync_until_explicit_request() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    // Model an existing manual-policy registration; current simple opt-in
+    // intentionally defaults newly enabled projects to automatic sync.
+    f.r.db
+        .execute("UPDATE cloud_projects SET auto_sync=0", [])
+        .unwrap();
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 0);
+    fs::write(f.root.join("New_Research.md"), "new research file").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    let request = crate::review::ReviewRequest {
+        project: f.id.clone(),
+        paths: vec!["New_Research.md".into()],
+        action: "approve".into(),
+    };
+    let plan = crate::review::preview(&f.r, &request).unwrap();
+    crate::review::apply(&mut f.r, &request, s(&plan, "token")).unwrap();
+    assert_eq!(
+        n(&cloud::project(&f.r.db, &f.id).unwrap(), "sync_requested"),
+        0
+    );
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 1);
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexed"));
+}
+#[test]
 fn repeated_sync_deduplicates_store_files_and_associations() {
     let mut f = Fixture::new();
     f.enable();

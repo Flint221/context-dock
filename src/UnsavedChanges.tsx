@@ -41,9 +41,9 @@ export function UnsavedChanges({ children }: { children: ReactNode }) {
     let active = true;
     let stop: (() => void) | undefined;
     desktop
-      .listenClose(() =>
+      .listenClose((action) =>
         request(() => {
-          void desktop.exit().catch((e) => setError(String(e)));
+          void desktop.exit(action).catch((e) => setError(String(e)));
         }),
       )
       .then((fn) => {

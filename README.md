@@ -127,7 +127,15 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 - Offline Markdown and DOCX body-text comparisons between any two captured versions of one document: verified snapshots, accurate line changes, unified/split display, paged context and change navigation. Equivalent text is distinguished from identical file bytes.
 - An unsigned per-user NSIS installer and Windows GitHub Actions build artifacts. Matching version tags can publish installers, but no public release is created automatically during development.
 
-**Discovery** reads metadata. **Tracking** reads document bytes to capture local immutable snapshots. **Archival** can move previous source files, and requires its own explicit project opt-in. Tracking alone never moves sources. Disabling tracking stops monitoring and retains history. There is no Windows service; close the app to stop it, and reopening catches up.
+**Discovery** reads metadata. **Tracking** reads document bytes to capture local immutable snapshots. **Archival** can move previous source files, and requires its own explicit project opt-in. Tracking alone never moves sources. Disabling tracking stops monitoring and retains history. By default X hides the window to the system tray; use **Exit ContextDock** there to fully quit. There is no Windows service; signing out, shutting down or fully exiting stops monitoring, and reopening catches up.
+
+### Background operation and pending approvals
+
+Settings provides **Keep running when closed**, opt-in **Start with Windows, hidden in the tray**, notification switches and **Pause background uploads**. Startup registration is per-user; ContextDock respects Windows' own disabled startup state. The tray offers Open, Pending approvals, Pause/Resume uploads, Settings and Exit. Unsaved checkbox selections are protected before hiding or quitting. Upload pause retains cloud data and project preferences while local tracking, existing indexing checks and confirmed document removals continue.
+
+**Pending approvals** groups newly discovered unrelated files by project. Nothing is selected by default. Select a batch, choose Approve or Ignore, then confirm the preview. Approval follows the existing tracking and cloud settings; it never enables them. Ignoring preserves source files and local history, keeps the path excluded and removes it from the inbox. Excluded parent folders suppress pending items and notifications. Recognized versions of previously approved document families continue through the existing high-confidence matching rules. The inbox, decisions and notification watermarks survive restart.
+
+Windows notifications summarize approval counts and actionable problems while the window is hidden, minimized or unfocused. They exclude filenames and document content, group bursts for 30 seconds and throttle each project/category to one notification per five minutes. Clicking an installed-app notification opens the relevant review group or project cloud status. Windows notification settings and Do Not Disturb still apply; the inbox works without notifications. See [background behavior and acceptance checks](docs/ContextDock_Background_Review_v1.md).
 
 ## Download and install
 

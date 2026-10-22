@@ -63,6 +63,16 @@ impl<'a> ProjectApi<'a> {
         if !self.cleanup && !removal {
             if method == "POST"
                 && (path == "/files"
+                    || path == "/vector_stores"
+                    || (path.starts_with("/vector_stores/") && !path.ends_with("/search")))
+                && crate::desktop::uploads_paused(&self.db)
+            {
+                return Err(cloud_api::ApiError::local(
+                    "Cloud sync paused, disconnected or stopped before the next request.",
+                ));
+            }
+            if method == "POST"
+                && (path == "/files"
                     || (path.starts_with("/vector_stores/") && path.ends_with("/files")))
             {
                 let enabled: bool = self
@@ -207,6 +217,12 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     if n(p, "paused") == 1 {
         return Ok(false);
     }
+    if crate::desktop::uploads_paused(db) {
+        return Ok(!s(p, "store_id").is_empty()
+            && cloud::jobs(db, s(p, "project_id"))?.iter().any(|j| {
+                s(j, "state") == "indexing" && n(j, "next_at") <= chrono::Utc::now().timestamp()
+            }));
+    }
     if s(p, "store_id").is_empty() || n(p, "reconcile_requested") == 1 {
         return Ok(true);
     }
@@ -277,6 +293,9 @@ pub(crate) fn runtime_database_path(path: PathBuf) -> std::io::Result<PathBuf> {
     std::fs::canonicalize(path)
 }
 impl CloudRuntime {
+    pub(crate) fn request_stop(&self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
     pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
         let path = runtime_database_path(path)?;
         if let Ok(db) = cloud::connect(&path) {

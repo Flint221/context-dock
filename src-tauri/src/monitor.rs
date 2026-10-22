@@ -48,6 +48,9 @@ impl Drop for Monitor {
     }
 }
 impl Monitor {
+    pub(crate) fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+    }
     pub fn start(
         registry: Shared,
         changed: impl Fn(&str) + Send + Sync + 'static,

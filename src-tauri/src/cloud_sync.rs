@@ -226,6 +226,13 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     let mut remote = match existing {
         Some(v) => v,
         None => {
+            if crate::desktop::uploads_paused(db) {
+                return execute(
+                    db,
+                    "UPDATE cloud_jobs SET next_at=?2 WHERE id=?1",
+                    &[&s(j, "id"), &(chrono::Utc::now().timestamp() + 15)],
+                );
+            }
             // Check File existence first: a missing File must never be reported as indexed.
             api.request("GET", &format!("/files/{file}"), None)?;
             api.request(
@@ -430,6 +437,9 @@ pub fn step(
             cloud::desired(db, id, &cloud::draft(db, &p).map_err(local)?).map_err(local)?;
         }
         if s(&p, "store_id").is_empty() {
+            if crate::desktop::uploads_paused(db) {
+                return Ok(());
+            }
             return create_store(db, &p, api);
         }
         let store = match cloud::owned_store(api, db, &p) {
@@ -481,6 +491,7 @@ pub fn step(
             .map_err(local)?;
         if let Some(j) = jobs.iter().find(|j| {
             tracking
+                && (!crate::desktop::uploads_paused(db) || s(j, "state") == "indexing")
                 && n(j, "desired") == 1
                 && n(j, "next_at") <= chrono::Utc::now().timestamp()
                 && !["indexed", "removed", "purged", "failed", "uncertain"].contains(&s(j, "state"))
@@ -508,6 +519,9 @@ pub fn step(
                 // Backoff/failure belongs to this file, not the entire project.
                 return Ok(());
             }
+            return Ok(());
+        }
+        if crate::desktop::uploads_paused(db) {
             return Ok(());
         }
         // Preserve all known-good old associations until every desired replacement is indexed.

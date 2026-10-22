@@ -25,6 +25,9 @@ mod comparison;
 mod comparison_models;
 #[cfg(test)]
 mod comparison_tests;
+mod desktop;
+#[cfg(test)]
+mod desktop_tests;
 mod extraction;
 mod folder_recovery;
 #[cfg(test)]
@@ -39,7 +42,9 @@ mod path_selection;
 mod path_selection_tests;
 mod processes;
 mod registry;
+mod review;
 mod scanner;
+mod startup;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -373,7 +378,20 @@ async fn save_path_selection(
 }
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            desktop::launch(app, &args)
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                desktop::request_close(window.app_handle(), "close");
+            }
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                let _ = window.app_handle().emit("desktop-changed", ());
+            }
+        })
         .setup(|app| {
             let dir: PathBuf = app.path().app_local_data_dir()?;
             std::fs::create_dir_all(&dir)?;
@@ -406,9 +424,28 @@ pub fn run() {
                 let _ = handle.emit("registry-changed", project);
             })?;
             app.manage(monitor);
+            app.manage(desktop::start(app.handle(), dir.join("contextdock.db"))?);
+            if let Err(e) = desktop::tray(app.handle()) {
+                if let Ok(mut slot) = app.state::<desktop::Runtime>().error.lock() {
+                    *slot = Some(format!(
+                        "System tray unavailable; the window will remain accessible. {e}"
+                    ));
+                }
+                desktop::show(app.handle());
+            }
+            let args = std::env::args().collect::<Vec<_>>();
+            desktop::launch(app.handle(), &args);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            desktop::desktop_read,
+            desktop::desktop_setting,
+            desktop::desktop_ready,
+            desktop::desktop_route,
+            desktop::desktop_complete,
+            desktop::pending_read,
+            desktop::pending_preview,
+            desktop::pending_apply,
             ai_commands::ai_action,
             chat_commands::chat_action,
             cloud_commands::cloud_read,
