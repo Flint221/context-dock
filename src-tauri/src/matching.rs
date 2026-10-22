@@ -86,3 +86,12 @@ pub fn safe_name(value: &str) -> String {
         value.into()
     }
 }
+
+/// Display the author's filename version separately from the snapshot sequence.
+pub fn version_label(name: &str) -> Option<String> {
+    static LABEL: OnceLock<Regex> = OnceLock::new();
+    let pattern = LABEL.get_or_init(|| Regex::new(r"(?i)(?:^|[\s_(-])v(?:ersion)?[\s_-]*(\d+(?:\.\d+)*)\)?(?:[\s_-]+(?:(?:19|20)\d{2}[-_]\d{2}[-_]\d{2}|(?:19|20)\d{6}))*$").expect("constant version label pattern"));
+    let raw = Path::new(name).file_stem()?.to_str()?;
+    let captures = pattern.captures(raw)?;
+    Some(format!("v{}", &captures[1]))
+}

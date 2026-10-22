@@ -86,15 +86,20 @@ impl Registry {
         let mut q=self.db.prepare("SELECT d.id,d.family_name,d.kind,d.tracking_state,d.active_source_id,COALESCE(s.name,(SELECT source_name FROM document_versions WHERE id=d.current_version_id)),s.status,v.number,(SELECT COUNT(*) FROM document_versions h WHERE h.document_id=d.id),(SELECT MAX(captured_at) FROM document_versions h WHERE h.document_id=d.id),EXISTS(SELECT 1 FROM pending_matches m JOIN source_files f ON f.id=m.source_id WHERE f.document_id=d.id) FROM documents d LEFT JOIN source_files s ON s.id=d.active_source_id LEFT JOIN document_versions v ON v.id=d.current_version_id WHERE d.project_id=?1 AND (d.merged_into IS NULL OR d.tracking_state='grouped_history') ORDER BY d.family_name COLLATE NOCASE").map_err(error)?;
         let families = q
             .query_map([project], |r| {
+                let active_filename: Option<String> = r.get(5)?;
+                let current_label = active_filename
+                    .as_deref()
+                    .and_then(crate::matching::version_label);
                 Ok(Family {
                     id: r.get(0)?,
                     name: r.get(1)?,
                     kind: r.get(2)?,
                     state: r.get(3)?,
                     active_source_id: r.get(4)?,
-                    active_filename: r.get(5)?,
+                    active_filename,
                     source_status: r.get(6)?,
                     current_number: r.get(7)?,
+                    current_label,
                     version_count: r.get(8)?,
                     last_captured: r.get(9)?,
                     needs_review: r.get(10)?,

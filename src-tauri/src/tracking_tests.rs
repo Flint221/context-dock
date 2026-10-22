@@ -209,6 +209,71 @@ fn independent_initial_versions_same_path_archival_and_duplicate_hashes() {
 }
 
 #[test]
+fn current_filename_label_is_independent_of_snapshot_count_and_cloud_sequence() {
+    let mut f = Fixture::new(&[
+        ("RAP_Master_Context_v2.md", "two"),
+        ("RAP_Master_Context_v4.md", "four"),
+        ("RAP_Master_Context_v6.md", "six"),
+    ]);
+    f.enable(false);
+    let id = f.document("RAP_Master_Context_v6.md");
+    let view = f.r.tracking_view(&f.project).unwrap();
+    let family = view.families.iter().find(|x| x.id == id).unwrap();
+    assert_eq!(family.current_label.as_deref(), Some("v6"));
+    assert_eq!(family.current_number, Some(3));
+    assert_eq!(family.version_count, 3);
+    assert_eq!(
+        crate::cloud::families(&f.r.db, &f.project)
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == id)
+            .unwrap()["currentNumber"],
+        3
+    );
+    let before =
+        f.r.versions(&id)
+            .unwrap()
+            .iter()
+            .map(|v| (v.id.clone(), v.number, v.sha256.clone()))
+            .collect::<Vec<_>>();
+    f.scan();
+    assert_eq!(
+        f.r.versions(&id)
+            .unwrap()
+            .iter()
+            .map(|v| (v.id.clone(), v.number, v.sha256.clone()))
+            .collect::<Vec<_>>(),
+        before
+    );
+    fs::write(f.root.join("RAP_Master_Context_v6.md"), "edited six").unwrap();
+    f.scan();
+    let view = f.r.tracking_view(&f.project).unwrap();
+    let family = view.families.iter().find(|x| x.id == id).unwrap();
+    assert_eq!(family.current_label.as_deref(), Some("v6"));
+    assert_eq!(family.current_number, Some(4));
+    assert_eq!(family.version_count, 4);
+}
+
+#[test]
+fn filename_version_labels_preserve_decimal_labels_and_do_not_guess_unversioned_names() {
+    for (name, label) in [
+        ("RAP_Master_Context_v6.md", Some("v6")),
+        ("Spec (V2.10).docx", Some("v2.10")),
+        ("Report_version_6_2026-10-22.md", Some("v6")),
+        ("Report_v06.md", Some("v06")),
+        ("Report_2026-10-22.md", None),
+        ("Report_v6_draft.md", None),
+        ("Readme.md", None),
+    ] {
+        assert_eq!(
+            crate::matching::version_label(name).as_deref(),
+            label,
+            "{name}"
+        );
+    }
+}
+
+#[test]
 fn initial_numbered_exports_group_in_numeric_order_without_moving_sources() {
     let mut f = Fixture::new(&[
         ("CottonTrax_Architecture_v10.md", "ten"),

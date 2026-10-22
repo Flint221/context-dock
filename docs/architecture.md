@@ -1,3 +1,7 @@
+# Filename display labels — 0.7.3
+
+Tracking family readback derives nullable `currentLabel` from the active filename (or retained current snapshot filename). `matching::version_label` recognizes trailing v/version numeric labels, preserves decimal components/leading zeroes and permits trailing date suffixes. It does not change import ranking or any persisted version metadata. Document families uses this label for Current; an unlabeled filename falls back to explicitly named Capture N. Versions remains the number of locally stored distinct snapshots. Numeric `currentNumber` continues to represent the capture sequence for history and cloud readiness; no version IDs/rows or cloud associations are rewritten. Schema 008 and application identity are unchanged.
+
 # Ordered initial filename imports — 0.7.2
 
 `matching::version_order` parses bounded explicit trailing numeric export versions, including decimal components. Initial groups require the same normalized stem, parent path and document kind, with unique numeric ranks. Numeric component ordering avoids lexicographic v10/v2 errors; equivalent v1/v01/v1.0 ranks are ambiguous. Date-only labels are not ordered automatically. Nonmembers retain independent families. Initial grouping establishes a directory/name alias so a later single numbered replacement can find the imported family even when another workstream has the same stem.

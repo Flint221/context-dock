@@ -1,6 +1,10 @@
 # ContextDock
 
-ContextDock 0.7.2 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.7.3 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+
+## Current filename version versus saved captures (0.7.3)
+
+In Document families, **Current** shows the active filename's version label. For `RAP_Master_Context_v6.md` with three local snapshots, Current is **v6** and Versions is **3**. Decimal labels are preserved. Files without a recognizable version label show **Capture N** instead; the Current cell's tooltip identifies the saved capture number. Existing projects update automatically on installation: snapshot IDs, numbering, counts and cloud readiness checks are unchanged. No re-import is needed.
 
 ## Larger Word packages and independent sync failures (0.7.1)
 

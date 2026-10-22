@@ -202,6 +202,51 @@ it("keeps prior separate histories accessible without counting them as active fa
     expect(registry.versions).toHaveBeenCalledWith("original"),
   );
 });
+it("shows the filename version as Current separately from the local snapshot count", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  view.families = [
+    {
+      id: "master",
+      name: "RAP Master Context",
+      kind: "markdown",
+      state: "tracked",
+      activeSourceId: "s1",
+      activeFilename: "RAP_Master_Context_v6.md",
+      sourceStatus: "available",
+      currentNumber: 3,
+      currentLabel: "v6",
+      versionCount: 3,
+      lastCaptured: null,
+      needsReview: false,
+    },
+    {
+      id: "readme",
+      name: "Readme",
+      kind: "markdown",
+      state: "tracked",
+      activeSourceId: "s2",
+      activeFilename: "Readme.md",
+      sourceStatus: "available",
+      currentNumber: 2,
+      currentLabel: null,
+      versionCount: 2,
+      lastCaptured: null,
+      needsReview: false,
+    },
+  ];
+  render(<TrackingPanel project={project} changed={changed} />);
+  const row = await screen.findByRole("row", { name: /RAP Master Context/ });
+  expect(within(row).getByRole("cell", { name: "v6" })).toHaveAttribute(
+    "title",
+    "Current saved capture #3",
+  );
+  expect(within(row).getByRole("cell", { name: "3" })).toBeInTheDocument();
+  const unversioned = screen.getByRole("row", { name: /Readme/ });
+  expect(
+    within(unversioned).getByRole("cell", { name: "Capture 2" }),
+  ).toBeInTheDocument();
+});
 it("holds ambiguous files for an explicit family selection", async () => {
   view.enabled = true;
   view.initialized = true;

@@ -62,6 +62,7 @@ export interface Family {
   activeFilename: string | null;
   sourceStatus: string | null;
   currentNumber: number | null;
+  currentLabel?: string | null;
   versionCount: number;
   lastCaptured: string | null;
   needsReview: boolean;

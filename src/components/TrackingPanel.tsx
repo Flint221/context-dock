@@ -369,8 +369,17 @@ export function TrackingPanel({
                               {f.activeFilename || "No active source"}
                             </small>
                           </td>
-                          <td>
-                            {f.currentNumber ? `v${f.currentNumber}` : "—"}
+                          <td
+                            title={
+                              f.currentNumber
+                                ? `Current saved capture #${f.currentNumber}`
+                                : undefined
+                            }
+                          >
+                            {f.currentLabel ||
+                              (f.currentNumber
+                                ? `Capture ${f.currentNumber}`
+                                : "—")}
                           </td>
                           <td>{f.versionCount}</td>
                           <td>{date(f.lastCaptured)}</td>

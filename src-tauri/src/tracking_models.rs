@@ -10,6 +10,7 @@ pub struct Family {
     pub active_filename: Option<String>,
     pub source_status: Option<String>,
     pub current_number: Option<i64>,
+    pub current_label: Option<String>,
     pub version_count: i64,
     pub last_captured: Option<String>,
     pub needs_review: bool,
