@@ -182,7 +182,10 @@ impl Registry {
             initialized,
             watch_status,
             error: problem,
-            families: families.into_iter().filter(|f| !blocked_documents.contains(&f.id)).collect(),
+            families: families
+                .into_iter()
+                .filter(|f| !blocked_documents.contains(&f.id))
+                .collect(),
             sources: sources
                 .into_iter()
                 .filter(|s| crate::path_selection::permits(&path_rules, &s.relative_path))

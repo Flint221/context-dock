@@ -148,6 +148,12 @@ fn schema_six_migration_retains_legacy_ignored_files_and_saved_history() {
     let mut r = Registry::open(&db).unwrap();
     let id = r.add("P", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, vec![]).unwrap();
+    // Simulate a file ignored by the pre-folder-selection implementation.
+    r.db.execute(
+        "UPDATE source_files SET disposition='ignored' WHERE project_id=?1",
+        [&id],
+    )
+    .unwrap();
     r.db.execute_batch(
         "DROP TABLE path_exclusions; DROP TABLE path_selection; PRAGMA user_version=6;",
     )

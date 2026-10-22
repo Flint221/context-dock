@@ -1011,6 +1011,17 @@ fn initialization_can_ignore_existing_files_and_word_lock_files_are_not_document
             .unwrap()
             .id
             .clone();
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(
+        &f.project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Ignored.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
+    // The legacy argument cannot override the saved folder selection.
     f.r.configure_tracking(&f.project, true, false, vec![selected])
         .unwrap();
     let ignored = f.document("Ignored.md");
