@@ -151,7 +151,7 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
-        let mut q=self.db.prepare("SELECT id,kind,state,error,created_at FROM operations WHERE project_id=?1 AND state!='done' ORDER BY created_at").map_err(error)?;
+        let mut q=self.db.prepare("SELECT id,kind,state,error,created_at FROM operations WHERE project_id=?1 AND state NOT IN ('done','cancelled','restored') ORDER BY created_at").map_err(error)?;
         let operations = q
             .query_map([project], |r| {
                 Ok(PendingOperation {

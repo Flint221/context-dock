@@ -283,7 +283,7 @@ fn initial_numbered_exports_group_in_numeric_order_without_moving_sources() {
         ("nested/CottonTrax_Architecture_v3.md", "other"),
         ("CottonTrax_Architecture_v4.docx", "word"),
     ]);
-    f.enable(true);
+    f.enable(false);
     let id = f.document("CottonTrax_Architecture_v1.md");
     assert_eq!(f.document("CottonTrax_Architecture_v2.md"), id);
     assert_eq!(f.document("CottonTrax_Architecture_v10.md"), id);
@@ -420,7 +420,9 @@ fn interrupted_numbered_import_recovers_order_after_restart_without_duplicate_ca
         vec!["Report_v3.md", "Report_v2.md", "Report_v1.md"]
     );
     assert!(f.r.tracking_view(&f.project).unwrap().operations.is_empty());
-    assert!(!f.root.join("Old Context Files").exists());
+    assert!(f.root.join("Old Context Files").exists());
+    assert!(f.root.join("Report_v3.md").exists());
+    assert!(!f.root.join("Report_v1.md").exists());
 }
 
 fn initialize_legacy_separate(f: &mut Fixture) {
@@ -484,7 +486,7 @@ fn readded_legacy_project_regroups_simple_exports_but_retains_original_history_i
         f.r.add("Restored", f.root.to_str().unwrap()).unwrap(),
         f.project
     );
-    f.enable(true);
+    f.enable(false);
     let target = f.document("Report_v1.md");
     assert_eq!(f.document("Report_v2.md"), target);
     assert_eq!(f.count(&target), 2);

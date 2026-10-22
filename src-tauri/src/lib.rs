@@ -4,6 +4,9 @@ mod ai_inference;
 mod ai_models;
 #[cfg(test)]
 mod ai_tests;
+mod archival;
+#[cfg(test)]
+mod archival_tests;
 mod chat;
 mod chat_commands;
 mod chat_stream;
@@ -182,6 +185,39 @@ async fn configure_tracking(
     })
     .await
     .map_err(|e| format!("Tracking settings failed: {e}"))?
+}
+#[tauri::command]
+async fn archival_review(
+    state: tauri::State<'_, Store>,
+    project: String,
+    enabled: bool,
+) -> Result<archival::Review, String> {
+    work(state.inner().clone(), move |r| {
+        r.archival_review(&project, enabled)
+    })
+    .await
+}
+#[tauri::command]
+async fn apply_archival_review(
+    state: tauri::State<'_, Store>,
+    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
+    app: tauri::AppHandle,
+    project: String,
+    enabled: bool,
+    token: String,
+) -> Result<(), String> {
+    let store = state.inner().clone();
+    let gate = runtime.gate.clone();
+    let id = project.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
+        let mut r = store.0.lock().map_err(|_| "Registry is unavailable.")?;
+        r.apply_archival(&id, enabled, &token)
+    })
+    .await
+    .map_err(|e| format!("Archival action failed: {e}"))??;
+    let _ = app.emit("registry-changed", &project);
+    Ok(())
 }
 #[tauri::command]
 async fn resolve_match(
@@ -388,6 +424,8 @@ pub fn run() {
             open_project,
             tracking_view,
             configure_tracking,
+            archival_review,
+            apply_archival_review,
             resolve_match,
             document_versions,
             compare_versions,

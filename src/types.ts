@@ -108,6 +108,17 @@ export interface TrackingView {
   activity: Activity[];
   operations: PendingOperation[];
 }
+export interface ArchivalReview {
+  token: string;
+  enabled: boolean;
+  items: {
+    from: string;
+    to: string;
+    action: "archive" | "restore" | "copy";
+    problem: string | null;
+  }[];
+  warnings: string[];
+}
 export interface Version {
   id: string;
   number: number;

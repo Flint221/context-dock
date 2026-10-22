@@ -1,3 +1,15 @@
+# 0.8.0 — Reviewed reversible archival
+
+October 22, 2026. **187 native tests pass**, plus one intentionally ignored child-fixture entry invoked by its parent test. **127 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation and Windows x64 NSIS packaging pass. Package/lockfile, Rust and Tauri versions agree at 0.8.0. Schema 009 records durable archive intents and rejects older readers; application identity remains com.contextdock.desktop.
+
+Eleven new native tests cover repeated source archive/restore cycles without snapshot/history changes, original-path conflicts and restart retry, stale reviews, changed archive identities, failed metadata commits after forward/reverse renames, retained in-place snapshot copies, folder exclusions, initial import archival consent, foreign archive destinations, nested original paths, ignored setting writes, restoration while tracking remains paused and 24 Windows Unicode/path-length rename alignments. Three added frontend regressions cover review failures/reload/cancel, stale token recovery and paused-tracking opt-out, alongside the existing confirmation/readback/duplicate-action tests.
+
+Disposable nested-path tests exposed an existing FILE_RENAME_INFO buffer issue: some destination lengths acquired trailing garbage characters. Explicit UTF-16 termination plus exact destination identity verification fixes the observed case; all alignment cases pass. No installed user project sources, snapshots or cloud resources were modified by validation. Installed upgrade, Explorer organization, real file locks and authenticated cloud acceptance remain user checks in [the reversible archival walkthrough](manual-testing-reversible-archival.md). Existing checked archival does not trigger silent backfill after upgrade; use Organize older files now.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.8.0_x64-setup.exe`, **4,486,107 bytes**, SHA-256 `37BBE14B5682EDB2FA0E42690C2AA07771B98366CD587F6075313AC9DECB2521`. File/product version is 0.8.0. The installer was built, not executed against user data. Local checks do not claim a GitHub CI result or main merge.
+
+---
+
 # 0.7.3 — Current filename version versus capture count
 
 October 22, 2026. **176 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **124 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied and diff whitespace checks pass. Versions agree at 0.7.3; schema 008 and application identity are unchanged.

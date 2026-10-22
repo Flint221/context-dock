@@ -263,12 +263,19 @@ pub fn discard_stage(store: &Path, temp: &str) -> Result<()> {
 pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {
     use std::{
         mem::{offset_of, size_of},
-        os::windows::{ffi::OsStrExt, io::AsRawHandle},
+        os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO,
+        FileRenameInfo, SetFileInformationByHandle, FILE_RENAME_INFO, FILE_SHARE_DELETE,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
-    let name: Vec<u16> = destination.as_os_str().encode_wide().collect();
+    // Include an explicit terminator even when the flexible buffer lands exactly
+    // on an allocation boundary. FileNameLength still excludes that terminator.
+    let name: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     let size = offset_of!(FILE_RENAME_INFO, FileName) + name.len() * size_of::<u16>();
     let mut buffer = vec![0u64; size.div_ceil(size_of::<u64>())];
     // Buffer is aligned for FILE_RENAME_INFO, sized for its trailing UTF-16 filename.
@@ -276,7 +283,7 @@ pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {
         let info = buffer.as_mut_ptr().cast::<FILE_RENAME_INFO>();
         (*info).Anonymous.ReplaceIfExists = false;
         (*info).RootDirectory = std::ptr::null_mut();
-        (*info).FileNameLength = (name.len() * 2) as u32;
+        (*info).FileNameLength = ((name.len() - 1) * 2) as u32;
         std::ptr::copy_nonoverlapping(
             name.as_ptr(),
             std::ptr::addr_of_mut!((*info).FileName).cast::<u16>(),
@@ -291,6 +298,12 @@ pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {
     };
     if ok == 0 {
         return Err(format!("Safe archive rename failed (including cross-volume or sharing conflicts): {}. Source was not deleted.",std::io::Error::last_os_error()));
+    }
+    // Keep the original write/delete-denied handle pinned while verifying that
+    // the exact requested destination resolves to this same file.
+    let destination_file = OpenOptions::new().read(true).share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).open(destination).map_err(|e|format!("The rename completed but its destination could not be verified. Saved snapshots and move identity are retained for recovery: {e}"))?;
+    if file_identity(&destination_file)? != file_identity(file)? {
+        return Err("Rename destination identity did not match the moved source. Saved snapshots and the move receipt are retained for recovery.".into());
     }
     Ok(())
 }

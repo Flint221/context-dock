@@ -137,7 +137,10 @@ fn enqueue_archive(
         }
         .into(),
     };
-    db.execute("INSERT OR IGNORE INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'archive',?5,?6,?6)",params![id,project,document,format!("archive:{previous}:{next}"),encode(&plan)?,models::now()]).map_err(error)?;
+    let key = format!("archive:{previous}:{next}");
+    let terminal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE dedupe_key=?1 AND state IN ('cancelled','restored'))",[&key],|r|r.get(0)).map_err(error)?;
+    let key = if terminal { format!("{key}:{id}") } else { key };
+    db.execute("INSERT OR IGNORE INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'archive',?5,?6,?6)",params![id,project,document,key,encode(&plan)?,models::now()]).map_err(error)?;
     Ok(())
 }
 fn activate(
@@ -474,8 +477,12 @@ impl Registry {
         project: &str,
         retry_blocked: bool,
     ) -> Result<Vec<String>> {
-        if !self.tracking_flags(project)?.0 {
-            return Ok(vec![]);
+        let tracking = self.tracking_flags(project)?.0;
+        if !tracking {
+            let restores: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE project_id=?1 AND kind='restore' AND (state IN ('pending','finalized') OR (?2 AND state='blocked')))", params![project, retry_blocked], |r| r.get(0)).map_err(error)?;
+            if !restores {
+                return Ok(vec![]);
+            }
         }
         crate::folder_recovery::require_ready(&self.db, project)?;
         let mut q=self.db.prepare("SELECT id,kind,payload,state FROM operations WHERE project_id=?1 AND (state IN ('pending','finalized') OR (?2 AND state='blocked')) ORDER BY CASE kind WHEN 'capture' THEN 0 ELSE 1 END,created_at").map_err(error)?;
@@ -494,6 +501,9 @@ impl Registry {
         drop(q);
         let mut errors = vec![];
         for (id, kind, payload, state) in ops {
+            if !tracking && kind != "restore" {
+                continue;
+            }
             if kind == "archive" && !self.tracking_flags(project)?.1 {
                 continue;
             }
@@ -528,6 +538,9 @@ impl Registry {
                 }
             }
             let result = match kind.as_str() {
+                "restore" => serde_json::from_str::<crate::archival::RestorePlan>(&payload)
+                    .map_err(|e| e.to_string())
+                    .and_then(|p| self.finish_restore(&id, &p)),
                 "initial_import" => self.finish_initial_import(&id, &payload),
                 "capture" => serde_json::from_str::<CapturePlan>(&payload)
                     .map_err(|e| e.to_string())

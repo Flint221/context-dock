@@ -20,7 +20,10 @@ impl Registry {
     ) -> Result<()> {
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
-        let (was_enabled, _, initialized) = self.tracking_flags(project)?;
+        let (was_enabled, was_archive, initialized) = self.tracking_flags(project)?;
+        if archive && !was_archive {
+            self.require_no_restores(project)?;
+        }
         if enabled {
             crate::folder_recovery::require_ready(&self.db, project)?;
             let canonical =
@@ -65,6 +68,9 @@ impl Registry {
             tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         }
         tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 AND tracking_initialized=0 THEN 2 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
+        if archive != was_archive {
+            tx.execute("INSERT INTO archive_intents VALUES(?1,?2,1) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,pending=1",params![project,archive]).map_err(error)?;
+        }
         tx.commit().map_err(error)?;
         self.verify_tracking_settings(project, enabled, archive)?;
         self.activity(
@@ -120,6 +126,10 @@ impl Registry {
             self.reconcile(project, "startup_reconciliation", &HashSet::new(), true)?;
         } else if enabled && archive {
             let errors = self.recover_operations(project, true)?;
+            self.set_tracking_error(project, &errors)?;
+        }
+        let errors = self.finish_archival_intent(project)?;
+        if !errors.is_empty() {
             self.set_tracking_error(project, &errors)?;
         }
         self.verify_tracking_settings(project, enabled, archive)
@@ -196,7 +206,8 @@ impl Registry {
                 )
                 .map_err(error)?;
         }
-        let mut problems = self.recover_operations(project, full)?;
+        let mut problems = self.finish_archival_intent(project)?;
+        problems.extend(self.recover_operations(project, full)?);
         let path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
@@ -337,7 +348,8 @@ impl Registry {
             }
         }
         problems.extend(self.recover_operations(project, false)?);
-        let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state!='done'",[project],|r|r.get(0)).map_err(error)?;
+        problems.extend(self.finish_archival_intent(project)?);
+        let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state NOT IN ('done','cancelled','restored')",[project],|r|r.get(0)).map_err(error)?;
         if blocked > 0 && problems.is_empty() {
             problems.push("A journal operation needs review or an explicit retry below.".into());
         }

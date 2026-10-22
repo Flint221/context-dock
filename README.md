@@ -1,6 +1,14 @@
 # ContextDock
 
-ContextDock 0.7.3 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.8.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+
+## Reversible source archival (0.8.0)
+
+Automatic archival now organizes already captured older exports as well as future replacements. For a project that already has archival checked, click **Organize older files now**, review the exact paths, then confirm. For example, captured Master Context v4/v5 can move into **Old Context Files** under the project root while v6 stays active. Excluded, ambiguous, unfinished or unverified sources are left alone with an explanation.
+
+Turning archival off opens a restore review and returns recorded source moves to their original paths, including nested folders. This works while tracking is paused and does not resume it. **Restore moved files…** retries unfinished restores. Existing destination files are never overwritten; changed, missing or locked files remain visible for retry. In-place edits archive snapshot copies, which remain archived because restoring them would replace the working document. Snapshots, local history, current selection and cloud choices are retained. Upgrading an already-enabled project does not silently organize files.
+
+See [archive/restore acceptance checks](docs/manual-testing-reversible-archival.md). This release upgrades the registry to schema 009; do not reopen it with an older application.
 
 ## Current filename version versus saved captures (0.7.3)
 
@@ -14,7 +22,7 @@ Upload/index failures now identify the original relative path, version and reaso
 
 ## Initial numbered document families (0.7.2)
 
-**Enable tracking → Capture selected and enable** now groups clear numeric exports such as `CottonTrax_Architecture_v1.md` and `_v2.md` into one family. Imports run in numeric order (`v2` before `v10`), and the highest export becomes the active source. Folder and file type must match; unrelated stems, duplicate equivalent version numbers and dates-only names remain separate. History numbers count distinct captured bytes, so identical exports reuse a snapshot and filename suffix gaps do not create missing capture numbers. Original filenames remain visible in history. Initial imports never move sources, even with archival enabled.
+**Enable tracking → Capture selected and enable** now groups clear numeric exports such as `CottonTrax_Architecture_v1.md` and `_v2.md` into one family. Imports run in numeric order (`v2` before `v10`), and the highest export becomes the active source. Folder and file type must match; unrelated stems, duplicate equivalent version numbers and dates-only names remain separate. History numbers count distinct captured bytes, so identical exports reuse a snapshot and filename suffix gaps do not create missing capture numbers. Original filenames remain visible in history. With archival off, initial imports leave every source in place. With separate archival consent, verified older exports are organized after their snapshots finish; the newest source stays in place.
 
 Removing a project keeps its local history. After re-adding the same folder, **Resume tracking** can repair the old separate-initial-history layout when each member is an unchanged single initial snapshot and no cloud resources remain. Prior snapshot/version IDs, metadata and bytes remain accessible under **Earlier separate histories**; regrouped families need explicit cloud selection again. Edited/multi-version/manual histories or retained cloud resources are preserved separately with a visible explanation. You can also stop/resume tracking after deleting project cloud data instead of removing the registration. Ordered imports resume safely after interruption. See [the acceptance walkthrough](docs/manual-testing-numbered-import.md). Schema 008 prevents older builds from reopening an import-aware registry; do not downgrade after upgrading.
 
@@ -92,7 +100,7 @@ Send is an explicit paid OpenAI action, using pinned GPT-5.4 Mini. There are no 
 ## Implemented through Milestone 4
 
 - Dashboard, project registration, metadata discovery/search, rename, clipboard paths, Explorer locations, non-destructive unregistration, and light/dark/system themes.
-- Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; clear numbered exports with the same normalized name, folder and type form one ordered history. Unrelated/ambiguous files start independent histories. Initialization never moves existing files.
+- Per-project **Document tracking**, initially off for existing and new registrations. Select initial files; clear numbered exports with the same normalized name, folder and type form one ordered history. Unrelated/ambiguous files start independent histories. Initialization retains every source when archival is off; separate archival consent organizes verified older exports after capture.
 - Native filesystem monitoring while the app is running, debounced writes, bounded retries for unstable/locked files, and startup reconciliation of missed changes.
 - SHA-256-verified immutable local snapshots, independent version numbering, duplicate-content prevention, and remembered manual associations.
 - Conservative matching of trailing version/date filenames within the same directory. Ambiguous matches and duplicate copies go to **Needs Review** for assignment, independent tracking, or ignore.
