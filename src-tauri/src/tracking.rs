@@ -212,6 +212,8 @@ impl Registry {
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
+        let mut inherited = HashSet::new();
+        let mut retry = false;
         for sid in &ids {
             let s = self.source(sid)?;
             if s.disposition == "discovered"
@@ -271,13 +273,24 @@ impl Registry {
                 Ok(s) => s,
                 Err(_) => continue,
             };
-            let candidate = self.match_candidates(&source, &staged.hash);
-            storage::discard_stage(&self.store, &staged.temporary)?;
-            let (matches, _, high) = candidate?;
+            let (matches, explanation, high) = self.match_candidates(&source, &staged.hash)?;
             if !high || matches.len() != 1 {
+                storage::discard_stage(&self.store, &staged.temporary)?;
                 continue;
             }
+            let target = &matches[0];
             let tx = self.db.transaction().map_err(error)?;
+            // Bind the exact candidate identified from these staged bytes before
+            // making the path eligible. A second scan must not reclassify a
+            // different file after the exclusion has already been removed.
+            tx.execute(
+                "UPDATE source_files SET document_id=?1,disposition='tracked' WHERE id=?2",
+                params![target, source.id],
+            )
+            .map_err(error)?;
+            if target != &source.document_id {
+                tx.execute("UPDATE documents SET tracking_state='merged',merged_into=?1,active_source_id=NULL WHERE id=?2 AND current_version_id IS NULL AND NOT EXISTS(SELECT 1 FROM source_files WHERE document_id=?2)",params![target,source.document_id]).map_err(error)?;
+            }
             tx.execute(
                 "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
                 params![project, path],
@@ -291,9 +304,30 @@ impl Registry {
             tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1", [project]).map_err(error)?;
             tx.commit().map_err(error)?;
             path_rules = crate::path_selection::rules(&self.db, project)?;
+            self.activity(
+                project,
+                "matched",
+                &format!(
+                    "High-confidence match: {} -> {}. {}",
+                    source.relative, target, explanation
+                ),
+            )?;
+            let assigned = self.source(&source.id)?;
+            if let Err(e) = self.capture(&assigned, staged, "new_replacement", archive) {
+                self.activity(
+                    project,
+                    "capture_deferred",
+                    &format!("{}: {e}", source.relative),
+                )?;
+                problems.push(e);
+                retry = true;
+            }
+            inherited.insert(source.id);
         }
-        let mut retry = false;
         for sid in ids {
+            if inherited.contains(&sid) {
+                continue;
+            }
             let source = self.source(&sid)?;
             let importing: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE document_id=?1 AND kind='initial_import' AND state!='done')",[&source.document_id],|r|r.get(0)).map_err(error)?;
             if importing {
