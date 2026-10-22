@@ -100,6 +100,8 @@ export function ProjectCloud({ project }: { project: string }) {
     !!view.store_id &&
     view.failed === 0 &&
     view.pending === 0 &&
+    awaitingCapture === 0 &&
+    needsAttention === 0 &&
     selected.length > 0 &&
     selected.every((f) => f.currentNumber === f.cloudNumber);
   const reason = !view

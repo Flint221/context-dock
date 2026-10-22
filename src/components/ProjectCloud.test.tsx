@@ -19,6 +19,14 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("does not claim all selected documents are ready while capture is pending", async () => {
+  connected();
+  view.families.push({ ...view.families[0], id: "pending", name: "Waiting for capture", selected: 0, eligible: 0, currentNumber: null, cloudNumber: null, versionCount: 0, rawBytes: 0 });
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByText(/1 awaiting capture/)).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+  expect(screen.queryByText("On · Documents ready for questions")).not.toBeInTheDocument();
+});
 it("includes selected documents awaiting a cloud job in coverage", async () => {
   connected();
   view.indexed = 9;
