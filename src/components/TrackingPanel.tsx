@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, BookOpen, Check, Eye, RefreshCw } from "lucide-react";
-import type { Project, TrackingView, PendingMatch, Family } from "../types";
+import type {
+  Project,
+  TrackingView,
+  PendingMatch,
+  Family,
+  ArchivalReview,
+} from "../types";
 import { registry } from "../services/registry";
 import { date } from "../format";
 import { Modal } from "./Modal";
@@ -62,9 +68,11 @@ function MatchDecision({
 export function TrackingPanel({
   project,
   changed,
+  onStatus,
 }: {
   project: Project;
   changed: () => Promise<void>;
+  onStatus?: (view: TrackingView | null) => void;
 }) {
   const [view, setView] = useState<TrackingView | null>(null);
   const [stateKnown, setStateKnown] = useState(false);
@@ -84,11 +92,47 @@ export function TrackingPanel({
     };
   }, []);
   const [initialize, setInitialize] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   const [archive, setArchive] = useState(false);
   const [history, setHistory] = useState<string | null>(null);
   const [limit, setLimit] = useState(100);
   const [choiceLimit, setChoiceLimit] = useState(100);
+  const [archivalReview, setArchivalReview] = useState<ArchivalReview | null>(
+    null,
+  );
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewLimit, setReviewLimit] = useState(100);
+  const reviewSequence = useRef(0);
+  async function reviewArchival(target: boolean) {
+    const sequence = ++reviewSequence.current;
+    setConfirmation({
+      enabled: !!view?.enabled,
+      archive: target,
+      kind: "archival",
+    });
+    setArchivalReview(null);
+    setReviewLoading(true);
+    setError("");
+    setReviewLimit(100);
+    try {
+      const review = await registry.archivalReview(project.id, target);
+      if (alive.current && sequence === reviewSequence.current)
+        setArchivalReview(review);
+    } catch (e) {
+      if (alive.current && sequence === reviewSequence.current)
+        setError(String(e));
+    } finally {
+      if (alive.current && sequence === reviewSequence.current)
+        setReviewLoading(false);
+    }
+  }
+  function closeConfirmation() {
+    if (busy) return;
+    ++reviewSequence.current;
+    setConfirmation(null);
+    setError("");
+    setReviewLoading(false);
+    setArchivalReview(null);
+  }
   useEffect(() => {
     let active = true;
     registry
@@ -115,6 +159,9 @@ export function TrackingPanel({
     project.archiveEnabled,
     project.trackingRevision,
   ]);
+  useEffect(() => {
+    onStatus?.(stateKnown ? view : null);
+  }, [view, stateKnown, onStatus]);
   async function mutate(
     work: () => Promise<unknown>,
     expected?: { enabled: boolean; archive: boolean },
@@ -154,6 +201,15 @@ export function TrackingPanel({
       }
     } catch (e) {
       if (alive.current) setError(String(e));
+      try {
+        const next = await registry.tracking(project.id);
+        if (alive.current) {
+          setView(next);
+          setStateKnown(true);
+        }
+      } catch {
+        if (alive.current) setStateKnown(false);
+      }
     } finally {
       release();
       if (alive.current) setBusy(false);
@@ -234,7 +290,6 @@ export function TrackingPanel({
                     kind: "tracking",
                   });
                 else {
-                  setSelected(eligible.map((s) => s.id));
                   setArchive(false);
                   setChoiceLimit(100);
                   setInitialize(true);
@@ -258,29 +313,37 @@ export function TrackingPanel({
                 busy ||
                 !!confirmation ||
                 initialize ||
-                !view.enabled ||
+                (!view.enabled && !view.archiveEnabled) ||
                 !stateKnown
               }
-              onChange={(e) =>
-                setConfirmation({
-                  enabled: view.enabled,
-                  archive: e.target.checked,
-                  kind: "archival",
-                })
-              }
+              onChange={(e) => void reviewArchival(e.target.checked)}
             />
             <span>
               <strong>
                 Enable automatic archival of replaced source files
               </strong>
               <small>
-                Separately opt in to Old Context Files. A confirmed replacement
-                can move the previous source after both snapshots are verified.
-                In-place edits archive a copy of the old snapshot and leave the
-                current source untouched.
+                Move verified older exports into Old Context Files and archive
+                future replacements. Turning this off reviews restoring moved
+                files to their original locations. Your current source stays in
+                place; in-place snapshot copies remain archived.
               </small>
             </span>
           </label>
+          <button
+            disabled={
+              busy ||
+              !!confirmation ||
+              initialize ||
+              (!view.enabled && view.archiveEnabled) ||
+              !stateKnown
+            }
+            onClick={() => void reviewArchival(view.archiveEnabled)}
+          >
+            {view.archiveEnabled
+              ? "Organize older files now"
+              : "Restore moved files…"}
+          </button>
           {!view.enabled && view.initialized && (
             <p className="tracking-note">
               Tracking is paused. Your history is retained. Resume catches up
@@ -504,7 +567,11 @@ export function TrackingPanel({
                 </div>
               ))}
               <button
-                disabled={busy || !view.enabled}
+                disabled={
+                  busy ||
+                  (!view.enabled &&
+                    !view.operations.some((op) => op.kind === "restore"))
+                }
                 onClick={() => void mutate(() => registry.retry(project.id))}
               >
                 Retry pending operations
@@ -536,46 +603,21 @@ export function TrackingPanel({
           }}
         >
           <p>
-            Select files to track. Clear numbered sequences such as
-            Report_v1.md, Report_v2.md and Report_v10.md in the same folder and
-            file type become one document family, imported in numeric order with
-            the newest export active. Unrelated or ambiguous names stay
-            separate. Initialization never moves your original files.
+            The saved folder selection determines which files are tracked. Clear
+            numbered sequences such as Report_v1.md, Report_v2.md and
+            Report_v10.md in the same folder and file type become one document
+            family, imported in numeric order with the newest export active.
+            Unrelated or ambiguous names stay separate. Initialization never
+            moves your original files.
           </p>
           <p className="tracking-note">
-            Unselected existing files are ignored for tracking until you include
-            them and Save changes in the folder tree. New unrelated files added
-            later are tracked automatically unless their folder is excluded.
+            Select or exclude files in the folder tree and save your changes.
+            New unrelated files are excluded until you select them.
           </p>
-          <div className="selection-actions">
-            <button
-              disabled={busy}
-              onClick={() => setSelected(eligible.map((s) => s.id))}
-            >
-              Select all
-            </button>
-            <button disabled={busy} onClick={() => setSelected([])}>
-              Clear selection
-            </button>
-            <span>{selected.length} selected</span>
-          </div>
+          <p>{eligible.length} available selected files</p>
           <div className="source-selection">
             {eligible.slice(0, choiceLimit).map((s) => (
-              <label key={s.id} className="tracking-toggle">
-                <input
-                  type="checkbox"
-                  disabled={busy}
-                  checked={selected.includes(s.id)}
-                  onChange={(e) =>
-                    setSelected((ids) =>
-                      e.target.checked
-                        ? [...ids, s.id]
-                        : ids.filter((id) => id !== s.id),
-                    )
-                  }
-                />
-                <span>{s.relativePath}</span>
-              </label>
+              <p key={s.id}>{s.relativePath}</p>
             ))}
             {eligible.length > choiceLimit && (
               <button onClick={() => setChoiceLimit((n) => n + 100)}>
@@ -599,8 +641,9 @@ export function TrackingPanel({
             <span>
               Also enable automatic archival
               <small>
-                Future confirmed replacements may move previous sources into Old
-                Context Files. Initial sources remain in place.
+                After capture, verified older exports move into Old Context
+                Files. The newest export stays active. Turning archival off
+                restores moved sources after review.
               </small>
             </span>
           </label>
@@ -623,7 +666,7 @@ export function TrackingPanel({
                       project.id,
                       true,
                       archive,
-                      selected,
+                      eligible.map((s) => s.id),
                     ),
                   { enabled: true, archive },
                   () => setInitialize(false),
@@ -649,28 +692,84 @@ export function TrackingPanel({
           title={
             confirmation.kind === "archival"
               ? confirmation.archive
-                ? "Enable automatic archival?"
-                : "Turn off automatic archival?"
+                ? view?.archiveEnabled
+                  ? "Organize older files?"
+                  : "Enable automatic archival?"
+                : view?.archiveEnabled
+                  ? "Turn off automatic archival?"
+                  : "Restore moved files?"
               : confirmation.enabled
                 ? "Resume document tracking?"
                 : "Turn off document tracking?"
           }
-          close={() => {
-            if (!busy) {
-              setConfirmation(null);
-              setError("");
-            }
-          }}
+          close={closeConfirmation}
         >
           <p>
             {confirmation.kind === "archival"
               ? confirmation.archive
-                ? "Future replacements can move older sources into Old Context Files after verification. In-place edits archive a copy of the previous version. Your current document stays available."
-                : "Stop creating archives or moving replaced source files. Version tracking and existing archives are kept."
+                ? "Organize verified older exports into Old Context Files and archive future replacements. Review the paths below. Your current document stays in place; changed, locked or conflicting files stay untouched until resolved."
+                : "Stop archival and restore files ContextDock moved to their original folders. Existing files are never overwritten. Snapshot copies from in-place edits stay archived; saved history and cloud selections are kept."
               : confirmation.enabled
                 ? "Resume watching this folder and capture changes made while tracking was off. Clear numbered exports saved as separate initial histories by older versions can be grouped when no cloud resources remain. Original histories stay available under Earlier separate histories; regrouped families require explicit cloud re-selection."
                 : "Stop capturing new document versions. Existing history, saved chats and documents are kept. Cloud sync will not receive uncaptured edits."}
           </p>
+          {confirmation.kind === "archival" && (
+            <>
+              {reviewLoading && (
+                <p role="status">Checking archive paths and ownership…</p>
+              )}
+              {archivalReview && (
+                <div className="source-selection">
+                  <p>
+                    {archivalReview.items.length} file action(s) in this review.
+                  </p>
+                  {archivalReview.warnings.map((warning, i) => (
+                    <p className="banner warning" key={i}>
+                      {warning}
+                    </p>
+                  ))}
+                  {archivalReview.items.slice(0, reviewLimit).map((item, i) => (
+                    <article
+                      className="review-card"
+                      key={`${item.from}:${item.to}:${i}`}
+                    >
+                      <strong>
+                        {item.action === "restore"
+                          ? "Restore"
+                          : item.action === "copy"
+                            ? "Copy snapshot"
+                            : "Archive"}
+                        : {item.from}
+                      </strong>
+                      <small>To: {item.to}</small>
+                      {item.problem && (
+                        <p className="error" role="alert">
+                          {item.problem}
+                        </p>
+                      )}
+                    </article>
+                  ))}
+                  {archivalReview.items.length > reviewLimit && (
+                    <button onClick={() => setReviewLimit((n) => n + 100)}>
+                      Show 100 more actions
+                    </button>
+                  )}
+                  {archivalReview.items.length === 0 && (
+                    <p>
+                      No verified file moves are needed. You can still save this
+                      archival setting.
+                    </p>
+                  )}
+                </div>
+              )}
+              <button
+                disabled={busy || reviewLoading}
+                onClick={() => void reviewArchival(confirmation.archive)}
+              >
+                Reload review
+              </button>
+            </>
+          )}
           {error && <p role="alert">{error}</p>}
           <OperationStatus
             busy={busy}
@@ -679,16 +778,26 @@ export function TrackingPanel({
           <div className="toolbar-actions">
             <button
               className="primary"
-              disabled={busy}
+              disabled={
+                busy ||
+                (confirmation.kind === "archival" &&
+                  (reviewLoading || !archivalReview))
+              }
               aria-busy={busy}
               onClick={() =>
                 void mutate(
                   () =>
-                    registry.configureTracking(
-                      project.id,
-                      confirmation.enabled,
-                      confirmation.archive,
-                    ),
+                    confirmation.kind === "archival" && archivalReview
+                      ? registry.applyArchival(
+                          project.id,
+                          confirmation.archive,
+                          archivalReview.token,
+                        )
+                      : registry.configureTracking(
+                          project.id,
+                          confirmation.enabled,
+                          confirmation.archive,
+                        ),
                   confirmation,
                   () => setConfirmation(null),
                 )
@@ -698,19 +807,17 @@ export function TrackingPanel({
                 ? "Saving…"
                 : confirmation.kind === "archival"
                   ? confirmation.archive
-                    ? "Enable archival"
-                    : "Turn off archival"
+                    ? view?.archiveEnabled
+                      ? "Organize files"
+                      : "Enable archival"
+                    : view?.archiveEnabled
+                      ? "Turn off archival"
+                      : "Restore moved files"
                   : confirmation.enabled
                     ? "Resume tracking"
                     : "Turn off tracking"}
             </button>
-            <button
-              disabled={busy}
-              onClick={() => {
-                setConfirmation(null);
-                setError("");
-              }}
-            >
+            <button disabled={busy} onClick={closeConfirmation}>
               Cancel
             </button>
           </div>

@@ -59,6 +59,17 @@ impl Fixture {
             .reconcile(&self.project, "manual_refresh", &HashSet::new(), true)
             .unwrap();
     }
+    fn select_new(&mut self, path: &str) {
+        assert!(!crate::path_selection::allowed(&self.r.db, &self.project, path).unwrap());
+        let revision = crate::path_selection::revision(&self.r.db, &self.project).unwrap();
+        let path = crate::path_selection::normalized(path);
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.project).unwrap();
+        rules.retain(|rule| rule.kind != "file" || rule.path != path);
+        self.r
+            .save_path_selection(&self.project, revision, rules)
+            .unwrap();
+        self.scan();
+    }
     fn document(&self, name: &str) -> String {
         self.r
             .snapshot()
@@ -81,6 +92,15 @@ impl Fixture {
         let document = self.document(old);
         fs::write(self.root.join(new), bytes).unwrap();
         self.r.refresh(&self.project).unwrap();
+        // Newly discovered paths require explicit folder selection before this
+        // fixture can exercise the lower-level capture and recovery journal.
+        let revision = crate::path_selection::revision(&self.r.db, &self.project).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.project).unwrap();
+        let new_path = crate::path_selection::normalized(new);
+        rules.retain(|rule| !(rule.kind == "file" && rule.path == new_path));
+        self.r
+            .save_path_selection(&self.project, revision, rules)
+            .unwrap();
         let sid = self
             .r
             .snapshot()
@@ -283,7 +303,7 @@ fn initial_numbered_exports_group_in_numeric_order_without_moving_sources() {
         ("nested/CottonTrax_Architecture_v3.md", "other"),
         ("CottonTrax_Architecture_v4.docx", "word"),
     ]);
-    f.enable(true);
+    f.enable(false);
     let id = f.document("CottonTrax_Architecture_v1.md");
     assert_eq!(f.document("CottonTrax_Architecture_v2.md"), id);
     assert_eq!(f.document("CottonTrax_Architecture_v10.md"), id);
@@ -344,6 +364,16 @@ fn initial_grouping_respects_selection_ambiguity_and_identical_bytes() {
         ("Decimal_v1.10.md", "ten"),
         ("Decimal_v1.2.md", "two"),
     ]);
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(
+        &f.project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Report_v3.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
     let ids =
         f.r.snapshot()
             .unwrap()
@@ -420,7 +450,9 @@ fn interrupted_numbered_import_recovers_order_after_restart_without_duplicate_ca
         vec!["Report_v3.md", "Report_v2.md", "Report_v1.md"]
     );
     assert!(f.r.tracking_view(&f.project).unwrap().operations.is_empty());
-    assert!(!f.root.join("Old Context Files").exists());
+    assert!(f.root.join("Old Context Files").exists());
+    assert!(f.root.join("Report_v3.md").exists());
+    assert!(!f.root.join("Report_v1.md").exists());
 }
 
 fn initialize_legacy_separate(f: &mut Fixture) {
@@ -484,7 +516,7 @@ fn readded_legacy_project_regroups_simple_exports_but_retains_original_history_i
         f.r.add("Restored", f.root.to_str().unwrap()).unwrap(),
         f.project
     );
-    f.enable(true);
+    f.enable(false);
     let target = f.document("Report_v1.md");
     assert_eq!(f.document("Report_v2.md"), target);
     assert_eq!(f.count(&target), 2);
@@ -596,6 +628,16 @@ fn ambiguous_families_and_other_directories_require_review_and_manual_associatio
     let id = f.document("Design_Notes_v1.md");
     fs::write(f.root.join("Design_Notes_v3.md"), "third").unwrap();
     f.scan();
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.project, "Design_Notes_v3.md").unwrap());
+    assert!(f
+        .r
+        .path_selection(&f.project)
+        .unwrap()
+        .entries
+        .iter()
+        .any(|entry| entry.path == "Design_Notes_v3.md" && entry.new));
+    assert_eq!(f.count(&id), 1);
+    f.select_new("Design_Notes_v3.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     assert_eq!(review.candidate_ids.len(), 2);
     assert!(f.root.join("Design_Notes_v1.md").exists());
@@ -609,6 +651,7 @@ fn ambiguous_families_and_other_directories_require_review_and_manual_associatio
     fs::create_dir(f.root.join("other")).unwrap();
     fs::write(f.root.join("other/Design_Notes_v5.md"), "other workstream").unwrap();
     f.scan();
+    f.select_new("other/Design_Notes_v5.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     f.r.resolve_match(&f.project, &review.source_id, "new", None)
         .unwrap();
@@ -631,6 +674,7 @@ fn identical_content_copy_needs_review_but_rename_preserves_identity_without_new
     assert!(f.r.tracking_view(&f.project).unwrap().reviews.is_empty());
     fs::copy(f.root.join("Renamed.md"), f.root.join("Copy.md")).unwrap();
     f.scan();
+    f.select_new("Copy.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     assert!(review.explanation.contains("Identical"));
     f.r.resolve_match(&f.project, &review.source_id, "assign", Some(id.clone()))
@@ -1009,6 +1053,17 @@ fn initialization_can_ignore_existing_files_and_word_lock_files_are_not_document
             .unwrap()
             .id
             .clone();
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(
+        &f.project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Ignored.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
+    // The legacy argument cannot override the saved folder selection.
     f.r.configure_tracking(&f.project, true, false, vec![selected])
         .unwrap();
     let ignored = f.document("Ignored.md");

@@ -28,7 +28,7 @@ fn migrations_persistence_rename_duplicate_and_safe_removal() {
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        8
+        10
     );
     r.remove(&id).unwrap();
     assert!(r.snapshot().unwrap().documents.is_empty());
@@ -225,13 +225,13 @@ fn future_database_version_is_rejected_without_downgrading() {
     let path = t.path().join("r.db");
     {
         let r = Registry::open(&path).unwrap();
-        r.db.pragma_update(None, "user_version", 9).unwrap();
+        r.db.pragma_update(None, "user_version", 11).unwrap();
     }
     assert!(Registry::open(&path).is_err());
     let c = rusqlite::Connection::open(path).unwrap();
     assert_eq!(
         c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        9
+        11
     );
 }

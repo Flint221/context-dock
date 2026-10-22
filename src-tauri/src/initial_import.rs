@@ -98,7 +98,7 @@ impl Registry {
                         .map_err(error)?;
                     result
                 };
-                let conflict: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE document_id=?1 AND state!='done') OR EXISTS(SELECT 1 FROM pending_matches WHERE source_id=?2) OR EXISTS(SELECT 1 FROM document_aliases WHERE document_id=?1) OR (SELECT COUNT(*) FROM source_files WHERE document_id=?1)!=1",params![s.document_id,s.id],|r|r.get(0)).map_err(error)?;
+                let conflict: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE document_id=?1 AND state NOT IN ('done','cancelled','restored')) OR EXISTS(SELECT 1 FROM pending_matches WHERE source_id=?2) OR EXISTS(SELECT 1 FROM document_aliases WHERE document_id=?1) OR (SELECT COUNT(*) FROM source_files WHERE document_id=?1)!=1",params![s.document_id,s.id],|r|r.get(0)).map_err(error)?;
                 if conflict
                     || versions.len() > 1
                     || versions.first().is_some_and(|v| v.2 != "initial_tracking")

@@ -348,6 +348,18 @@ pub fn step(
     if n(&p, "next_at") > chrono::Utc::now().timestamp() {
         return Ok(());
     }
+    if n(&p, "delete_requested") != 1 {
+        let tracking: bool = db
+            .query_row(
+                "SELECT tracking_enabled FROM projects WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if !tracking {
+            return Ok(());
+        }
+    }
     let result = (|| -> ApiResult<()> {
         if n(&p, "delete_requested") != 1 {
             cloud::desired(db, id, &cloud::draft(db, &p).map_err(local)?).map_err(local)?;
@@ -385,17 +397,26 @@ pub fn step(
             execute(db,"UPDATE cloud_projects SET sync_requested=0,status='ready',error=NULL WHERE project_id=?1",&[&id])?;
             return Ok(());
         }
+        if n(&p, "auto_sync") == 1 || n(&p, "sync_requested") == 1 {
+            cloud::queue(db, id).map_err(local)?;
+        }
         if let Some(job) = cloud::jobs(db, id).map_err(local)?.iter().find(|j| {
             s(j, "phase") == "remove" && s(j, "state") != "removed" && s(j, "state") != "purged"
         }) {
             return detach(db, &p, job, api);
         }
-        if n(&p, "auto_sync") == 1 || n(&p, "sync_requested") == 1 {
-            cloud::queue(db, id).map_err(local)?;
-        }
         let jobs = cloud::jobs(db, id).map_err(local)?;
+        let tracking: bool = db
+            .query_row(
+                "SELECT tracking_enabled FROM projects WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .map_err(error)
+            .map_err(local)?;
         if let Some(j) = jobs.iter().find(|j| {
-            n(j, "desired") == 1
+            tracking
+                && n(j, "desired") == 1
                 && n(j, "next_at") <= chrono::Utc::now().timestamp()
                 && !["indexed", "removed", "purged", "failed", "uncertain"].contains(&s(j, "state"))
         }) {

@@ -256,6 +256,7 @@ fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_loc
     fs::write(f.root.join("Illustrated.docx"), &bytes).unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Illustrated.docx");
     let doc =
         f.r.snapshot()
             .unwrap()
@@ -292,6 +293,7 @@ fn bad_word_reports_path_and_reason_while_other_files_finish_without_retry_loop(
     fs::write(f.root.join("Drafts/Bad.docx"), bad).unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Drafts/Bad.docx");
     let doc =
         f.r.snapshot()
             .unwrap()
@@ -478,9 +480,111 @@ impl Fixture {
             .reconcile(&self.id, "manual_refresh", &HashSet::new(), true)
             .unwrap();
     }
+    fn select_file(&mut self, path: &str) {
+        let revision = crate::path_selection::revision(&self.r.db, &self.id).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.id).unwrap();
+        let path = crate::path_selection::normalized(path);
+        rules.retain(|rule| rule.kind != "file" || rule.path != path);
+        self.r
+            .save_path_selection(&self.id, revision, rules)
+            .unwrap();
+        self.r
+            .reconcile(&self.id, "test", &HashSet::new(), true)
+            .unwrap();
+    }
+    fn exclude_file(&mut self, path: &str) {
+        let revision = crate::path_selection::revision(&self.r.db, &self.id).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.id).unwrap();
+        rules.push(crate::path_selection::Rule {
+            path: path.into(),
+            kind: "file".into(),
+        });
+        self.r
+            .save_path_selection(&self.id, revision, rules)
+            .unwrap();
+    }
     fn jobs(&self) -> Vec<Value> {
         cloud::jobs(&self.r.db, &self.id).unwrap()
     }
+}
+#[test]
+fn folder_selection_drives_nine_to_ten_cloud_coverage_without_legacy_list() {
+    let mut f = Fixture::new();
+    for i in 1..=8 {
+        fs::write(
+            f.root.join(format!("Document_{i}.md")),
+            format!("document {i}"),
+        )
+        .unwrap();
+    }
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.enable();
+    let api = Mock::default();
+    for _ in 0..50 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 9);
+    assert_eq!(api.0.borrow().files.len(), 9);
+
+    fs::write(f.root.join("CottonTrax_Team_Tasks.md"), "team tasks").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "CottonTrax_Team_Tasks.md").unwrap());
+    for _ in 0..5 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 9);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    for _ in 0..20 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 10);
+    assert_eq!(api.0.borrow().files.len(), 10);
+    assert_eq!(api.0.borrow().associations.len(), 10);
+    for _ in 0..10 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 10);
+}
+#[test]
+fn reselecting_before_remote_removal_preserves_and_reuses_existing_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Master_Context.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    assert!(cloud::selection_removals(&f.r.db, &f.id)
+        .unwrap()
+        .is_empty());
+    api.0.borrow_mut().calls.clear();
+    for _ in 0..10 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c == "UPLOAD" || c.starts_with("DELETE ")));
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 1);
 }
 #[test]
 #[cfg(windows)]
@@ -507,6 +611,168 @@ fn cloud_runtime_normalizes_windows_database_path_before_guarded_upload() {
         fs::read(f.root.join("Master_Context.md")).unwrap()
     );
 }
+#[test]
+fn folder_selected_tracked_document_does_not_require_legacy_cloud_selection() {
+    let mut f = Fixture::new();
+    f.enable();
+    f.r.db
+        .execute("DELETE FROM cloud_documents WHERE project_id=?1", [&f.id])
+        .unwrap();
+    let draft = cloud::draft(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap();
+    assert_eq!(draft.documents, vec![f.doc.clone()]);
+    let api = Mock::default();
+    f.sync(&api);
+    assert_eq!(
+        f.jobs()
+            .iter()
+            .filter(|j| s(j, "state") == "indexed")
+            .count(),
+        1
+    );
+}
+#[test]
+fn legacy_version_opt_out_cannot_remove_folder_selected_version() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let version = s(&f.jobs()[0], "version_id").to_owned();
+    f.r.db
+        .execute(
+            "INSERT INTO cloud_exclusions VALUES(?1,?2)",
+            params![f.id, version],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET desired=0,phase='remove',state='removing'",
+            [],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    api.0.borrow_mut().calls.clear();
+    for _ in 0..5 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|call| call.starts_with("DELETE ") || call == "UPLOAD"));
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    let err = cloud_commands::action_impl(
+        &mut f.r.db,
+        Some(&f.id),
+        "remove",
+        &json!({"version":version,"confirm":true}),
+    )
+    .unwrap_err();
+    assert!(err.contains("saved folder selection"));
+}
+
+#[test]
+fn legacy_cloud_list_cannot_bypass_source_validation() {
+    let mut f = Fixture::new();
+    f.enable();
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    f.r.refresh(&f.id).unwrap();
+    let mut old_client = f.draft();
+    old_client.automatic = true;
+    old_client.documents.clear();
+    assert!(!cloud::selection_reduction(
+        &f.r.db,
+        &cloud::project(&f.r.db, &f.id).unwrap(),
+        &old_client
+    )
+    .unwrap());
+    assert!(cloud::preview(&f.r.db, &f.id, &old_client).is_err());
+}
+
+#[test]
+fn tracking_off_prevents_sync_and_next_guarded_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap();
+    f.r.configure_tracking(&f.id, false, false, vec![]).unwrap();
+    assert!(guard.upload("blocked.md", b"private".to_vec()).is_err());
+    assert!(guard
+        .request(
+            "POST",
+            "/vector_stores/vs_test/files",
+            Some(json!({"file_id": "file_already_uploaded"})),
+        )
+        .is_err());
+    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    f.step(&api);
+    assert!(api.0.borrow().calls.is_empty());
+}
+#[test]
+fn unified_selection_upgrade_preserves_choices_and_syncs_missing_selected_capture() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let store = s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id").to_owned();
+    fs::write(f.root.join("Selected.md"), "selected before upgrade").unwrap();
+    fs::write(f.root.join("Excluded.md"), "excluded before upgrade").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.select_file("Selected.md");
+    let selected =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .into_iter()
+            .find(|d| d.name == "Selected.md")
+            .unwrap()
+            .document_id;
+    assert_eq!(f.r.versions(&selected).unwrap().len(), 1);
+    f.r.db
+        .execute(
+            "INSERT OR IGNORE INTO cloud_documents(project_id,document_id) VALUES(?1,?2)",
+            params![f.id, f.doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET auto_sync=0,sync_requested=0", [])
+        .unwrap();
+    f.r.db
+        .execute_batch("DROP TABLE new_paths; PRAGMA user_version=9;")
+        .unwrap();
+    let db = f.r.store.join("test.db");
+    drop(f.r);
+    f.r = Registry::open(&db).unwrap();
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 1);
+    assert!(crate::path_selection::allowed(&f.r.db, &f.id, "Selected.md").unwrap());
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "Excluded.md").unwrap());
+    assert_eq!(f.r.versions(&selected).unwrap().len(), 1);
+    for _ in 0..15 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id"),
+        store
+    );
+    assert!(f
+        .jobs()
+        .iter()
+        .any(|j| s(j, "document_id") == selected && s(j, "state") == "indexed"));
+}
+
 #[test]
 fn migration_defaults_cloud_off_and_preserves_local_preferences() {
     let f = Fixture::new();
@@ -646,7 +912,7 @@ fn cloud_off_stop_intent_survives_an_in_flight_document_removal_failure() {
 }
 
 #[test]
-fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
+fn folder_selection_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
 ) {
     use std::sync::{atomic::AtomicBool, Arc};
     let mut f = Fixture::new();
@@ -654,6 +920,7 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
     fs::write(f.root.join("Other.md"), "Independent family").unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Other.md");
     let other =
         f.r.snapshot()
             .unwrap()
@@ -682,13 +949,11 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
     f.r.db
         .execute("UPDATE cloud_projects SET paused=1,sync_requested=0", [])
         .unwrap();
-    let mut reduced = full.clone();
-    reduced.documents = vec![other.clone()];
-    f.apply(reduced);
+    f.exclude_file("Master_Context.md");
     assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 2);
     assert_eq!(
         n(&cloud::project(&f.r.db, &f.id).unwrap(), "sync_requested"),
-        0
+        1
     );
     api.0.borrow_mut().calls.clear();
     let guarded = cloud_commands::ProjectApi::new(
@@ -715,7 +980,7 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
         .all(|c| c.starts_with("GET ") || c.starts_with("DELETE /vector_stores/vs_test/files/")));
     assert_eq!(api.0.borrow().files.len(), 3);
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "paused"), 1);
-    f.apply(full);
+    f.select_file("Master_Context.md");
     f.step(&api);
     assert_eq!(api.0.borrow().associations.len(), 1);
     f.r.db
@@ -743,18 +1008,8 @@ fn opted_out_documents_are_removed_before_unrelated_additions_even_if_new_source
     fs::write(f.root.join("Replacement.md"), "New family").unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
-    let other =
-        f.r.snapshot()
-            .unwrap()
-            .documents
-            .iter()
-            .find(|d| d.name == "Replacement.md")
-            .unwrap()
-            .document_id
-            .clone();
-    let mut changed = f.draft();
-    changed.documents = vec![other];
-    f.apply(changed);
+    f.select_file("Replacement.md");
+    f.exclude_file("Master_Context.md");
     fs::remove_file(f.root.join("Replacement.md")).unwrap();
     api.0.borrow_mut().calls.clear();
     f.step(&api);
@@ -776,9 +1031,7 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
         f.r.db
             .execute("UPDATE cloud_projects SET paused=1", [])
             .unwrap();
-        let mut none = f.draft();
-        none.documents.clear();
-        f.apply(none);
+        f.exclude_file("Master_Context.md");
         api.0.borrow_mut().bad_association_receipt = bad_receipt;
         api.0.borrow_mut().ignore_association_delete = !bad_receipt;
         f.step(&api);
@@ -814,12 +1067,13 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
 }
 
 #[test]
-fn pure_opt_out_can_be_saved_without_source_or_credentials_and_only_authorizes_narrow_deletion() {
+fn saved_folder_opt_out_with_unavailable_source_only_authorizes_narrow_deletion() {
     use std::sync::{atomic::AtomicBool, Arc};
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
+    f.exclude_file("Master_Context.md");
     fs::rename(&f.root, f.root.with_file_name("unavailable")).unwrap();
     f.r.db
         .execute("UPDATE cloud_projects SET paused=1", [])
@@ -827,18 +1081,6 @@ fn pure_opt_out_can_be_saved_without_source_or_credentials_and_only_authorizes_n
     f.r.db
         .execute("UPDATE cloud_connection SET status='disconnected'", [])
         .unwrap();
-    let mut none = f.draft();
-    none.documents.clear();
-    let plan =
-        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "preview", &json!({"draft":none}))
-            .unwrap();
-    cloud_commands::action_impl(
-        &mut f.r.db,
-        Some(&f.id),
-        "apply",
-        &json!({"draft":none,"token":plan["token"],"consent":true}),
-    )
-    .unwrap();
     assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
     let guarded = cloud_commands::ProjectApi::new(
         &api,
@@ -897,12 +1139,10 @@ fn lost_upload_response_is_recovered_after_document_opt_out_and_reselection_with
             [],
         )
         .unwrap();
-    let mut none = f.draft();
-    none.documents.clear();
-    f.apply(none);
+    f.exclude_file("Master_Context.md");
     f.sync(&api);
     assert_eq!(s(&f.jobs()[0], "state"), "removed");
-    f.apply(f.draft());
+    f.select_file("Master_Context.md");
     f.sync(&api);
     assert_eq!(api.0.borrow().files.len(), 1);
     assert_eq!(
@@ -989,13 +1229,16 @@ fn cloud_configuration_verification_rolls_back_a_silently_ignored_save() {
     let mut f = Fixture::new();
     f.enable();
     let mut draft = f.draft();
-    draft.automatic = true;
+    draft.mode = "history".into();
     let plan = cloud::preview(&f.r.db, &f.id, &draft).unwrap();
     f.r.db.execute_batch("CREATE TRIGGER ignore_cloud_settings BEFORE UPDATE ON cloud_projects BEGIN SELECT RAISE(IGNORE); END;").unwrap();
     assert!(cloud::apply(&mut f.r.db, &f.id, &draft, &plan.token)
         .unwrap_err()
         .contains("verification failed"));
-    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 0);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "mode"),
+        "current"
+    );
 }
 #[test]
 fn no_api_requests_for_local_only_or_paused() {
@@ -1019,11 +1262,13 @@ fn credential_scope_cannot_cross_project_binding() {
     assert!(api.0.borrow().calls.is_empty());
 }
 #[test]
-fn selection_is_project_scoped_and_untracked_is_ineligible() {
+fn legacy_selection_cannot_select_foreign_documents_and_untracked_is_ineligible() {
     let f = Fixture::new();
     let mut d = f.draft();
     d.documents = vec!["foreign-document".into()];
-    assert!(cloud::preview(&f.r.db, &f.id, &d).is_err());
+    let desired = cloud::desired(&f.r.db, &f.id, &d).unwrap();
+    assert_eq!(desired.len(), 1);
+    assert_eq!(desired[0].document, f.doc);
     f.r.db
         .execute("UPDATE documents SET tracking_state='ignored'", [])
         .unwrap();
@@ -1201,14 +1446,15 @@ fn history_mode_keeps_both_versions_and_sets_current_metadata() {
     );
 }
 #[test]
-fn auto_sync_off_requires_sync_now_for_new_versions() {
+fn legacy_automatic_false_does_not_disable_sync_for_new_versions() {
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
     f.edit();
-    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
-    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 2);
 }
 #[test]
 fn auto_sync_detects_new_committed_version() {
@@ -1379,12 +1625,13 @@ fn missing_association_is_reconciled_using_existing_file() {
     assert_eq!(api.0.borrow().associations.len(), 1);
 }
 #[test]
-fn explicit_removal_excludes_version_and_retains_file_and_local_history() {
+fn explicit_removal_of_excluded_version_retains_file_and_local_history() {
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
     let version = f.jobs()[0]["version_id"].clone();
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -1597,6 +1844,7 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     let api = Mock::default();
     f.sync(&api);
     let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -1616,6 +1864,11 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     assert!(api.0.borrow().files.is_empty());
     assert_eq!(s(&f.jobs()[0], "state"), "purged");
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+    f.select_file("Master_Context.md");
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
 }
 #[test]
 fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
@@ -1631,6 +1884,35 @@ fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
         .unwrap();
     f.step(&api);
     assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "needs_attention"
+    );
+}
+#[test]
+fn selected_family_without_active_source_preserves_existing_index() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.r.db
+        .execute(
+            "UPDATE documents SET active_source_id=NULL WHERE id=?1",
+            [&f.doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|call| call.starts_with("DELETE ")));
     assert_eq!(
         s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
         "needs_attention"
@@ -1680,7 +1962,7 @@ fn confirmed_stop_controls_block_queued_work_without_credentials_and_keep_histor
         assert_eq!(n(&project, "paused"), 1);
         assert_eq!(n(&project, "delete_requested"), 0);
         if action == "stop_automatic" {
-            assert_eq!(n(&project, "auto_sync"), 0);
+            assert_eq!(n(&project, "auto_sync"), 1);
             assert_eq!(n(&project, "sync_requested"), 0);
             assert_eq!(n(&project, "enabled"), 1);
         } else {
@@ -1776,6 +2058,7 @@ fn explicit_association_cleanup_works_while_cloud_sync_is_disconnected() {
     let api = Mock::default();
     f.sync(&api);
     let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -1803,15 +2086,14 @@ fn search_waits_for_deselected_associations_to_be_removed() {
     f.enable();
     let api = Mock::default();
     f.sync(&api);
-    let mut draft = f.draft();
-    draft.documents.clear();
-    f.apply(draft);
+    f.exclude_file("Master_Context.md");
     assert!(cloud_sync::search(&f.r.db, &f.id, "old selected content", &api, "bound").is_err());
     assert!(api.0.borrow().calls.iter().all(|c| !c.ends_with("/search")));
 }
 #[test]
 fn initial_empty_selection_is_rejected_without_enabling_project() {
     let mut f = Fixture::new();
+    f.exclude_file("Master_Context.md");
     let mut draft = f.draft();
     draft.documents.clear();
     assert!(cloud::preview(&f.r.db, &f.id, &draft)
@@ -1820,7 +2102,9 @@ fn initial_empty_selection_is_rejected_without_enabling_project() {
         .contains("Select at least one"));
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 0);
     // Emptying an existing index remains an explicit supported selection change.
+    f.select_file("Master_Context.md");
     f.enable();
+    f.exclude_file("Master_Context.md");
     assert_eq!(cloud::preview(&f.r.db, &f.id, &draft).unwrap().files, 0);
 }
 #[test]
@@ -1922,6 +2206,7 @@ fn saved_folder_exclusion_removes_from_index_while_paused_and_reinclude_reuses_o
     fs::create_dir_all(f.root.join("Drafts/Nested")).unwrap();
     fs::write(f.root.join("Drafts/Nested/notes.md"), "nested notes").unwrap();
     f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.select_file("Drafts/Nested/notes.md");
     let nested =
         f.r.snapshot()
             .unwrap()

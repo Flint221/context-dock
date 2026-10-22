@@ -14,7 +14,15 @@ import {
 import { OperationStatus } from "./OperationStatus";
 import { ProgressBar } from "./ProgressBar";
 
-export function ProjectCloud({ project }: { project: string }) {
+export function ProjectCloud({
+  project,
+  tab,
+  onStatus,
+}: {
+  project: string;
+  tab?: "files" | "cloud" | "ai";
+  onStatus?: (view: CloudView | null) => void;
+}) {
   const [view, setView] = useState<CloudView | null>(null);
   const [stateKnown, setStateKnown] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,6 +69,9 @@ export function ProjectCloud({ project }: { project: string }) {
       unsubscribe?.();
     };
   }, [load]);
+  useEffect(() => {
+    onStatus?.(stateKnown ? view : null);
+  }, [view, stateKnown, onStatus]);
   async function run(work: () => Promise<unknown>) {
     const release = beginOperation(`cloud:${project}`);
     if (!release) return;
@@ -82,8 +93,22 @@ export function ProjectCloud({ project }: { project: string }) {
   const cleanupNeeded =
     !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
   const retained = !!view && !enabled && hasCloudData(view);
-  const indexedTotal = view ? view.indexed + view.pending + view.failed : 0;
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
+  const indexedTotal = view
+    ? Math.max(view.indexed + view.pending + view.failed, selected.length)
+    : 0;
+  const awaitingSelection =
+    view?.families.filter((f) => f.pathExcluded).length ?? 0;
+  const awaitingCapture =
+    view?.families.filter((f) => !f.pathExcluded && f.versionCount === 0)
+      .length ?? 0;
+  const awaitingUpload = selected.filter(
+    (f) => f.currentNumber !== f.cloudNumber,
+  ).length;
+  const needsAttention =
+    view?.families.filter(
+      (f) => f.selected && !f.eligible && f.versionCount > 0,
+    ).length ?? 0;
   const pathsExcluded = !!view?.families.some(
     (f) => f.selected && f.pathExcluded,
   );
@@ -94,6 +119,8 @@ export function ProjectCloud({ project }: { project: string }) {
     !!view.store_id &&
     view.failed === 0 &&
     view.pending === 0 &&
+    awaitingCapture === 0 &&
+    needsAttention === 0 &&
     selected.length > 0 &&
     selected.every((f) => f.currentNumber === f.cloudNumber);
   const reason = !view
@@ -107,30 +134,21 @@ export function ProjectCloud({ project }: { project: string }) {
           : pathsExcluded && selected.length === 0
             ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
             : selected.length === 0
-              ? "Enable version tracking and select documents for cloud sync."
+              ? "Select files in the folder tree and enable version tracking."
               : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;
     void run(async () => {
-      const eligible = view.families.filter((f) => f.eligible);
+      const eligible = view.families.filter((f) => f.selected && f.eligible);
       if (!eligible.length)
         throw new Error(
-          "Enable document tracking below and capture a document first, then turn on Cloud sync.",
+          "Select files in the folder tree, enable document tracking, and capture an eligible document before turning on Cloud sync.",
         );
-      const saved = view.families.filter((f) => f.selected);
-      if (
-        (view.selectionSaved || saved.length > 0) &&
-        (!saved.length || saved.some((f) => !f.eligible))
-      ) {
-        throw new Error(
-          "Your saved document selection is empty or needs review. Choose documents in Advanced cloud settings before enabling; no other documents were selected automatically.",
-        );
-      }
       const draft: Draft = {
         enabled: true,
         automatic: true,
         mode: view.mode,
-        documents: (saved.length ? saved : eligible).map((f) => f.id),
+        documents: eligible.map((f) => f.id),
         softLimit: view.soft_limit,
       };
       const plan = await cloud.action<Plan>(project, "preview", { draft });
@@ -139,188 +157,210 @@ export function ProjectCloud({ project }: { project: string }) {
   }
   return (
     <>
-      <section className="panel simple-cloud" aria-label="Cloud sync">
-        <div className="cloud-heading">
-          <div>
-            <h2>Cloud sync</h2>
-            <p>
+      <div
+        hidden={tab !== undefined && tab !== "cloud"}
+        role={tab ? "tabpanel" : undefined}
+        id="project-panel-cloud"
+        aria-labelledby={tab ? "project-tab-cloud" : undefined}
+      >
+        <section className="panel simple-cloud" aria-label="Cloud sync">
+          <div className="cloud-heading">
+            <div>
+              <h2>Cloud sync</h2>
+              <p>
+                {!stateKnown
+                  ? busy
+                    ? "Checking cloud status…"
+                    : "Cloud status unavailable · Refresh status"
+                  : cleanupNeeded
+                    ? "Cloud deletion incomplete · Retry cleanup"
+                    : retained
+                      ? "Paused · Cloud data retained"
+                      : enabled
+                        ? ready
+                          ? "On · Documents ready for questions"
+                          : view.failed > 0
+                            ? "On · Some files need attention"
+                            : pathsExcluded && selected.length === 0
+                              ? "On · Selected paths excluded"
+                              : "On · Preparing your documents"
+                        : "Off · Local version history"}
+              </p>
+            </div>
+            <label className="cloud-check cloud-switch">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Cloud sync"
+                checked={!!view?.enabled}
+                disabled={
+                  busy ||
+                  advancedBusy ||
+                  !!setup ||
+                  stop ||
+                  !view ||
+                  !stateKnown ||
+                  cleanupNeeded
+                }
+                aria-busy={busy}
+                onChange={(e) => {
+                  if (e.target.checked) enable();
+                  else setStop(true);
+                }}
+              />
               {!stateKnown
                 ? busy
-                  ? "Checking cloud status…"
-                  : "Cloud status unavailable · Refresh status"
-                : cleanupNeeded
-                  ? "Cloud deletion incomplete · Retry cleanup"
-                  : retained
-                    ? "Paused · Cloud data retained"
-                    : enabled
-                      ? ready
-                        ? "On · Documents ready for questions"
-                        : view.failed > 0
-                          ? "On · Some files need attention"
-                          : pathsExcluded && selected.length === 0
-                            ? "On · Selected paths excluded"
-                            : "On · Preparing your documents"
-                      : "Off · Local version history"}
-            </p>
+                  ? "Checking…"
+                  : "Unknown"
+                : enabled
+                  ? "On"
+                  : cleanupNeeded
+                    ? "Cleanup needed"
+                    : retained
+                      ? "Paused"
+                      : "Off"}
+            </label>
           </div>
-          <label className="cloud-check cloud-switch">
-            <input
-              type="checkbox"
-              role="switch"
-              aria-label="Cloud sync"
-              checked={!!view?.enabled}
-              disabled={
-                busy ||
-                advancedBusy ||
-                !!setup ||
-                stop ||
-                !view ||
-                !stateKnown ||
-                cleanupNeeded
-              }
-              aria-busy={busy}
-              onChange={(e) => {
-                if (e.target.checked) enable();
-                else setStop(true);
-              }}
-            />
-            {!stateKnown
-              ? busy
-                ? "Checking…"
-                : "Unknown"
-              : enabled
-                ? "On"
-                : cleanupNeeded
-                  ? "Cleanup needed"
-                  : retained
-                    ? "Paused"
-                    : "Off"}
-          </label>
-        </div>
-        <p>
-          {enabled
-            ? "Your selected documents sync to OpenAI. Ask project uses their current indexed versions."
-            : retained
-              ? "Cloud data is still retained. Delete it below to fully turn off Cloud sync; local history and chats stay available."
-              : "Your documents and version history stay on this computer. Turn on Cloud sync to ask AI questions."}
-        </p>
-        {view && view.connectionStatus !== "connected" && (
-          <p>First, open Settings → OpenAI connection → Save and test key.</p>
-        )}
-        {error && !setup && !stop && <p role="alert">{error}</p>}
-        {view?.error && <p role="alert">{view.error}</p>}
-        {!!view?.selectionRemovalPending && (
-          <div className="banner warning">
-            <span>
-              {view.selectionRemovalPending} excluded index entries await
-              verified removal. Local exclusion is already saved.
-            </span>
-            <button
-              disabled={busy || advancedBusy}
-              onClick={() =>
-                void run(async () => {
-                  await cloud.action(project, "retry_selection_removals");
-                  await load();
-                })
-              }
-            >
-              Retry index removals
-            </button>
-          </div>
-        )}
-        <OperationStatus
-          busy={busy || advancedBusy}
-          message="Saving and checking cloud status…"
-          success={notice}
-        />
-        {view &&
-          stateKnown &&
-          !cleanupNeeded &&
-          !!view.enabled &&
-          !!view.started &&
-          indexedTotal > 0 && (
-            <div className="cloud-index-progress">
-              <ProgressBar
-                label="Indexed versions"
-                value={(100 * view.indexed) / indexedTotal}
-                detail={`${view.indexed} of ${indexedTotal} indexed`}
-              />
-              <small className={view.failed ? "error" : undefined}>
-                {view.paused ? "Uploads paused · " : ""}
-                {view.pending} pending · {view.failed} failed or uncertain
-                {!ready &&
-                  " · Questions unlock when selected current versions are ready."}
-              </small>
+          <p>
+            {enabled
+              ? "Your selected documents sync to OpenAI. Ask project uses their current indexed versions."
+              : retained
+                ? "Cloud data is still retained. Delete it below to fully turn off Cloud sync; local history and chats stay available."
+                : "Your documents and version history stay on this computer. Turn on Cloud sync to ask AI questions."}
+          </p>
+          {view && view.connectionStatus !== "connected" && (
+            <p>First, open Settings → OpenAI connection → Save and test key.</p>
+          )}
+          {error && !setup && !stop && <p role="alert">{error}</p>}
+          {view?.error && <p role="alert">{view.error}</p>}
+          {!!view?.selectionRemovalPending && (
+            <div className="banner warning">
+              <span>
+                {view.selectionRemovalPending} excluded index entries await
+                verified removal. Local exclusion is already saved.
+              </span>
+              <button
+                disabled={busy || advancedBusy}
+                onClick={() =>
+                  void run(async () => {
+                    await cloud.action(project, "retry_selection_removals");
+                    await load();
+                  })
+                }
+              >
+                Retry index removals
+              </button>
             </div>
           )}
-        <div className="toolbar-actions">
-          <button
-            disabled={busy || advancedBusy}
-            onClick={() => void run(load)}
-          >
-            Refresh status
-          </button>
-          {retained && (
-            <button
-              className="danger"
-              disabled={busy || advancedBusy || !stateKnown}
-              onClick={() => setStop(true)}
-            >
-              Delete cloud data
-            </button>
+          <OperationStatus
+            busy={busy || advancedBusy}
+            message="Saving and checking cloud status…"
+            success={notice}
+          />
+          {view && stateKnown && (
+            <p className="tracking-note">
+              Folder coverage: {awaitingSelection} excluded or awaiting
+              selection · {awaitingCapture} awaiting capture · {awaitingUpload}{" "}
+              awaiting cloud sync · {needsAttention} need local review. Upload
+              failures are reported separately below.
+            </p>
           )}
-          {enabled && (
+          {view &&
+            stateKnown &&
+            !cleanupNeeded &&
+            !!view.enabled &&
+            !!view.started &&
+            indexedTotal > 0 && (
+              <div className="cloud-index-progress">
+                <ProgressBar
+                  label="Indexed versions"
+                  value={(100 * view.indexed) / indexedTotal}
+                  detail={`${view.indexed} of ${indexedTotal} indexed`}
+                />
+                <small className={view.failed ? "error" : undefined}>
+                  {view.paused ? "Uploads paused · " : ""}
+                  {view.pending} pending · {view.failed} failed or uncertain
+                  {!ready &&
+                    " · Questions unlock when selected current versions are ready."}
+                </small>
+              </div>
+            )}
+          <div className="toolbar-actions">
             <button
-              className="primary"
-              aria-busy={busy || advancedBusy}
               disabled={busy || advancedBusy}
-              onClick={() =>
-                void run(async () => {
-                  await cloud.action(project, "sync");
-                  verifyCloudAction(await load(), "sync");
-                  if (alive.current)
-                    setNotice(
-                      "Sync requested and confirmed. Document indexing may still be in progress.",
-                    );
-                })
-              }
+              onClick={() => void run(load)}
             >
-              Sync now
+              Refresh status
             </button>
-          )}
-        </div>
-        <details
-          onToggle={(e) => {
-            const open = e.currentTarget.open;
-            setAdvanced(open);
-            if (!open) void load().catch(() => {});
-          }}
-        >
-          <summary>Advanced cloud settings</summary>
-          {advanced && (
-            <CloudPanel
-              key={project}
-              project={project}
-              onBusyChange={(saving) => {
-                setAdvancedBusy(saving);
-                if (saving) setNotice("");
-              }}
-              onChanged={load}
-            />
-          )}
-        </details>
-      </section>
-      <ProjectChat
-        key={project}
-        project={project}
-        enabled={enabled}
-        ready={ready && stateKnown && !busy && !advancedBusy}
-        reason={
-          stateKnown
-            ? reason
-            : "Cloud status could not be verified. Refresh status before asking a question."
-        }
-      />
+            {retained && (
+              <button
+                className="danger"
+                disabled={busy || advancedBusy || !stateKnown}
+                onClick={() => setStop(true)}
+              >
+                Delete cloud data
+              </button>
+            )}
+            {enabled && (
+              <button
+                className="primary"
+                aria-busy={busy || advancedBusy}
+                disabled={busy || advancedBusy}
+                onClick={() =>
+                  void run(async () => {
+                    await cloud.action(project, "sync");
+                    verifyCloudAction(await load(), "sync");
+                    if (alive.current)
+                      setNotice(
+                        "Sync requested and confirmed. Document indexing may still be in progress.",
+                      );
+                  })
+                }
+              >
+                Sync now
+              </button>
+            )}
+          </div>
+          <details
+            onToggle={(e) => {
+              const open = e.currentTarget.open;
+              setAdvanced(open);
+              if (!open) void load().catch(() => {});
+            }}
+          >
+            <summary>Advanced cloud settings</summary>
+            {advanced && (
+              <CloudPanel
+                key={project}
+                project={project}
+                onBusyChange={(saving) => {
+                  setAdvancedBusy(saving);
+                  if (saving) setNotice("");
+                }}
+                onChanged={load}
+              />
+            )}
+          </details>
+        </section>
+      </div>
+      <div
+        hidden={tab !== undefined && tab !== "ai"}
+        role={tab ? "tabpanel" : undefined}
+        id="project-panel-ai"
+        aria-labelledby={tab ? "project-tab-ai" : undefined}
+      >
+        <ProjectChat
+          key={project}
+          project={project}
+          enabled={enabled}
+          ready={ready && stateKnown && !busy && !advancedBusy}
+          reason={
+            stateKnown
+              ? reason
+              : "Cloud status could not be verified. Refresh status before asking a question."
+          }
+        />
+      </div>
       {setup && (
         <Modal
           title="Enable Cloud sync and AI?"
@@ -348,8 +388,8 @@ export function ProjectCloud({ project }: { project: string }) {
             {setup.draft.mode === "current"
               ? "Current versions"
               : "Captured history"}
-            . Change the document selection or version policy in Advanced cloud
-            settings.
+            . Change document selection in the folder tree or the version policy
+            in Advanced cloud settings.
           </p>
           <p>
             OpenAI receives these files. Sending a question also sends that

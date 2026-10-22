@@ -15,6 +15,8 @@ vi.mock("../services/registry", () => ({
   registry: {
     tracking: vi.fn(),
     configureTracking: vi.fn(),
+    archivalReview: vi.fn(),
+    applyArchival: vi.fn(),
     resolve: vi.fn(),
     versions: vi.fn(),
     openVersion: vi.fn(),
@@ -42,6 +44,18 @@ let view: TrackingView;
 const changed = vi.fn(async () => {});
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(registry.archivalReview).mockImplementation(
+    async (_project, enabled) => ({
+      token: "review-token",
+      enabled,
+      items: [],
+      warnings: [],
+    }),
+  );
+  vi.mocked(registry.applyArchival).mockImplementation(
+    async (project, enabled) =>
+      registry.configureTracking(project, view.enabled, enabled),
+  );
   view = {
     enabled: false,
     archiveEnabled: false,
@@ -82,7 +96,7 @@ beforeEach(() => {
     },
   );
 });
-it("initializes only selected sources with archival off by default", async () => {
+it("initializes folder-selected sources with archival off by default", async () => {
   const user = userEvent.setup();
   render(<TrackingPanel project={project} changed={changed} />);
   await user.click(
@@ -95,16 +109,100 @@ it("initializes only selected sources with archival off by default", async () =>
   expect(
     dialog.getByRole("checkbox", { name: /Also enable automatic archival/ }),
   ).not.toBeChecked();
-  await user.click(
-    dialog.getByRole("checkbox", { name: "Technical_Documentation.md" }),
-  );
+  expect(dialog.getByText("Technical_Documentation.md")).toBeInTheDocument();
+  expect(dialog.queryByRole("checkbox", { name: "Technical_Documentation.md" })).not.toBeInTheDocument();
   await user.click(dialog.getByText("Capture selected and enable"));
   await waitFor(() =>
     expect(registry.configureTracking).toHaveBeenCalledWith("p", true, false, [
-      "s1",
+      "s1", "s2",
     ]),
   );
   await screen.findByRole("button", { name: "Disable tracking" });
+});
+
+it("reviews existing archive paths without moving files and allows cancelling a failed review", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  view.archiveEnabled = true;
+  vi.mocked(registry.archivalReview).mockRejectedValueOnce(
+    new Error("Folder is unavailable"),
+  );
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  await user.click(
+    await screen.findByRole("button", { name: "Organize older files now" }),
+  );
+  const dialog = within(screen.getByRole("dialog"));
+  expect(await dialog.findByRole("alert")).toHaveTextContent(
+    "Folder is unavailable",
+  );
+  expect(dialog.getByRole("button", { name: "Organize files" })).toBeDisabled();
+  vi.mocked(registry.archivalReview).mockResolvedValueOnce({
+    token: "paths",
+    enabled: true,
+    items: [
+      {
+        from: "Report_v1.md",
+        to: "Old Context Files/Report/Report_v1.md",
+        action: "archive",
+        problem: null,
+      },
+    ],
+    warnings: [],
+  });
+  await user.click(dialog.getByRole("button", { name: "Reload review" }));
+  expect(await dialog.findByText(/Archive: Report_v1.md/)).toBeInTheDocument();
+  expect(dialog.getByText(/To: Old Context Files/)).toBeInTheDocument();
+  expect(registry.applyArchival).not.toHaveBeenCalled();
+  await user.click(dialog.getByRole("button", { name: "Cancel" }));
+  expect(
+    screen.getByRole("checkbox", { name: /Enable automatic archival/ }),
+  ).toBeChecked();
+});
+
+it("keeps a stale archival review open, reloads it, and applies only the new token", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  vi.mocked(registry.applyArchival).mockRejectedValueOnce(
+    new Error("The archival review changed. Reload the review."),
+  );
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  await user.click(
+    await screen.findByRole("checkbox", { name: /Enable automatic archival/ }),
+  );
+  const dialog = within(screen.getByRole("dialog"));
+  await waitFor(() =>
+    expect(
+      dialog.getByRole("button", { name: "Enable archival" }),
+    ).toBeEnabled(),
+  );
+  await user.click(dialog.getByRole("button", { name: "Enable archival" }));
+  expect(await dialog.findByRole("alert")).toHaveTextContent("review changed");
+  vi.mocked(registry.archivalReview).mockResolvedValueOnce({
+    token: "new-review",
+    enabled: true,
+    items: [],
+    warnings: [],
+  });
+  await user.click(dialog.getByRole("button", { name: "Reload review" }));
+  await waitFor(() =>
+    expect(
+      dialog.getByRole("button", { name: "Enable archival" }),
+    ).toBeEnabled(),
+  );
+  await user.click(dialog.getByRole("button", { name: "Enable archival" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(registry.applyArchival).toHaveBeenLastCalledWith(
+    "p",
+    true,
+    "new-review",
+  );
+  expect(
+    screen.getByRole("checkbox", { name: /Enable automatic archival/ }),
+  ).toBeChecked();
 });
 it("requires a separate archival toggle and retains history controls when tracking is paused", async () => {
   view.enabled = true;
@@ -490,4 +588,30 @@ it("sends a tracking toggle once and keeps its spinner until state verification 
   );
   expect(screen.getByRole("button", { name: "Resume tracking" })).toBeEnabled();
   expect(screen.getByRole("status")).toHaveTextContent("saved and confirmed");
+});
+
+it("restores archived sources while keeping tracking paused", async () => {
+  view.initialized = true;
+  view.enabled = false;
+  view.archiveEnabled = true;
+  const user = userEvent.setup();
+  render(<TrackingPanel project={project} changed={changed} />);
+  const checkbox = await screen.findByRole("checkbox", {
+    name: /Enable automatic archival/,
+  });
+  expect(checkbox).toBeEnabled();
+  await user.click(checkbox);
+  const dialog = within(screen.getByRole("dialog"));
+  await user.click(
+    await dialog.findByRole("button", { name: "Turn off archival" }),
+  );
+  await waitFor(() =>
+    expect(registry.configureTracking).toHaveBeenCalledWith("p", false, false),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Resume tracking" }),
+  ).toBeInTheDocument();
+  expect(
+    await screen.findByRole("button", { name: "Restore moved files…" }),
+  ).toBeEnabled();
 });

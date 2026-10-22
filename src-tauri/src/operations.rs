@@ -7,7 +7,10 @@ use crate::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::{
+    collections::HashSet,
+    path::{Component, Path},
+};
 #[derive(Serialize, Deserialize, Clone)]
 pub struct CapturePlan {
     pub project: String,
@@ -48,6 +51,87 @@ fn event(db: &Connection, project: &str, kind: &str, message: &str) -> Result<()
     db.execute("INSERT INTO tracking_activity(id,project_id,kind,message,created_at) VALUES(?1,?2,?3,?4,?5)",params![uuid::Uuid::new_v4().to_string(),project,kind,message,models::now()]).map_err(error)?;
     Ok(())
 }
+/// Final archive paths keep the source filename, including its author version.
+/// Journal IDs remain internal; readable subfolders disambiguate collisions.
+pub(crate) fn archive_destination(
+    db: &Connection,
+    project: &str,
+    family: &str,
+    relative: &str,
+    capture: Option<i64>,
+    reserved: &[String],
+) -> Result<String> {
+    let source = Path::new(relative);
+    if source
+        .components()
+        .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err("Unsafe original archive path.".into());
+    }
+    let name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Archive source has no filename.")?;
+    let mut folder = matching::safe_name(family);
+    let device = folder.split('.').next().unwrap_or("").to_uppercase();
+    if matches!(
+        device.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || ["COM", "LPT"].iter().any(|prefix| {
+        device.strip_prefix(prefix).is_some_and(|n| {
+            matches!(
+                n,
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+    }) {
+        folder.push_str(" documents");
+    }
+    let mut directory = Path::new("Old Context Files")
+        .join(source.parent().unwrap_or(Path::new("")))
+        .join(folder);
+    if let Some(number) = capture {
+        directory.push(format!("Capture {number}"));
+    }
+    let root: String = db
+        .query_row("SELECT path FROM projects WHERE id=?1", [project], |r| {
+            r.get(0)
+        })
+        .map_err(error)?;
+    let mut q = db.prepare("SELECT CASE kind WHEN 'restore' THEN json_extract(payload,'$.archive.destination') ELSE json_extract(payload,'$.destination') END FROM operations WHERE project_id=?1 AND ((kind='archive' AND state NOT IN ('cancelled','restored')) OR (kind='restore' AND state NOT IN ('done','cancelled','restored')))").map_err(error)?;
+    let mut occupied = q
+        .query_map([project], |r| r.get::<_, Option<String>>(0))
+        .map_err(error)?
+        .collect::<std::result::Result<Vec<_>, _>>()
+        .map_err(error)?
+        .into_iter()
+        .flatten()
+        .map(|p| crate::path_selection::normalized(&p))
+        .collect::<HashSet<_>>();
+    occupied.extend(
+        reserved
+            .iter()
+            .map(|p| crate::path_selection::normalized(p)),
+    );
+    for index in 1..=10_000 {
+        let candidate = if index == 1 {
+            directory.join(name)
+        } else {
+            directory.join(format!("Archive {index}")).join(name)
+        };
+        let relative = candidate.to_string_lossy().replace('\\', "/");
+        let path = Path::new(&root).join(&candidate);
+        let exists = match std::fs::symlink_metadata(&path) {
+            Ok(_) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+            Err(e) => return Err(format!("Cannot check archive destination {relative}: {e}")),
+        };
+        if !exists && !occupied.contains(&crate::path_selection::normalized(&relative)) {
+            return Ok(relative);
+        }
+    }
+    Err("Too many archive name conflicts; review Old Context Files before retrying.".into())
+}
 fn enqueue_archive(
     db: &Connection,
     source: &Source,
@@ -78,9 +162,9 @@ fn enqueue_archive(
     if previous == next {
         return Ok(());
     }
-    let (number, name, already): (i64, String, Option<String>) = db
+    let (number, relative, already): (i64, String, Option<String>) = db
         .query_row(
-            "SELECT number,source_name,archive_relative FROM document_versions WHERE id=?1",
+            "SELECT number,source_relative,archive_relative FROM document_versions WHERE id=?1",
             [previous],
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
@@ -103,23 +187,20 @@ fn enqueue_archive(
         )
         .map_err(error)?;
     let id = uuid::Uuid::new_v4().to_string();
-    let directory = format!(
-        "Old Context Files/{} - {document}",
-        matching::safe_name(&family)
-    );
-    let destination = format!(
-        "{directory}/v{number} - {} - {id}.{}",
-        matching::safe_name(
-            Path::new(&name)
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap_or("Document")
-        ),
-        Path::new(&name)
-            .extension()
-            .and_then(|n| n.to_str())
-            .unwrap_or("md")
-    );
+    let copy = old_source == new_source || status == "missing";
+    let destination = archive_destination(
+        db,
+        project,
+        &family,
+        if copy { &relative } else { &old_path },
+        copy.then_some(number),
+        &[],
+    )?;
+    let directory = Path::new(&destination)
+        .parent()
+        .ok_or("Archive has no directory.")?
+        .to_string_lossy()
+        .into_owned();
     let plan = ArchivePlan {
         project: project.into(),
         document: document.into(),
@@ -130,14 +211,12 @@ fn enqueue_archive(
         destination,
         old_identity: None,
         temporary: format!("{directory}/.contextdock-{id}.tmp"),
-        mode: if old_source == new_source || status == "missing" {
-            "copy"
-        } else {
-            "move"
-        }
-        .into(),
+        mode: if copy { "copy" } else { "move" }.into(),
     };
-    db.execute("INSERT OR IGNORE INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'archive',?5,?6,?6)",params![id,project,document,format!("archive:{previous}:{next}"),encode(&plan)?,models::now()]).map_err(error)?;
+    let key = format!("archive:{previous}:{next}");
+    let terminal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE dedupe_key=?1 AND state IN ('cancelled','restored'))",[&key],|r|r.get(0)).map_err(error)?;
+    let key = if terminal { format!("{key}:{id}") } else { key };
+    db.execute("INSERT OR IGNORE INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'archive',?5,?6,?6)",params![id,project,document,key,encode(&plan)?,models::now()]).map_err(error)?;
     Ok(())
 }
 fn activate(
@@ -474,8 +553,12 @@ impl Registry {
         project: &str,
         retry_blocked: bool,
     ) -> Result<Vec<String>> {
-        if !self.tracking_flags(project)?.0 {
-            return Ok(vec![]);
+        let tracking = self.tracking_flags(project)?.0;
+        if !tracking {
+            let restores: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE project_id=?1 AND kind='restore' AND (state IN ('pending','finalized') OR (?2 AND state='blocked')))", params![project, retry_blocked], |r| r.get(0)).map_err(error)?;
+            if !restores {
+                return Ok(vec![]);
+            }
         }
         crate::folder_recovery::require_ready(&self.db, project)?;
         let mut q=self.db.prepare("SELECT id,kind,payload,state FROM operations WHERE project_id=?1 AND (state IN ('pending','finalized') OR (?2 AND state='blocked')) ORDER BY CASE kind WHEN 'capture' THEN 0 ELSE 1 END,created_at").map_err(error)?;
@@ -494,6 +577,9 @@ impl Registry {
         drop(q);
         let mut errors = vec![];
         for (id, kind, payload, state) in ops {
+            if !tracking && kind != "restore" {
+                continue;
+            }
             if kind == "archive" && !self.tracking_flags(project)?.1 {
                 continue;
             }
@@ -528,6 +614,9 @@ impl Registry {
                 }
             }
             let result = match kind.as_str() {
+                "restore" => serde_json::from_str::<crate::archival::RestorePlan>(&payload)
+                    .map_err(|e| e.to_string())
+                    .and_then(|p| self.finish_restore(&id, &p)),
                 "initial_import" => self.finish_initial_import(&id, &payload),
                 "capture" => serde_json::from_str::<CapturePlan>(&payload)
                     .map_err(|e| e.to_string())

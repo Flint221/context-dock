@@ -29,6 +29,7 @@ export interface Family {
 export interface Job {
   id: string;
   version_id: string;
+  desired?: number;
   file_id: string | null;
   familyName: string;
   sourceName?: string;

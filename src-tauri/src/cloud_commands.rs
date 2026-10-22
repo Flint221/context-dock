@@ -61,6 +61,24 @@ impl<'a> ProjectApi<'a> {
             && cloud::selection_removal_request(&self.db, &self.project, method, path)
                 .map_err(|e| cloud_api::ApiError::local(&e))?;
         if !self.cleanup && !removal {
+            if method == "POST"
+                && (path == "/files"
+                    || (path.starts_with("/vector_stores/") && path.ends_with("/files")))
+            {
+                let enabled: bool = self
+                    .db
+                    .query_row(
+                        "SELECT tracking_enabled FROM projects WHERE id=?1",
+                        [&self.project],
+                        |r| r.get(0),
+                    )
+                    .map_err(|_| cloud_api::ApiError::local("Cannot verify tracking state."))?;
+                if !enabled {
+                    return Err(cloud_api::ApiError::local(
+                        "Cloud sync paused, disconnected or stopped before the next request.",
+                    ));
+                }
+            }
             if crate::path_selection::revision(&self.db, &self.project)
                 .map_err(|e| cloud_api::ApiError::local(&e))?
                 != self.path_revision
@@ -171,6 +189,16 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
         return Ok(n(p, "enabled") == 1 || removals.iter().any(|j| s(j, "phase") == "path_remove"));
     }
     if n(p, "enabled") != 1 {
+        return Ok(false);
+    }
+    let tracking: bool = db
+        .query_row(
+            "SELECT tracking_enabled FROM projects WHERE id=?1",
+            [s(p, "project_id")],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if !tracking {
         return Ok(false);
     }
     if crate::folder_recovery::require_ready(db, s(p, "project_id")).is_err() {
@@ -537,12 +565,14 @@ pub fn action_impl(
             Ok(Value::Null)
         }
         "stop_automatic" => {
-            db.execute("UPDATE cloud_projects SET auto_sync=0,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
+            // Compatibility for older clients: stopping automatic work is now
+            // a pause, so resuming cannot leave sync silently disabled.
+            db.execute("UPDATE cloud_projects SET auto_sync=1,paused=1,sync_requested=0,delete_requested=0,status='paused',revision=revision+1 WHERE project_id=?1", [id]).map_err(error)?;
             cloud::verify_flags(
                 db,
                 id,
                 &[
-                    ("auto_sync", 0),
+                    ("auto_sync", 1),
                     ("paused", 1),
                     ("sync_requested", 0),
                     ("delete_requested", 0),
@@ -649,6 +679,12 @@ pub fn action_impl(
                 .ok_or("Version is not owned by this project's cloud index.")?;
             if s(&job, "file_id").is_empty() {
                 return Err("No known remote association for this version.".into());
+            }
+            if cloud::desired(db, id, &cloud::draft(db, &p)?)?
+                .iter()
+                .any(|v| v.id == version)
+            {
+                return Err("This version follows the saved folder selection. Exclude its file in the folder tree or change the version policy before removing it from the index.".into());
             }
             let tx = db.transaction().map_err(error)?;
             tx.execute(

@@ -19,6 +19,48 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("does not claim all selected documents are ready while capture is pending", async () => {
+  connected();
+  view.families.push({
+    ...view.families[0],
+    id: "pending",
+    name: "Waiting for capture",
+    selected: 0,
+    eligible: 0,
+    currentNumber: null,
+    cloudNumber: null,
+    versionCount: 0,
+    rawBytes: 0,
+  });
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByText(/1 awaiting capture/)).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+  expect(
+    screen.queryByText("On · Documents ready for questions"),
+  ).not.toBeInTheDocument();
+});
+it("includes selected documents awaiting a cloud job in coverage", async () => {
+  connected();
+  view.indexed = 9;
+  view.pending = 0;
+  view.failed = 0;
+  view.families = Array.from({ length: 10 }, (_, i) => ({
+    ...view.families[0],
+    id: `doc-${i}`,
+    name: `Document ${i}`,
+    selected: 1,
+    eligible: 1,
+    currentNumber: 1,
+    cloudNumber: i === 9 ? null : 1,
+  }));
+  render(<ProjectCloud project="p1" />);
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "90");
+  expect(screen.getByText(/9 of 10 indexed/)).toBeInTheDocument();
+  expect(screen.getByText(/1 awaiting cloud sync/)).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});
 it("shows a file-specific failure while other versions are still syncing", async () => {
   connected();
   view.pending = 2;
@@ -158,7 +200,7 @@ beforeEach(() => {
         id: "d1",
         name: "Master Context",
         eligible: 1,
-        selected: 0,
+        selected: 1,
         currentNumber: 1,
         cloudNumber: null,
         versionCount: 1,
@@ -273,24 +315,18 @@ it("keeps a paused cloud project checked so unchecking always means verified clo
   );
 });
 it.each(["empty", "ineligible"])(
-  "preserves an %s saved selection instead of silently selecting all documents on re-enable",
+  "does not enable cloud with an %s folder selection",
   async (kind) => {
     view.selectionSaved = true;
     view.status = "cloud_deleted";
-    if (kind === "ineligible")
-      view.families.push({
-        ...view.families[0],
-        id: "old-selection",
-        name: "Needs review",
-        selected: 1,
-        eligible: 0,
-      });
+    if (kind === "ineligible") view.families[0].eligible = 0;
+    else view.families[0].selected = 0;
     const user = userEvent.setup();
     render(<ProjectCloud project="p1" />);
     await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
     expect(
       await screen.findByText(
-        /saved document selection is empty or needs review/,
+        /Select files in the folder tree, enable document tracking/,
       ),
     ).toBeInTheDocument();
     expect(cloud.action).not.toHaveBeenCalled();
@@ -693,4 +729,27 @@ it("shows incomplete cloud deletion as cleanup needed and offers a verified retr
     }),
   );
   await screen.findByText("Off · Local version history");
+});
+
+it("keeps a typed AI question and a single cloud subscription when switching project tabs", async () => {
+  connected();
+  const user = userEvent.setup();
+  const { rerender } = render(<ProjectCloud project="p1" tab="ai" />);
+  const question = await screen.findByRole("textbox", {
+    name: "Your question",
+  });
+  await waitFor(() => expect(question).toBeEnabled());
+  await user.type(question, "What changed in version six?");
+  rerender(<ProjectCloud project="p1" tab="cloud" />);
+  expect(
+    screen.queryByRole("textbox", { name: "Your question" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("switch", { name: "Cloud sync" }),
+  ).toBeInTheDocument();
+  rerender(<ProjectCloud project="p1" tab="ai" />);
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBe(question);
+  expect(question).toHaveValue("What changed in version six?");
+  expect(cloud.subscribe).toHaveBeenCalledTimes(1);
+  expect(chat.action).not.toHaveBeenCalledWith("p1", "ask", expect.anything());
 });

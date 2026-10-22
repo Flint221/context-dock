@@ -9,9 +9,14 @@ import type {
   FolderPlan,
   PathRule,
   PathSelectionView,
+  ArchivalReview,
 } from "../types";
 import type { Comparison } from "../comparison";
 export const registry = {
+  archivalReview: (project: string, enabled: boolean) =>
+    invoke<ArchivalReview>("archival_review", { project, enabled }),
+  applyArchival: (project: string, enabled: boolean, token: string) =>
+    invoke<void>("apply_archival_review", { project, enabled, token }),
   paths: (project: string) =>
     invoke<PathSelectionView>("path_selection_view", { project }),
   savePaths: (project: string, revision: number, exclusions: PathRule[]) =>

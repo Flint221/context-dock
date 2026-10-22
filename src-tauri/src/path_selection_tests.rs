@@ -11,6 +11,85 @@ fn folder(path: &str) -> Rule {
     }
 }
 #[test]
+fn newly_discovered_unrelated_file_is_excluded_until_selected() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("project");
+    fs::create_dir(&root).unwrap();
+    fs::write(root.join("existing.md"), "existing").unwrap();
+    fs::create_dir(t.path().join("app")).unwrap();
+    let mut r = Registry::open(&t.path().join("app/registry.db")).unwrap();
+    let id = r.add("Project", root.to_str().unwrap()).unwrap();
+    r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())
+        .unwrap();
+    fs::write(root.join("new.md"), "new").unwrap();
+    r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
+    let view = r.path_selection(&id).unwrap();
+    assert!(view.entries.iter().any(|e| e.path == "new.md" && e.new));
+    assert!(!path_selection::allowed(&r.db, &id, "new.md").unwrap());
+    assert_eq!(
+        r.db.query_row("SELECT COUNT(*) FROM document_versions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    r.save_path_selection(&id, view.revision, vec![]).unwrap();
+    r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
+    assert_eq!(
+        r.db.query_row("SELECT COUNT(*) FROM document_versions", [], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        2
+    );
+    assert!(
+        !r.path_selection(&id)
+            .unwrap()
+            .entries
+            .iter()
+            .find(|e| e.path == "new.md")
+            .unwrap()
+            .new
+    );
+}
+#[test]
+fn new_version_inherits_selected_family_but_not_excluded_parent() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("project");
+    fs::create_dir_all(root.join("private")).unwrap();
+    fs::create_dir(t.path().join("app")).unwrap();
+    fs::write(root.join("Report_v1.md"), "first").unwrap();
+    fs::write(root.join("private/Notes_v1.md"), "private first").unwrap();
+    let db = t.path().join("app/registry.db");
+    let mut r = Registry::open(&db).unwrap();
+    let id = r.add("Project", root.to_str().unwrap()).unwrap();
+    r.configure_tracking(&id, true, false, vec![]).unwrap();
+    let revision = path_selection::revision(&r.db, &id).unwrap();
+    r.save_path_selection(&id, revision, vec![folder("private")])
+        .unwrap();
+    fs::write(root.join("Report_v2.md"), "second").unwrap();
+    fs::write(root.join("private/Notes_v2.md"), "private second").unwrap();
+    r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
+    assert!(path_selection::allowed(&r.db, &id, "Report_v2.md").unwrap());
+    assert!(!path_selection::allowed(&r.db, &id, "private/Notes_v2.md").unwrap());
+    let report = r
+        .snapshot()
+        .unwrap()
+        .documents
+        .into_iter()
+        .find(|d| d.name == "Report_v2.md")
+        .unwrap();
+    assert_eq!(r.versions(&report.document_id).unwrap().len(), 2);
+    drop(r);
+    let mut r = Registry::open(&db).unwrap();
+    r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
+    assert!(path_selection::allowed(&r.db, &id, "Report_v2.md").unwrap());
+    let view = r.path_selection(&id).unwrap();
+    assert!(view
+        .entries
+        .iter()
+        .any(|e| e.path == "private/Notes_v2.md" && e.new));
+    assert_eq!(r.versions(&report.document_id).unwrap().len(), 2);
+}
+#[test]
 fn exclusions_cover_nested_future_files_persist_and_reinclude_without_losing_history() {
     let t = tempdir().unwrap();
     let root = t.path().join("project");
@@ -108,6 +187,12 @@ fn schema_six_migration_retains_legacy_ignored_files_and_saved_history() {
     let mut r = Registry::open(&db).unwrap();
     let id = r.add("P", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, vec![]).unwrap();
+    // Simulate a file ignored by the pre-folder-selection implementation.
+    r.db.execute(
+        "UPDATE source_files SET disposition='ignored' WHERE project_id=?1",
+        [&id],
+    )
+    .unwrap();
     r.db.execute_batch(
         "DROP TABLE path_exclusions; DROP TABLE path_selection; PRAGMA user_version=6;",
     )

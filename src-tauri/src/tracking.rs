@@ -16,11 +16,14 @@ impl Registry {
         project: &str,
         enabled: bool,
         archive: bool,
-        selected: Vec<String>,
+        _selected: Vec<String>,
     ) -> Result<()> {
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
-        let (was_enabled, _, initialized) = self.tracking_flags(project)?;
+        let (was_enabled, was_archive, initialized) = self.tracking_flags(project)?;
+        if archive && !was_archive {
+            self.require_no_restores(project)?;
+        }
         if enabled {
             crate::folder_recovery::require_ready(&self.db, project)?;
             let canonical =
@@ -31,14 +34,17 @@ impl Registry {
             let _guard = storage::directory_guard(&canonical)?;
             self.refresh(project)?;
         }
-        let selected: HashSet<String> = selected.into_iter().collect();
-        for id in &selected {
-            let s = self.source(id)?;
-            if s.project_id != project
-                || s.status != "available"
-                || !crate::path_selection::allowed(&self.db, project, &s.relative)?
-            {
-                return Err("Select available documents from this project only.".into());
+        // The saved folder selection, not a caller-provided checklist, controls
+        // initial capture. Refresh first so newly discovered paths are reviewed.
+        let mut selected = HashSet::new();
+        if enabled && !initialized {
+            for id in self.source_ids(project)? {
+                let source = self.source(&id)?;
+                if source.status == "available"
+                    && crate::path_selection::allowed(&self.db, project, &source.relative)?
+                {
+                    selected.insert(id);
+                }
             }
         }
         let tx = self.db.transaction().map_err(error)?;
@@ -61,10 +67,11 @@ impl Registry {
                 .map_err(error)?;
                 tx.execute("UPDATE documents SET tracking_state='tracked' WHERE id=(SELECT document_id FROM source_files WHERE id=?1)",[sid]).map_err(error)?;
             }
-            tx.execute("INSERT OR IGNORE INTO path_exclusions SELECT project_id,lower(replace(relative_path,char(92),'/')),'file' FROM source_files WHERE project_id=?1 AND disposition='ignored'",[project]).map_err(error)?;
-            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         }
         tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 AND tracking_initialized=0 THEN 2 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
+        if archive != was_archive {
+            tx.execute("INSERT INTO archive_intents VALUES(?1,?2,1) ON CONFLICT(project_id) DO UPDATE SET enabled=excluded.enabled,pending=1",params![project,archive]).map_err(error)?;
+        }
         tx.commit().map_err(error)?;
         self.verify_tracking_settings(project, enabled, archive)?;
         self.activity(
@@ -120,6 +127,10 @@ impl Registry {
             self.reconcile(project, "startup_reconciliation", &HashSet::new(), true)?;
         } else if enabled && archive {
             let errors = self.recover_operations(project, true)?;
+            self.set_tracking_error(project, &errors)?;
+        }
+        let errors = self.finish_archival_intent(project)?;
+        if !errors.is_empty() {
             self.set_tracking_error(project, &errors)?;
         }
         self.verify_tracking_settings(project, enabled, archive)
@@ -196,10 +207,13 @@ impl Registry {
                 )
                 .map_err(error)?;
         }
-        let mut problems = self.recover_operations(project, full)?;
-        let path_rules = crate::path_selection::rules(&self.db, project)?;
+        let mut problems = self.finish_archival_intent(project)?;
+        problems.extend(self.recover_operations(project, full)?);
+        let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         let ids = self.source_ids(project)?;
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
+        let mut inherited = HashSet::new();
+        let mut retry = false;
         for sid in &ids {
             let s = self.source(sid)?;
             if s.disposition == "discovered"
@@ -214,8 +228,106 @@ impl Registry {
                     .or_default() += 1;
             }
         }
-        let mut retry = false;
+        // Only explicitly new paths may inherit a tracked family's selection.
+        // Probe using the existing matcher before allowing capture; an excluded
+        // parent, ambiguous batch, or uncertain match remains excluded.
+        for sid in &ids {
+            let source = self.source(sid)?;
+            let path = crate::path_selection::normalized(&source.relative);
+            let is_new: bool = self
+                .db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM new_paths WHERE project_id=?1 AND path=?2)",
+                    params![project, path],
+                    |r| r.get(0),
+                )
+                .map_err(error)?;
+            if !is_new || source.status != "available" {
+                continue;
+            }
+            let without_file: Vec<_> = path_rules
+                .iter()
+                .filter(|r| !(r.kind == "file" && r.path == path))
+                .cloned()
+                .collect();
+            if !crate::path_selection::permits(&without_file, &path) {
+                continue;
+            }
+            let same_batch = ids
+                .iter()
+                .filter_map(|id| self.source(id).ok())
+                .filter(|s| {
+                    s.id != source.id
+                        && s.disposition == "discovered"
+                        && matching::parent_key(&s.relative)
+                            == matching::parent_key(&source.relative)
+                        && matching::stem(&s.name).normalized
+                            == matching::stem(&source.name).normalized
+                        && s.kind == source.kind
+                })
+                .count();
+            if same_batch != 0 {
+                continue;
+            }
+            let staged = match storage::stage(root, &source.relative, &self.store) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let (matches, explanation, high) = self.match_candidates(&source, &staged.hash)?;
+            if !high || matches.len() != 1 {
+                storage::discard_stage(&self.store, &staged.temporary)?;
+                continue;
+            }
+            let target = &matches[0];
+            let tx = self.db.transaction().map_err(error)?;
+            // Bind the exact candidate identified from these staged bytes before
+            // making the path eligible. A second scan must not reclassify a
+            // different file after the exclusion has already been removed.
+            tx.execute(
+                "UPDATE source_files SET document_id=?1,disposition='tracked' WHERE id=?2",
+                params![target, source.id],
+            )
+            .map_err(error)?;
+            if target != &source.document_id {
+                tx.execute("UPDATE documents SET tracking_state='merged',merged_into=?1,active_source_id=NULL WHERE id=?2 AND current_version_id IS NULL AND NOT EXISTS(SELECT 1 FROM source_files WHERE document_id=?2)",params![target,source.document_id]).map_err(error)?;
+            }
+            tx.execute(
+                "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
+                params![project, path],
+            )
+            .map_err(error)?;
+            tx.execute(
+                "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                params![project, path],
+            )
+            .map_err(error)?;
+            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1", [project]).map_err(error)?;
+            tx.commit().map_err(error)?;
+            path_rules = crate::path_selection::rules(&self.db, project)?;
+            self.activity(
+                project,
+                "matched",
+                &format!(
+                    "High-confidence match: {} -> {}. {}",
+                    source.relative, target, explanation
+                ),
+            )?;
+            let assigned = self.source(&source.id)?;
+            if let Err(e) = self.capture(&assigned, staged, "new_replacement", archive) {
+                self.activity(
+                    project,
+                    "capture_deferred",
+                    &format!("{}: {e}", source.relative),
+                )?;
+                problems.push(e);
+                retry = true;
+            }
+            inherited.insert(source.id);
+        }
         for sid in ids {
+            if inherited.contains(&sid) {
+                continue;
+            }
             let source = self.source(&sid)?;
             let importing: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE document_id=?1 AND kind='initial_import' AND state!='done')",[&source.document_id],|r|r.get(0)).map_err(error)?;
             if importing {
@@ -337,7 +449,8 @@ impl Registry {
             }
         }
         problems.extend(self.recover_operations(project, false)?);
-        let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state!='done'",[project],|r|r.get(0)).map_err(error)?;
+        problems.extend(self.finish_archival_intent(project)?);
+        let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state NOT IN ('done','cancelled','restored')",[project],|r|r.get(0)).map_err(error)?;
         if blocked > 0 && problems.is_empty() {
             problems.push("A journal operation needs review or an explicit retry below.".into());
         }

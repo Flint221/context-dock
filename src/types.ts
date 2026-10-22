@@ -44,7 +44,7 @@ export interface PathRule {
 export interface PathSelectionView {
   revision: number;
   exclusions: PathRule[];
-  entries: { path: string; kind: "folder" | "file"; status: string }[];
+  entries: { path: string; kind: "folder" | "file"; status: string; new?: boolean }[];
   warnings: string[];
   cloudPending: number;
 }
@@ -107,6 +107,17 @@ export interface TrackingView {
   reviews: PendingMatch[];
   activity: Activity[];
   operations: PendingOperation[];
+}
+export interface ArchivalReview {
+  token: string;
+  enabled: boolean;
+  items: {
+    from: string;
+    to: string;
+    action: "archive" | "restore" | "copy";
+    problem: string | null;
+  }[];
+  warnings: string[];
 }
 export interface Version {
   id: string;

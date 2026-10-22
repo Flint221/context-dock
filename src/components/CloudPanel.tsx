@@ -21,7 +21,7 @@ import {
 import { OperationStatus } from "./OperationStatus";
 const initial: Draft = {
   enabled: true,
-  automatic: false,
+  automatic: true,
   mode: "current",
   documents: [],
   softLimit: 50 * 1024 * 1024,
@@ -31,7 +31,7 @@ function savedDraft(view: CloudView): Draft {
     enabled:
       !!view.enabled ||
       (view.store_state === "none" && view.status !== "cloud_deleted"),
-    automatic: !!view.auto_sync,
+    automatic: true,
     mode: view.mode,
     documents: view.families.filter((f) => f.selected).map((f) => f.id),
     softLimit: view.soft_limit,
@@ -221,7 +221,6 @@ export function CloudPanel({
   const hasChanges =
     !!view &&
     (draft.enabled !== savedDraft(view).enabled ||
-      draft.automatic !== !!view.auto_sync ||
       draft.mode !== view.mode ||
       draft.softLimit !== view.soft_limit ||
       view.families.some(
@@ -273,9 +272,9 @@ export function CloudPanel({
             configuration is successfully saved.
           </p>
           <p>
-            1. Save and test your OpenAI key in Settings. 2. Select documents
-            below. 3. Review and confirm cloud changes. 4. Click Start Initial
-            Sync.
+            1. Save and test your OpenAI key in Settings. 2. Select files in
+            the folder tree and enable tracking. 3. Review and confirm cloud
+            changes to start syncing.
           </p>
         </div>
       )}
@@ -296,7 +295,7 @@ export function CloudPanel({
         </div>
       )}
       <p>
-        Only explicitly selected, tracked document families can be uploaded.
+        Cloud sync follows the saved folder selection and uploads tracked documents automatically.
         Discovery alone never uploads files. Pausing stops the next request; an
         in-flight request may finish. Local tracking continues independently.
       </p>
@@ -330,7 +329,7 @@ export function CloudPanel({
             {date(view.last_sync)}
           </p>
           <fieldset disabled={busy}>
-            <legend>Project cloud selection</legend>
+            <legend>Project cloud settings</legend>
             {hasChanges && (
               <p role="status">
                 Unsaved cloud changes. Finish editing the upload limit to
@@ -344,15 +343,6 @@ export function CloudPanel({
                 onChange={(e) => edit({ enabled: e.target.checked })}
               />
               Enable cloud indexing for this project
-            </label>
-            <label className="cloud-check">
-              <input
-                type="checkbox"
-                checked={draft.automatic}
-                onChange={(e) => edit({ automatic: e.target.checked })}
-              />
-              Automatically sync newly captured versions while ContextDock is
-              open
             </label>
             <div className="cloud-form">
               <label>
@@ -407,39 +397,14 @@ export function CloudPanel({
             <div className="cloud-family-list">
               <p>
                 <strong>
-                  Documents to index · {draft.documents.length} selected
+                  Folder-selected tracked documents · {draft.documents.length} eligible
                 </strong>
               </p>
               {selectionMissing && (
-                <p>Select at least one eligible document below to continue.</p>
+                <p>Select files in the folder tree and enable tracking to continue.</p>
               )}
-              <button
-                type="button"
-                disabled={!view.families.some((f) => f.eligible)}
-                onClick={() =>
-                  edit({
-                    documents: view.families
-                      .filter((f) => f.eligible)
-                      .map((f) => f.id),
-                  })
-                }
-              >
-                Select all eligible documents
-              </button>
               {view.families.map((f) => (
-                <label className="cloud-family" key={f.id}>
-                  <input
-                    type="checkbox"
-                    disabled={!f.eligible && !f.selected}
-                    checked={draft.documents.includes(f.id)}
-                    onChange={(e) =>
-                      edit({
-                        documents: e.target.checked
-                          ? [...draft.documents, f.id]
-                          : draft.documents.filter((id) => id !== f.id),
-                      })
-                    }
-                  />
+                <div className="cloud-family" key={f.id}>
                   <span>
                     <strong>{f.name}</strong> · local v{f.currentNumber ?? "–"}{" "}
                     · cloud v{f.cloudNumber ?? "–"}
@@ -453,7 +418,7 @@ export function CloudPanel({
                           : "Resolve local tracking / ambiguity before upload"}
                     </small>
                   </span>
-                </label>
+                </div>
               ))}
             </div>
             <button
@@ -638,8 +603,8 @@ export function CloudPanel({
             association removals.
           </p>
           <p>
-            Individual document opt-outs remove their index entries and retain
-            uploaded Files for re-selection. Turning project Cloud sync off
+            Excluding files in the folder tree removes their index entries and
+            retains uploaded Files for re-selection. Turning project Cloud sync off
             deletes its owned stores and uploaded Files. Document removals run
             even while uploads stay paused and report success only after remote
             absence is verified. API data is not used for model training by
@@ -685,9 +650,10 @@ export function CloudPanel({
                     );
                     return;
                   }
-                  if (afterReview && draft.enabled) {
+                  const nextAction = afterReview ?? (draft.enabled && !saved.started ? "start" : null);
+                  if (nextAction && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
-                    await perform(afterReview);
+                    await perform(nextAction);
                     setNotice("Cloud configuration saved. Sync requested.");
                     return;
                   }
@@ -712,9 +678,8 @@ export function CloudPanel({
             </button>
           </div>
           <p>
-            New projects still require Start Initial Sync after confirmation.
-            Changes to an already-started index queue only the changes shown
-            above.
+            Confirmation starts initial sync. Changes to an already-started
+            index queue only the changes shown above; a paused index stays paused.
           </p>
         </Modal>
       )}
@@ -822,8 +787,8 @@ export function CloudPanel({
           )}
           <h3>Known cloud versions</h3>
           <p>
-            Individually removed versions stay excluded from automatic sync.
-            Families unchecked in Project cloud selection can be selected again
+            Versions required by the saved folder selection and version policy
+            stay in sync. Files excluded in the folder selection can be selected again
             to restore their index entries. Uploaded Files remain separate
             resources until project cleanup. Failed/uncertain rows require
             reconciliation.
@@ -855,8 +820,10 @@ export function CloudPanel({
                   disabled={
                     busy ||
                     !job.file_id ||
+                    job.desired === 1 ||
                     ["removed", "purged"].includes(job.state)
                   }
+                  title={job.desired === 1 ? "Exclude the file in the folder tree or change the version policy first." : undefined}
                   onClick={() => manage("remove", job)}
                 >
                   Remove association
@@ -944,8 +911,9 @@ export function CloudPanel({
           </p>
           {destruction.action === "remove" ? (
             <p>
-              Remove this version's vector-store association and exclude it from
-              future synchronization? The uploaded File remains in OpenAI.
+              Remove this version's vector-store association? Versions required
+              by the saved folder selection and version policy cannot be removed
+              here. The uploaded File remains in OpenAI.
             </p>
           ) : (
             <>

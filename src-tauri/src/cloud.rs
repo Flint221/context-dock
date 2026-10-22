@@ -71,11 +71,19 @@ pub fn activity(db: &Connection, id: &str, kind: &str, message: &str) -> Result<
 }
 const ELIGIBLE:&str="d.tracking_state='tracked' AND d.merged_into IS NULL AND d.current_version_id IS NOT NULL AND d.kind IN ('markdown','word') AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.kind='initial_import' AND o.state!='done') AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files sf ON sf.id=m.source_id WHERE sf.document_id=d.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))";
 pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
-    let mut families=rows(db,&format!("SELECT d.id,d.family_name name,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])?;
+    let mut families=rows(db,&format!("SELECT d.id,d.family_name name,d.tracking_state trackingState,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])?;
     let blocked = crate::path_selection::blocked_documents(db, id)?;
     for family in &mut families {
         let excluded = blocked.contains(s(family, "id"));
         family["pathExcluded"] = json!(excluded as i64);
+        // A previously captured selected family must not silently disappear
+        // from the desired index if tracking state becomes inconsistent.
+        // Keep it selected and let eligibility freeze sync for review.
+        family["selected"] = json!(
+            (!excluded
+                && (s(family, "trackingState") == "tracked" || n(family, "versionCount") > 0))
+                as i64
+        );
         if excluded {
             family["eligible"] = json!(0);
         }
@@ -99,7 +107,19 @@ fn desired_selection(
     let root: String = db
         .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
         .map_err(error)?;
-    for document in draft.documents.iter().filter(|_| check_sources) {
+    let selected: Vec<String> = families(db, id)?
+        .iter()
+        .filter(|f| n(f, "selected") == 1)
+        .map(|f| s(f, "id").to_string())
+        .collect();
+    if check_sources
+        && families(db, id)?
+            .iter()
+            .any(|f| n(f, "selected") == 1 && n(f, "eligible") != 1)
+    {
+        return Err("A selected tracked document needs local tracking review before cloud sync; existing index entries are retained.".into());
+    }
+    for document in selected.iter().filter(|_| check_sources) {
         let source:Option<(String,String,Option<i64>)>=db.query_row("SELECT s.relative_path,s.status,s.hashed_size FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?1 AND d.project_id=?2",params![document,id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional().map_err(error)?;
         if let Some((relative, status, hashed_size)) = source {
             if !crate::path_selection::permits(&path_rules, &relative) {
@@ -115,6 +135,8 @@ fn desired_selection(
             if hashed_size.is_none() {
                 return Err("Recheck the reassigned folder's documents before syncing or asking questions. Use Refresh documents to capture any changed files.".into());
             }
+        } else {
+            return Err("A selected tracked document has no active source. Resolve its local tracking state before cloud sync; existing index entries are retained.".into());
         }
     }
     if !["current", "history"].contains(&draft.mode.as_str())
@@ -122,20 +144,8 @@ fn desired_selection(
     {
         return Err("Choose a valid mode and a soft limit between 1 byte and 512 MiB.".into());
     }
-    let families = families(db, id)?;
-    if draft.documents.iter().any(|d| {
-        !families.iter().any(|f| {
-            s(f, "id") == d
-                && (!check_sources || n(f, "eligible") == 1 || n(f, "pathExcluded") == 1)
-        })
-    }) {
-        return Err(
-            "Selection includes an ineligible or unrelated document. Resolve local tracking first."
-                .into(),
-        );
-    }
     let eligibility = if check_sources { ELIGIBLE } else { "1=1" };
-    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {eligibility} AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=d.project_id AND e.version_id=v.id) ORDER BY d.id,v.number")).map_err(error)?;
+    let mut q=db.prepare(&format!("SELECT v.id,v.document_id,v.number,d.kind,v.sha256,v.snapshot_relative,v.size,v.id=d.current_version_id FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 AND {eligibility} ORDER BY d.id,v.number")).map_err(error)?;
     let versions = q
         .query_map([id], |r| {
             Ok(CloudVersion {
@@ -156,7 +166,7 @@ fn desired_selection(
         .into_iter()
         .filter(|v| {
             !blocked.contains(&v.id)
-                && draft.documents.contains(&v.document)
+                && selected.contains(&v.document)
                 && (draft.mode == "history" || v.current)
         })
         .collect())
@@ -174,17 +184,10 @@ pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
             .collect(),
     })
 }
-pub fn selection_reduction(db: &Connection, p: &Value, requested: &CloudDraft) -> Result<bool> {
-    let saved = draft(db, p)?;
-    Ok(requested.enabled == saved.enabled
-        && requested.automatic == saved.automatic
-        && requested.mode == saved.mode
-        && requested.soft_limit == saved.soft_limit
-        && requested.documents.len() < saved.documents.len()
-        && requested
-            .documents
-            .iter()
-            .all(|id| saved.documents.contains(id)))
+pub fn selection_reduction(_db: &Connection, _p: &Value, _requested: &CloudDraft) -> Result<bool> {
+    // Document selection now comes exclusively from saved paths; a client-supplied
+    // list can never authorize the legacy opt-out / reduced-validation path.
+    Ok(false)
 }
 pub fn preview(db: &Connection, id: &str, draft: &CloudDraft) -> Result<CloudPlan> {
     let p = project(db, id)?;
@@ -249,17 +252,14 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
                 .into(),
         );
     }
-    tx.execute("DELETE FROM cloud_documents WHERE project_id=?1", [id])
-        .map_err(error)?;
-    for d in &draft.documents {
-        tx.execute("INSERT INTO cloud_documents VALUES(?1,?2)", params![id, d])
-            .map_err(error)?;
-    }
-    // Explicit document opt-outs are independent of uploads and source availability.
-    // Preserve uncertain uploads without a File ID so re-selection can recover them safely.
-    tx.execute("UPDATE cloud_jobs SET desired=0,phase=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'selection_remove' ELSE phase END,state=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'removing' ELSE state END,next_at=0,error=NULL WHERE project_id=?1 AND document_id NOT IN (SELECT document_id FROM cloud_documents WHERE project_id=?1)",[id]).map_err(error)?;
-    tx.execute("UPDATE cloud_jobs SET desired=1,phase='attach',state='uploaded',next_at=0,error=NULL WHERE project_id=?1 AND phase='selection_remove' AND document_id IN (SELECT document_id FROM cloud_documents WHERE project_id=?1) AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=?1 AND e.version_id=cloud_jobs.version_id)",[id]).map_err(error)?;
-    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN ?8 THEN sync_requested WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string(),reduction]).map_err(error)?;
+    let selection = families(&tx, id)?
+        .into_iter()
+        .filter(|f| n(f, "selected") == 1)
+        .map(|f| s(&f, "id").to_string())
+        .collect::<Vec<_>>();
+    // Existing cloud_documents rows are retained for compatibility, but never
+    // authorize a document or schedule a removal under the unified selection.
+    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=1,mode=?3,soft_limit=?4,scope=?5,store_op=COALESCE(store_op,?6),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string()]).map_err(error)?;
     activity(
         &tx,
         id,
@@ -271,7 +271,7 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         id,
         &[
             ("enabled", draft.enabled as i64),
-            ("auto_sync", draft.automatic as i64),
+            ("auto_sync", 1),
             ("soft_limit", draft.soft_limit),
         ],
     )?;
@@ -281,7 +281,7 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         .filter(|f| n(f, "selected") == 1)
         .map(|f| s(f, "id").to_string())
         .collect::<Vec<_>>();
-    let mut requested = draft.documents.clone();
+    let mut requested = selection;
     selected.sort();
     requested.sort();
     if s(&saved, "mode") != draft.mode || selected != requested {
@@ -307,7 +307,7 @@ pub fn jobs(db: &Connection, id: &str) -> Result<Vec<Value>> {
 }
 pub fn selection_removals(db: &Connection, id: &str) -> Result<Vec<Value>> {
     let blocked = crate::path_selection::blocked_versions(db, id)?;
-    Ok(rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName,EXISTS(SELECT 1 FROM cloud_documents c WHERE c.project_id=j.project_id AND c.document_id=j.document_id) selected FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 AND j.phase IN ('selection_remove','path_remove') AND j.state NOT IN ('removed','purged') AND j.desired=0 ORDER BY j.id",&[&id])?.into_iter().filter(|j|n(j,"selected")==0 || blocked.contains(s(j,"version_id"))).collect())
+    Ok(rows(db,"SELECT j.*,v.number,v.source_name sourceName,v.size rawBytes,d.family_name familyName FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id JOIN documents d ON d.id=j.document_id WHERE j.project_id=?1 AND j.phase IN ('selection_remove','path_remove') AND j.state NOT IN ('removed','purged') AND j.desired=0 ORDER BY j.id",&[&id])?.into_iter().filter(|j|blocked.contains(s(j,"version_id"))).collect())
 }
 /// Only the exact GET/DELETE routes needed to complete saved document opt-outs.
 pub fn selection_removal_request(
@@ -410,9 +410,10 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
     tx.execute("UPDATE cloud_jobs SET desired=0 WHERE project_id=?1", [id])
         .map_err(error)?;
     for v in wanted {
+        tx.execute("UPDATE cloud_jobs SET phase=CASE WHEN file_id IS NOT NULL THEN 'attach' ELSE phase END,state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' ELSE state END,desired=1,next_at=0,error=NULL WHERE project_id=?1 AND version_id=?2 AND state!='purged' AND phase IN ('selection_remove','path_remove','remove')", params![id,v.id]).map_err(error)?;
         let job = uuid::Uuid::new_v4().to_string();
         let ext = if v.kind == "word" { "docx" } else { "md" };
-        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,state=CASE WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
+        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,remote_name=CASE WHEN state='purged' THEN excluded.remote_name ELSE remote_name END,phase=CASE WHEN state='purged' THEN 'upload' ELSE phase END,state=CASE WHEN state='purged' THEN 'pending' WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END,next_at=CASE WHEN state='purged' THEN 0 ELSE next_at END,error=CASE WHEN state='purged' THEN NULL ELSE error END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
     }
     tx.commit().map_err(error)
 }
