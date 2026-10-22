@@ -334,6 +334,10 @@ fn nested_sources_restore_to_their_original_folder_and_silent_setting_rejection_
     fs::create_dir(f.root.join("nested")).unwrap();
     fs::write(f.root.join("nested/Notes_v1.md"), "notes one").unwrap();
     f.scan();
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(&f.project, revision, vec![])
+        .unwrap();
+    f.scan();
     fs::write(f.root.join("nested/Notes_v2.md"), "notes two").unwrap();
     f.scan();
     f.r.db.execute_batch("CREATE TRIGGER reject_setting BEFORE UPDATE OF archive_enabled ON projects BEGIN SELECT RAISE(IGNORE); END;").unwrap();

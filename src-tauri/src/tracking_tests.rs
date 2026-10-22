@@ -81,6 +81,15 @@ impl Fixture {
         let document = self.document(old);
         fs::write(self.root.join(new), bytes).unwrap();
         self.r.refresh(&self.project).unwrap();
+        // Newly discovered paths require explicit folder selection before this
+        // fixture can exercise the lower-level capture and recovery journal.
+        let revision = crate::path_selection::revision(&self.r.db, &self.project).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.project).unwrap();
+        let new_path = crate::path_selection::normalized(new);
+        rules.retain(|rule| !(rule.kind == "file" && rule.path == new_path));
+        self.r
+            .save_path_selection(&self.project, revision, rules)
+            .unwrap();
         let sid = self
             .r
             .snapshot()
