@@ -708,6 +708,13 @@ fn tracking_off_prevents_sync_and_next_guarded_upload() {
     .unwrap();
     f.r.configure_tracking(&f.id, false, false, vec![]).unwrap();
     assert!(guard.upload("blocked.md", b"private".to_vec()).is_err());
+    assert!(guard
+        .request(
+            "POST",
+            "/vector_stores/vs_test/files",
+            Some(json!({"file_id": "file_already_uploaded"})),
+        )
+        .is_err());
     assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
     f.step(&api);
     assert!(api.0.borrow().calls.is_empty());
