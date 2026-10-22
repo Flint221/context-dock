@@ -1,3 +1,15 @@
+# 0.7.1 — Larger Word packages and independent sync failures
+
+October 22, 2026. **168 native tests pass**, plus the intentionally ignored child-fixture entry invoked by its parent test. **122 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, x64 NSIS packaging and diff whitespace checks pass. Versions agree at 0.7.1; schema 007 and application identity are unchanged. An overlapping native test invocation encountered a Windows executable lock; the final complete native test/Clippy/format sequence was rerun successfully.
+
+Four new native regressions verify that an illustrated DOCX above the old 4 MiB expanded-package screen uploads original bytes and indexes, the 128 MiB package safety boundary remains enforced, a malformed nested DOCX records path/version/reason while a healthy file finishes, local bytes/history remain retained, and automatic sync respects per-file backoff without a busy retry loop. The mixed-failure test also checks visible summary counts, question blocking and an idle scheduler after terminal outcomes. A frontend regression verifies the Some files need attention label, red alert content with filename/reason, available Sync now action and blocked question input. Existing scoped deletion, opt-out, uncertainty/recovery and pause/stop tests still pass.
+
+Provider evidence uses mocks and temporary source/snapshot/SQLite stores; no real credentials or cloud resources were used. Installed upgrade, real document compatibility and authenticated provider acceptance remain checks in [the Word-sync walkthrough](manual-testing-word-sync.md). The old package-byte screen is removed, while raw snapshot, soft-upload, body XML, extracted-text, ZIP entry/ratio and integrity checks remain. This does not claim arbitrary-size or provider-token acceptance.
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.7.1_x64-setup.exe`, **4,418,719 bytes**, SHA-256 `B6AE67179CC388E7C666A70C36DCBA9E6AB5DC1DD605D800145C64541E3CE00F`. File/product version is 0.7.1. The installer was built but not run. Changes are pushed on `codex/folder-selection`; no main merge or GitHub CI result is claimed.
+
+---
+
 # 0.7.0 — Saved folder tree selection
 
 October 22, 2026. **164 native tests pass**, plus one intentionally ignored child-fixture entry invoked by its parent integration test. **121 frontend tests across 15 files pass**. TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, production frontend compilation, Windows x64 NSIS packaging and diff whitespace checks pass. Package/lockfile, Rust and Tauri versions agree at 0.7.0; application identifier remains `com.contextdock.desktop`. Schema 007 upgrades the registry; downgrading afterward is unsupported.
