@@ -355,3 +355,25 @@ it("retains a dirty draft when the project folder becomes unavailable", async ()
   await waitFor(() => expect(desktop.exit).toHaveBeenCalledOnce());
   expect(saved.exclusions).toEqual([]);
 });
+
+it("refreshes saved folder coverage after a scan without replacing unsaved checkbox edits", async () => {
+  const user = userEvent.setup();
+  const { rerender } = render(
+    <FolderTree project="p" changed={changed} refreshKey="scan1" />,
+  );
+  const folder = await screen.findByRole("checkbox", {
+    name: "Include Drafts",
+  });
+  await waitFor(() => expect(folder).toBeEnabled());
+  const reads = vi.mocked(registry.paths).mock.calls.length;
+  await user.click(folder);
+  rerender(<FolderTree project="p" changed={changed} refreshKey="scan2" />);
+  expect(folder).not.toBeChecked();
+  expect(registry.paths).toHaveBeenCalledTimes(reads);
+  await user.click(screen.getByRole("button", { name: "Discard changes" }));
+  saved.entries.push({ path: "Added.md", kind: "file", status: "available" });
+  rerender(<FolderTree project="p" changed={changed} refreshKey="scan3" />);
+  expect(
+    await screen.findByRole("checkbox", { name: "Include Added.md" }),
+  ).toBeChecked();
+});

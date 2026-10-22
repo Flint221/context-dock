@@ -21,11 +21,23 @@ let chats: Chat[];
 let changed: () => void;
 it("does not claim all selected documents are ready while capture is pending", async () => {
   connected();
-  view.families.push({ ...view.families[0], id: "pending", name: "Waiting for capture", selected: 0, eligible: 0, currentNumber: null, cloudNumber: null, versionCount: 0, rawBytes: 0 });
+  view.families.push({
+    ...view.families[0],
+    id: "pending",
+    name: "Waiting for capture",
+    selected: 0,
+    eligible: 0,
+    currentNumber: null,
+    cloudNumber: null,
+    versionCount: 0,
+    rawBytes: 0,
+  });
   render(<ProjectCloud project="p1" />);
   expect(await screen.findByText(/1 awaiting capture/)).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
-  expect(screen.queryByText("On · Documents ready for questions")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("On · Documents ready for questions"),
+  ).not.toBeInTheDocument();
 });
 it("includes selected documents awaiting a cloud job in coverage", async () => {
   connected();
@@ -33,11 +45,18 @@ it("includes selected documents awaiting a cloud job in coverage", async () => {
   view.pending = 0;
   view.failed = 0;
   view.families = Array.from({ length: 10 }, (_, i) => ({
-    ...view.families[0], id: `doc-${i}`, name: `Document ${i}`,
-    selected: 1, eligible: 1, currentNumber: 1, cloudNumber: i === 9 ? null : 1,
+    ...view.families[0],
+    id: `doc-${i}`,
+    name: `Document ${i}`,
+    selected: 1,
+    eligible: 1,
+    currentNumber: 1,
+    cloudNumber: i === 9 ? null : 1,
   }));
   render(<ProjectCloud project="p1" />);
-  expect(await screen.findByRole("progressbar", { name: "Indexed versions" })).toHaveAttribute("aria-valuenow", "90");
+  expect(
+    await screen.findByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "90");
   expect(screen.getByText(/9 of 10 indexed/)).toBeInTheDocument();
   expect(screen.getByText(/1 awaiting cloud sync/)).toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
@@ -710,4 +729,27 @@ it("shows incomplete cloud deletion as cleanup needed and offers a verified retr
     }),
   );
   await screen.findByText("Off · Local version history");
+});
+
+it("keeps a typed AI question and a single cloud subscription when switching project tabs", async () => {
+  connected();
+  const user = userEvent.setup();
+  const { rerender } = render(<ProjectCloud project="p1" tab="ai" />);
+  const question = await screen.findByRole("textbox", {
+    name: "Your question",
+  });
+  await waitFor(() => expect(question).toBeEnabled());
+  await user.type(question, "What changed in version six?");
+  rerender(<ProjectCloud project="p1" tab="cloud" />);
+  expect(
+    screen.queryByRole("textbox", { name: "Your question" }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("switch", { name: "Cloud sync" }),
+  ).toBeInTheDocument();
+  rerender(<ProjectCloud project="p1" tab="ai" />);
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBe(question);
+  expect(question).toHaveValue("What changed in version six?");
+  expect(cloud.subscribe).toHaveBeenCalledTimes(1);
+  expect(chat.action).not.toHaveBeenCalledWith("p1", "ask", expect.anything());
 });

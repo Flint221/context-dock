@@ -1,6 +1,6 @@
 # ContextDock readable archive names
 
-Implemented on `codex/new-file-selection`; awaiting the next installer. No installer was built for this change.
+Included in the ContextDock 0.9.0 release alongside the project workspace tabs. The original naming change was validated and pushed separately before packaging was requested.
 
 New finalized archives keep the original filename, extension and author version label. Family folders use readable sanitized document titles without UUID suffixes.
 

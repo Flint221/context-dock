@@ -68,9 +68,11 @@ function MatchDecision({
 export function TrackingPanel({
   project,
   changed,
+  onStatus,
 }: {
   project: Project;
   changed: () => Promise<void>;
+  onStatus?: (view: TrackingView | null) => void;
 }) {
   const [view, setView] = useState<TrackingView | null>(null);
   const [stateKnown, setStateKnown] = useState(false);
@@ -157,6 +159,9 @@ export function TrackingPanel({
     project.archiveEnabled,
     project.trackingRevision,
   ]);
+  useEffect(() => {
+    onStatus?.(stateKnown ? view : null);
+  }, [view, stateKnown, onStatus]);
   async function mutate(
     work: () => Promise<unknown>,
     expected?: { enabled: boolean; archive: boolean },
@@ -598,12 +603,12 @@ export function TrackingPanel({
           }}
         >
           <p>
-            The saved folder selection determines which files are tracked.
-            Clear numbered sequences such as
-            Report_v1.md, Report_v2.md and Report_v10.md in the same folder and
-            file type become one document family, imported in numeric order with
-            the newest export active. Unrelated or ambiguous names stay
-            separate. Initialization never moves your original files.
+            The saved folder selection determines which files are tracked. Clear
+            numbered sequences such as Report_v1.md, Report_v2.md and
+            Report_v10.md in the same folder and file type become one document
+            family, imported in numeric order with the newest export active.
+            Unrelated or ambiguous names stay separate. Initialization never
+            moves your original files.
           </p>
           <p className="tracking-note">
             Select or exclude files in the folder tree and save your changes.

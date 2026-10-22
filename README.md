@@ -1,6 +1,12 @@
+# ContextDock 0.9.0 project workspace
+
+Projects now have a sticky header with the project name and **Files & tracking**, **Cloud sync**, and **Ask AI** tabs. Files & tracking opens with saved selection counts, tracked document families, cloud indexing coverage and local issues needing attention. Red marks failures, amber marks indexing or waiting, and green marks completed indexing. Folder selection comes before tracking controls and document lists. Tab changes preserve state and protect unsaved folder choices with the existing save/discard prompt.
+
+This installer also includes readable archive folders and exact original filenames/version labels. See [project tab verification](docs/ContextDock_Project_Tabs_v1.md) and [archive naming](docs/ContextDock_Archive_Names_v1.md).
+
 # ContextDock
 
-ContextDock 0.8.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.9.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 ## Unified folder selection (0.8.1)
 
@@ -183,7 +189,7 @@ Old Context Files/RAP Master Context/RAP_Master_Context_v5.md
 Old Context Files/RAP Master Context/Capture 3/RAP_Master_Context_v6.md
 ```
 
-Pending the next installer: new archives use readable family folders and keep exact original filenames, including author version numbers. Nested source folders are mirrored beneath `Old Context Files`. Snapshot copies use a `Capture N` subfolder to distinguish capture history from the filename's author version. Occupied or journal-reserved destinations use `Archive 2`, `Archive 3`, etc. subfolders without overwriting anything. Existing UUID archive receipts retain their recorded paths for safe recovery and restore. See [readable archive naming](docs/ContextDock_Archive_Names_v1.md). `Old Context Files` is excluded case-insensitively from discovery and monitoring. Editing an archive cannot change its independent immutable snapshot; opening an edited archive location reports a hash conflict.
+New archives use readable family folders and keep exact original filenames, including author version numbers. Nested source folders are mirrored beneath `Old Context Files`. Snapshot copies use a `Capture N` subfolder to distinguish capture history from the filename's author version. Occupied or journal-reserved destinations use `Archive 2`, `Archive 3`, etc. subfolders without overwriting anything. Existing UUID archive receipts retain their recorded paths for safe recovery and restore. See [readable archive naming](docs/ContextDock_Archive_Names_v1.md). `Old Context Files` is excluded case-insensitively from discovery and monitoring. Editing an archive cannot change its independent immutable snapshot; opening an edited archive location reports a hash conflict.
 
 Unregistering hides the project and disables tracking/archival. It does **not** delete source files, archives, snapshots, or retained history metadata. Registering the same canonical folder again restores its stable project ID/history with tracking and archival off. No automatic archive/snapshot retention cleanup or storage-purge feature is implemented.
 

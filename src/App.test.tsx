@@ -353,7 +353,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.8.1")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.9.0")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -584,4 +584,103 @@ it("keeps one live tracking panel through updates and removes it on navigation",
       screen.getByRole("heading", { name: "Registered folder" }),
     ).toBeInTheDocument();
   }
+});
+
+it("organizes project sections, guards unsaved tab changes and retains the folder tree", async () => {
+  state.projects = [
+    {
+      id: "tabs",
+      name: "Tabbed project",
+      path: "C:\\Project",
+      createdAt: "",
+      status: "available",
+      lastScan: null,
+      scanError: null,
+      documentCount: 1,
+      latestModified: null,
+      trackingEnabled: false,
+      archiveEnabled: false,
+      trackingRevision: 0,
+      folderState: "ready",
+    },
+  ];
+  let paths = {
+    revision: 0,
+    exclusions: [] as import("./types").PathRule[],
+    entries: [
+      { path: "Drafts", kind: "folder" as const, status: "available" },
+      {
+        path: "Drafts/Notes_v6.md",
+        kind: "file" as const,
+        status: "available",
+      },
+    ],
+    warnings: [],
+    cloudPending: 0,
+  };
+  vi.mocked(registry.paths).mockImplementation(async () =>
+    structuredClone(paths),
+  );
+  vi.mocked(registry.savePaths).mockImplementation(
+    async (_p, revision, exclusions) => {
+      paths = { ...paths, revision: revision + 1, exclusions };
+    },
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: /^Tabbed project C:/ }),
+  );
+  expect(
+    screen.getByRole("heading", { name: "Tabbed project" }).closest("header"),
+  ).toHaveClass("project-header");
+  const files = screen.getByRole("tab", { name: "Files & tracking" });
+  const cloudTab = screen.getByRole("tab", { name: "Cloud sync" });
+  const ai = screen.getByRole("tab", { name: "Ask AI" });
+  expect(files).toHaveAttribute("aria-selected", "true");
+  const tree = await screen.findByRole("checkbox", { name: "Include Drafts" });
+  await waitFor(() => expect(tree).toBeEnabled());
+  expect(
+    screen.getByRole("region", { name: "Project overview" }),
+  ).toHaveTextContent("Selected files1");
+  expect(
+    screen.queryByRole("region", { name: "Cloud sync" }),
+  ).not.toBeInTheDocument();
+  await user.click(tree);
+  await user.click(cloudTab);
+  expect(
+    screen.getByRole("dialog", { name: "Unsaved folder selection" }),
+  ).toBeInTheDocument();
+  expect(files).toHaveAttribute("aria-selected", "true");
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  expect(tree).not.toBeChecked();
+  await user.click(cloudTab);
+  await user.click(
+    screen.getByRole("button", { name: "Save changes and continue" }),
+  );
+  await waitFor(() =>
+    expect(cloudTab).toHaveAttribute("aria-selected", "true"),
+  );
+  expect(
+    screen.getByRole("region", { name: "Cloud sync" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("region", { name: "Ask project" }),
+  ).not.toBeInTheDocument();
+  await user.click(ai);
+  expect(
+    screen.getByRole("region", { name: "Ask project" }),
+  ).toBeInTheDocument();
+  await user.click(files);
+  expect(screen.getByRole("checkbox", { name: "Include Drafts" })).toBe(tree);
+  expect(tree).not.toBeChecked();
+  expect(
+    screen.getByRole("region", { name: "Project overview" }),
+  ).toHaveTextContent("Selected files0");
+  files.focus();
+  await user.keyboard("{ArrowRight}");
+  expect(cloudTab).toHaveFocus();
+  expect(files).toHaveAttribute("aria-selected", "true");
+  await user.keyboard("{Enter}");
+  expect(cloudTab).toHaveAttribute("aria-selected", "true");
 });

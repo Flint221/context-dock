@@ -24,6 +24,7 @@ import { AddProject } from "./components/AddProject";
 import { Projects } from "./components/Projects";
 import { Dashboard } from "./components/Dashboard";
 import { SettingsView } from "./components/Settings";
+import { ProjectTabs, type ProjectTab } from "./components/ProjectTabs";
 import { ProjectDetails } from "./components/ProjectDetails";
 import { RemoveProject } from "./components/RemoveProject";
 import { Modal } from "./components/Modal";
@@ -48,6 +49,7 @@ function Workspace() {
     documents: [],
     theme: "system",
   });
+  const [projectTab, setProjectTab] = useState<ProjectTab>("files");
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<"rename" | "remove" | null>(null);
@@ -125,6 +127,7 @@ function Workspace() {
     guard.request(() => {
       setPage("projects");
       setSelected(p.id);
+      setProjectTab("files");
       void run(() => registry.refresh(p.id));
     });
   }
@@ -177,23 +180,46 @@ function Workspace() {
         </div>
       </aside>
       <main>
-        <header>
-          <div className="breadcrumb">
-            Workspace <span>/</span>{" "}
-            {page === "dashboard"
-              ? "Dashboard"
-              : page === "settings"
-                ? "Settings"
-                : page === "processes"
-                  ? "Current processes"
-                  : "Projects"}
-            {project && page === "projects" && (
-              <>
-                {" "}
-                <span>/</span> {project.name}
-              </>
-            )}
-          </div>
+        <header
+          className={
+            project && page === "projects" ? "project-header" : undefined
+          }
+        >
+          {project && page === "projects" ? (
+            <>
+              <div className="project-header-name" title={project.name}>
+                <Folder size={20} />
+                <h1>{project.name}</h1>
+              </div>
+              <ProjectTabs
+                tab={projectTab}
+                select={(tab) => {
+                  if (tab !== projectTab)
+                    guard.request(() => {
+                      setProjectTab(tab);
+                      window.scrollTo({ top: 0, behavior: "instant" });
+                    });
+                }}
+              />
+            </>
+          ) : (
+            <div className="breadcrumb">
+              Workspace <span>/</span>{" "}
+              {page === "dashboard"
+                ? "Dashboard"
+                : page === "settings"
+                  ? "Settings"
+                  : page === "processes"
+                    ? "Current processes"
+                    : "Projects"}
+              {project && page === "projects" && (
+                <>
+                  {" "}
+                  <span>/</span> {project.name}
+                </>
+              )}
+            </div>
+          )}
           <span className="local-label">
             <span /> Offline ready
           </span>
@@ -214,46 +240,48 @@ function Workspace() {
           )}
           <OperationStatus busy={busy} message="Reading local metadata…" />
           <div className="page-scene" key={route}>
-            <div className="page-heading">
-              <div>
-                <div className="eyebrow">
-                  {page === "processes"
-                    ? "LOCAL ACTIVITY, AT A GLANCE"
-                    : page === "settings"
-                      ? "MAKE YOURSELF AT HOME"
-                      : "YOUR DOCUMENTATION, CONNECTED"}
+            {!(page === "projects" && project) && (
+              <div className="page-heading">
+                <div>
+                  <div className="eyebrow">
+                    {page === "processes"
+                      ? "LOCAL ACTIVITY, AT A GLANCE"
+                      : page === "settings"
+                        ? "MAKE YOURSELF AT HOME"
+                        : "YOUR DOCUMENTATION, CONNECTED"}
+                  </div>
+                  <h1>
+                    {page === "dashboard"
+                      ? "Workspace overview"
+                      : page === "settings"
+                        ? "Settings"
+                        : page === "processes"
+                          ? "Current processes"
+                          : project?.name || "Projects"}
+                  </h1>
+                  <p>
+                    {page === "dashboard"
+                      ? "A clear view of your projects and the documents behind them."
+                      : page === "settings"
+                        ? "Make ContextDock feel at home."
+                        : page === "processes"
+                          ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
+                          : project
+                            ? "Track document history and ask about your synced files."
+                            : "Existing folders. Independent documents. One place to find them."}
+                  </p>
                 </div>
-                <h1>
-                  {page === "dashboard"
-                    ? "Workspace overview"
-                    : page === "settings"
-                      ? "Settings"
-                      : page === "processes"
-                        ? "Current processes"
-                        : project?.name || "Projects"}
-                </h1>
-                <p>
-                  {page === "dashboard"
-                    ? "A clear view of your projects and the documents behind them."
-                    : page === "settings"
-                      ? "Make ContextDock feel at home."
-                      : page === "processes"
-                        ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
-                        : project
-                          ? "Track document history and ask about your synced files."
-                          : "Existing folders. Independent documents. One place to find them."}
-                </p>
+                {(page === "dashboard" || page === "projects") && (
+                  <button
+                    className="primary"
+                    disabled={busy || !loaded}
+                    onClick={() => guard.request(() => setAdding(true))}
+                  >
+                    <Plus size={17} /> Add project
+                  </button>
+                )}
               </div>
-              {(page === "dashboard" || page === "projects") && (
-                <button
-                  className="primary"
-                  disabled={busy || !loaded}
-                  onClick={() => guard.request(() => setAdding(true))}
-                >
-                  <Plus size={17} /> Add project
-                </button>
-              )}
-            </div>
+            )}
             {page === "processes" ? (
               <CurrentProcesses />
             ) : !loaded ? (
@@ -277,6 +305,8 @@ function Workspace() {
               />
             ) : page === "projects" && project ? (
               <ProjectDetails
+                key={project.id}
+                tab={projectTab}
                 project={project}
                 changed={load}
                 documents={data.documents.filter(
@@ -357,6 +387,7 @@ function Workspace() {
               const id = await registry.add(n, p);
               await load();
               setSelected(id);
+              setProjectTab("files");
               setPage("projects");
             } finally {
               setBusy(false);

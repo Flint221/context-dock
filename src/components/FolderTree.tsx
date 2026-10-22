@@ -52,7 +52,12 @@ function nodes(view: PathSelectionView): Node {
     isNew: false,
   };
   const map = new Map<string, Node>([["", root]]);
-  const add = (path: string, kind: "folder" | "file", status: string, isNew = false): Node => {
+  const add = (
+    path: string,
+    kind: "folder" | "file",
+    status: string,
+    isNew = false,
+  ): Node => {
     path = path.replaceAll("\\", "/");
     const id = key(path);
     const existing = map.get(id);
@@ -187,10 +192,14 @@ export function FolderTree({
   project,
   changed,
   unavailable = false,
+  onSelection,
+  refreshKey,
 }: {
   project: string;
   changed: () => Promise<void>;
   unavailable?: boolean;
+  refreshKey?: string | null;
+  onSelection?: (view: PathSelectionView | null) => void;
 }) {
   const [view, setView] = useState<PathSelectionView | null>(null);
   const [draft, setDraft] = useState<PathRule[]>([]);
@@ -205,11 +214,21 @@ export function FolderTree({
     !!view && ruleSignature(draft) !== ruleSignature(view.exclusions);
   useEffect(() => {
     mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const dirtyRef = useRef(false);
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+  useEffect(() => {
     let current = true;
+    if (dirtyRef.current) return;
     void registry
       .paths(project)
       .then((v) => {
-        if (current) {
+        if (current && !dirtyRef.current) {
           setView(v);
           setDraft(v.exclusions);
           setError("");
@@ -223,9 +242,11 @@ export function FolderTree({
       });
     return () => {
       current = false;
-      mounted.current = false;
     };
-  }, [project, reload]);
+  }, [project, reload, refreshKey]);
+  useEffect(() => {
+    onSelection?.(view);
+  }, [view, onSelection]);
   const discard = useCallback(() => {
     if (view) {
       setDraft(view.exclusions);
