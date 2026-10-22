@@ -112,10 +112,10 @@ export function ProjectCloud({ project }: { project: string }) {
   function enable() {
     if (!view) return;
     void run(async () => {
-      const eligible = view.families.filter((f) => f.eligible);
+      const eligible = view.families.filter((f) => f.selected && f.eligible);
       if (!eligible.length)
         throw new Error(
-          "Enable document tracking below and capture a document first, then turn on Cloud sync.",
+          "Select files in the folder tree, enable document tracking, and capture an eligible document before turning on Cloud sync.",
         );
       const draft: Draft = {
         enabled: true,
@@ -339,8 +339,8 @@ export function ProjectCloud({ project }: { project: string }) {
             {setup.draft.mode === "current"
               ? "Current versions"
               : "Captured history"}
-            . Change the document selection or version policy in Advanced cloud
-            settings.
+            . Change document selection in the folder tree or the version policy
+            in Advanced cloud settings.
           </p>
           <p>
             OpenAI receives these files. Sending a question also sends that

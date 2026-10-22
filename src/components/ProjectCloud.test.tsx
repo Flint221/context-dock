@@ -158,7 +158,7 @@ beforeEach(() => {
         id: "d1",
         name: "Master Context",
         eligible: 1,
-        selected: 0,
+        selected: 1,
         currentNumber: 1,
         cloudNumber: null,
         versionCount: 1,
@@ -273,24 +273,18 @@ it("keeps a paused cloud project checked so unchecking always means verified clo
   );
 });
 it.each(["empty", "ineligible"])(
-  "preserves an %s saved selection instead of silently selecting all documents on re-enable",
+  "does not enable cloud with an %s folder selection",
   async (kind) => {
     view.selectionSaved = true;
     view.status = "cloud_deleted";
-    if (kind === "ineligible")
-      view.families.push({
-        ...view.families[0],
-        id: "old-selection",
-        name: "Needs review",
-        selected: 1,
-        eligible: 0,
-      });
+    if (kind === "ineligible") view.families[0].eligible = 0;
+    else view.families[0].selected = 0;
     const user = userEvent.setup();
     render(<ProjectCloud project="p1" />);
     await user.click(await screen.findByRole("switch", { name: "Cloud sync" }));
     expect(
       await screen.findByText(
-        /saved document selection is empty or needs review/,
+        /Select files in the folder tree, enable document tracking/,
       ),
     ).toBeInTheDocument();
     expect(cloud.action).not.toHaveBeenCalled();

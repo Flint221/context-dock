@@ -126,7 +126,7 @@ beforeEach(() => {
         id: "d1",
         name: "Master Context",
         eligible: 1,
-        selected: 0,
+        selected: 1,
         currentNumber: 1,
         cloudNumber: null,
         versionCount: 1,
@@ -410,7 +410,7 @@ it("reviews re-enabling an existing stopped project and resumes only after conse
     "sync",
   ]);
 });
-it("requires a reviewed explicit selection and checked consent before apply; never starts initial uploads automatically", async () => {
+it("starts initial sync after confirming consent for folder-selected documents", async () => {
   const user = userEvent.setup();
   const plan: Plan = {
     token: "review-token",
@@ -420,11 +420,13 @@ it("requires a reviewed explicit selection and checked consent before apply; nev
     removals: 0,
     storeName: view.store_name,
   };
-  vi.mocked(cloud.action)
-    .mockResolvedValueOnce(plan as never)
-    .mockResolvedValueOnce(undefined);
+  vi.mocked(cloud.action).mockImplementation(async (p, action, payload) => {
+    if (action === "preview") return plan as never;
+    return confirmedAction(p, action, payload);
+  });
   render(<CloudPanel project="p1" />);
-  await user.click(await screen.findByLabelText(/Master Context/));
+  expect(await screen.findByText("Master Context")).toBeInTheDocument();
+  expect(screen.queryByRole("checkbox", { name: /Master Context/ })).not.toBeInTheDocument();
   await user.click(
     screen.getByRole("button", { name: "Review cloud changes" }),
   );
@@ -435,21 +437,17 @@ it("requires a reviewed explicit selection and checked consent before apply; nev
   expect(confirm).toBeDisabled();
   await user.click(within(modal).getByRole("checkbox"));
   await user.click(confirm);
-  await waitFor(() => expect(cloud.action).toHaveBeenCalledTimes(2));
-  expect(cloud.action).toHaveBeenLastCalledWith(
+  await waitFor(() => expect(cloud.action).toHaveBeenCalledTimes(3));
+  expect(cloud.action).toHaveBeenCalledWith(
     "p1",
     "apply",
     expect.objectContaining({
       token: "review-token",
       consent: true,
-      draft: expect.objectContaining({ documents: ["d1"], automatic: false }),
+      draft: expect.objectContaining({ documents: ["d1"], automatic: true }),
     }),
   );
-  expect(cloud.action).not.toHaveBeenCalledWith(
-    "p1",
-    "start",
-    expect.anything(),
-  );
+  expect(cloud.action).toHaveBeenCalledWith("p1", "start");
 });
 it("keeps local use available when cloud status fails and unlocks cloud controls after a rejected action", async () => {
   const user = userEvent.setup();
