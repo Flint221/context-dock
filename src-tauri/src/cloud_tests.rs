@@ -1618,12 +1618,13 @@ fn missing_association_is_reconciled_using_existing_file() {
     assert_eq!(api.0.borrow().associations.len(), 1);
 }
 #[test]
-fn explicit_removal_excludes_version_and_retains_file_and_local_history() {
+fn explicit_removal_of_excluded_version_retains_file_and_local_history() {
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
     let version = f.jobs()[0]["version_id"].clone();
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -1836,6 +1837,7 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     let api = Mock::default();
     f.sync(&api);
     let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
@@ -2044,6 +2046,7 @@ fn explicit_association_cleanup_works_while_cloud_sync_is_disconnected() {
     let api = Mock::default();
     f.sync(&api);
     let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
     cloud_commands::action_impl(
         &mut f.r.db,
         Some(&f.id),
