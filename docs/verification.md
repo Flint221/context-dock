@@ -1,3 +1,17 @@
+# 0.10.1 - First-send Windows notification repair and test control
+
+Local release checks passed: **224 native tests**, **144 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. Three explicit Windows integration tests then passed separately, for **227 distinct native tests/checks**. The normal run leaves four ignored entries: the existing child fixture and the three explicit Windows checks. Package/lockfile, Cargo/lockfile and Tauri versions agree at 0.10.1. Schema 012 and application identity are unchanged.
+
+Source commit `c347fe0` is pushed to main. A disposable notification identity reproduced `0x80070490` specifically from `ToastNotifier.Setting` before first submission. Registering identity metadata alone still left that first permission query failing. The repaired path allows only that specific not-yet-initialized exception through to `Show`, rechecks Windows permissions and verifies actual retention through Notification Center history. The isolated native test suppresses its popup and removes its own history and registry entries. It does not verify a visible installed banner or protocol click. Per-user installer/runtime registration supplies display name, logo and protocol-only stub identity; Windows notification permissions are not changed. A Settings test button submits an explicit harmless alert even while focused, with actionable disabled/error feedback. Failed and disabled alerts back off per project/category without marking delivery or blocking other projects; recovered/resolved notification errors clear.
+
+The two existing Windows fixture checks again passed for disposable startup registration/override and hidden native tray monitoring/reopen/Exit. Frontend tests cover test-notification success/failure without modifying preferences or approvals. See [the full installed test walkthrough](ContextDock_Tray_Testing_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.1_x64-setup.exe`, **4,709,249 bytes**, SHA-256 `EC8C7DC8343594637FEEF5E8778314B2F971AE4C131C2B28EA8DA96507854824`. File/product version is 0.10.1. Generated NSIS includes `ContextDock.ico` at the installation root, notification registration at postinstall and owned identity cleanup on explicit uninstall. The installer was built from pushed main and was not executed against user data.
+
+Actual project sources, application databases, snapshots, archives, backups, credentials and cloud resources were not changed. Temporary notification/startup test entries were cleaned up. Installed upgrade, real sign-out/sign-in, visible banners and clicking installed notifications remain user acceptance checks. No completed GitHub workflow result is claimed.
+
+---
+
 # 0.10.0 - Tray operation, Windows startup and approval inbox
 
 Local release checks passed: **222 native tests**, **143 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. The standard native run leaves three entries ignored: the existing intentionally ignored child fixture and two explicit Windows checks. Both Windows checks were then run separately and passed, bringing distinct native tests/checks passed to **224**. Package/lockfile, Cargo/lockfile and Tauri versions agree at 0.10.0. Schema is 012 and the application identity remains `com.contextdock.desktop`.
