@@ -1786,6 +1786,35 @@ fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
     );
 }
 #[test]
+fn selected_family_without_active_source_preserves_existing_index() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.r.db
+        .execute(
+            "UPDATE documents SET active_source_id=NULL WHERE id=?1",
+            [&f.doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET sync_requested=1", [])
+        .unwrap();
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|call| call.starts_with("DELETE ")));
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
+        "needs_attention"
+    );
+}
+#[test]
 fn resumed_store_before_initial_start_becomes_idle_without_uploading() {
     let mut f = Fixture::new();
     f.apply(f.draft());
