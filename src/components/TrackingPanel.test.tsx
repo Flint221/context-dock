@@ -110,11 +110,14 @@ it("initializes folder-selected sources with archival off by default", async () 
     dialog.getByRole("checkbox", { name: /Also enable automatic archival/ }),
   ).not.toBeChecked();
   expect(dialog.getByText("Technical_Documentation.md")).toBeInTheDocument();
-  expect(dialog.queryByRole("checkbox", { name: "Technical_Documentation.md" })).not.toBeInTheDocument();
+  expect(
+    dialog.queryByRole("checkbox", { name: "Technical_Documentation.md" }),
+  ).not.toBeInTheDocument();
   await user.click(dialog.getByText("Capture selected and enable"));
   await waitFor(() =>
     expect(registry.configureTracking).toHaveBeenCalledWith("p", true, false, [
-      "s1", "s2",
+      "s1",
+      "s2",
     ]),
   );
   await screen.findByRole("button", { name: "Disable tracking" });
@@ -342,7 +345,7 @@ it("shows the filename version as Current separately from the local snapshot cou
   expect(within(row).getByRole("cell", { name: "3" })).toBeInTheDocument();
   const unversioned = screen.getByRole("row", { name: /Readme/ });
   expect(
-    within(unversioned).getByRole("cell", { name: "Capture 2" }),
+    within(unversioned).getByRole("cell", { name: "Working copy" }),
   ).toBeInTheDocument();
 });
 it("holds ambiguous files for an explicit family selection", async () => {

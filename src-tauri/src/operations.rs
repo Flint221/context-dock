@@ -5,7 +5,7 @@ use crate::{
     storage,
     tracking_queries::Source,
 };
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -30,6 +30,8 @@ pub struct CapturePlan {
     pub previous_version: Option<String>,
     pub previous_source: Option<String>,
     pub may_archive: bool,
+    #[serde(default)]
+    pub version_key: Option<String>,
 }
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ArchivePlan {
@@ -257,15 +259,19 @@ impl Registry {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .map_err(error)?;
-        let existing: Option<String> = self
-            .db
-            .query_row(
-                "SELECT id FROM document_versions WHERE document_id=?1 AND sha256=?2",
-                params![source.document_id, staged.hash],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(error)?;
+        if reason != "manual_assignment"
+            && crate::versioning::would_lower(&self.db, &source.document_id, &source.name)?
+        {
+            self.queue_review(source, &staged, vec![source.document_id.clone()], "The filename version decreased. Confirm the document family or restore the higher filename version. Saved history is retained; nothing will be archived or synced until reviewed.")?;
+            return storage::discard_stage(&self.store, &staged.temporary);
+        }
+        let group = crate::versioning::effective(&self.db, &source.document_id, &source.name)?;
+        let existing = crate::versioning::content_match(
+            &self.db,
+            &source.document_id,
+            &staged.hash,
+            &source.name,
+        )?;
         if let Some(version) = existing {
             let tx = self.db.transaction().map_err(error)?;
             activate(
@@ -340,8 +346,9 @@ impl Registry {
             previous_version: previous,
             previous_source: old_source,
             may_archive,
+            version_key: Some(group.clone()),
         };
-        self.db.execute("INSERT INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'capture',?5,?6,?6)",params![id,source.project_id,source.document_id,format!("capture:{}:{}",source.document_id,plan.hash),encode(&plan)?,models::now()]).map_err(error)?;
+        self.db.execute("INSERT INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'capture',?5,?6,?6)",params![id,source.project_id,source.document_id,format!("capture:{}:{}:{}",source.document_id,group,plan.hash),encode(&plan)?,models::now()]).map_err(error)?;
         match self.finish_capture(&id, &plan, false) {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -367,7 +374,11 @@ impl Registry {
         storage::snapshot_seal(&self.store, &plan.temporary, &plan.snapshot)?;
         let source = self.source(&plan.source)?;
         let tx = self.db.transaction().map_err(error)?;
-        tx.execute("INSERT INTO document_versions(id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,reason) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![plan.version,plan.document,plan.number,plan.name,plan.relative,plan.captured_at,plan.modified,plan.size,plan.hash,plan.snapshot,plan.reason]).map_err(error)?;
+        let version_key = match &plan.version_key {
+            Some(key) => key.clone(),
+            None => crate::versioning::effective(&tx, &plan.document, &plan.name)?,
+        };
+        tx.execute("INSERT INTO document_versions(id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,reason,version_key) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![plan.version,plan.document,plan.number,plan.name,plan.relative,plan.captured_at,plan.modified,plan.size,plan.hash,plan.snapshot,plan.reason,version_key]).map_err(error)?;
         activate(
             &tx,
             &source,
@@ -390,13 +401,26 @@ impl Registry {
             params![models::now(), id],
         )
         .map_err(error)?;
+        let revision = plan
+            .previous_version
+            .as_deref()
+            .map(|previous| crate::versioning::same(&tx, previous, &plan.name))
+            .transpose()?
+            .unwrap_or(false);
         event(
             &tx,
             &plan.project,
-            "captured",
+            if revision {
+                "revision_saved"
+            } else {
+                "captured"
+            },
             &format!(
-                "{}: v{} captured and SHA-256 verified ({})",
-                plan.name, plan.number, plan.reason
+                "{}: {} saved and SHA-256 verified (revision #{}, {})",
+                plan.name,
+                crate::matching::version_label(&plan.name).unwrap_or_else(|| "Working copy".into()),
+                plan.number,
+                plan.reason
             ),
         )?;
         tx.commit().map_err(error)?;

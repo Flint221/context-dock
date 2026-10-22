@@ -138,9 +138,15 @@ pub fn view(r: &Registry, p: &str) -> Result<Value> {
     let name: String =
         r.db.query_row("SELECT name FROM projects WHERE id=?1", [p], |v| v.get(0))
             .map_err(error)?;
+    let mut versions = cloud::rows(&r.db,"SELECT v.id,v.document_id document,v.number,v.captured_at capturedAt,d.family_name name,d.current_version_id=v.id current FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 ORDER BY d.family_name,v.number",&[&p])?;
+    let mut published = std::collections::HashSet::new();
+    for family in r.tracking_view(p)?.families {
+        published.extend(crate::versioning::heads(&r.db, &family.id)?);
+    }
+    versions.retain(|v| published.contains(s(v, "id")));
     Ok(
         json!({"projectName":name,"baselines":cloud::rows(&r.db,"SELECT b.*,b.id=c.baseline_id active FROM ai_baselines b LEFT JOIN ai_current_baseline c ON c.project_id=b.project_id WHERE b.project_id=?1 ORDER BY revision DESC",&[&p])?,
-    "versions":cloud::rows(&r.db,"SELECT v.id,v.document_id document,v.number,v.captured_at capturedAt,d.family_name name,d.current_version_id=v.id current FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE d.project_id=?1 ORDER BY d.family_name,v.number",&[&p])?,
+    "versions":versions,
     "reports":cloud::rows(&r.db,"SELECT id,kind,state,created_at,completed_at,error FROM ai_reports WHERE project_id=?1 ORDER BY created_at DESC LIMIT 100",&[&p])?}),
     )
 }

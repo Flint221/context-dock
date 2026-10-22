@@ -432,9 +432,10 @@ pub fn step(
                     return Err(e);
                 }
                 e.message = format!(
-                    "{} (version {}): {} Other files can continue syncing.",
+                    "{} ({}): {} Other files can continue syncing.",
                     s(j, "sourcePath"),
-                    n(j, "number"),
+                    crate::matching::version_label(s(j, "sourcePath"))
+                        .unwrap_or_else(|| format!("saved revision {}", n(j, "number"))),
                     e.message
                 );
                 job_failure(db, j, &e)?;

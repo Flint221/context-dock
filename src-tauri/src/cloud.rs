@@ -74,6 +74,7 @@ pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
     let mut families=rows(db,&format!("SELECT d.id,d.family_name name,d.tracking_state trackingState,({ELIGIBLE}) eligible, EXISTS(SELECT 1 FROM cloud_documents cd WHERE cd.project_id=d.project_id AND cd.document_id=d.id) selected,(SELECT number FROM document_versions WHERE id=d.current_version_id) currentNumber,(SELECT MAX(v.number) FROM cloud_jobs j JOIN document_versions v ON v.id=j.version_id WHERE j.document_id=d.id AND j.state='indexed' AND j.remote_current=1) cloudNumber,(SELECT COUNT(*) FROM document_versions WHERE document_id=d.id) versionCount,(SELECT COALESCE(SUM(size),0) FROM document_versions WHERE document_id=d.id) rawBytes FROM documents d WHERE d.project_id=?1 AND d.merged_into IS NULL ORDER BY d.family_name"),&[&id])?;
     let blocked = crate::path_selection::blocked_documents(db, id)?;
     for family in &mut families {
+        family["versionCount"] = json!(crate::versioning::heads(db, s(family, "id"))?.len());
         let excluded = blocked.contains(s(family, "id"));
         family["pathExcluded"] = json!(excluded as i64);
         // A previously captured selected family must not silently disappear
@@ -162,10 +163,15 @@ fn desired_selection(
         .map_err(error)?
         .collect::<std::result::Result<Vec<_>, _>>()
         .map_err(error)?;
+    let mut heads = std::collections::HashSet::new();
+    for document in &selected {
+        heads.extend(crate::versioning::heads(db, document)?);
+    }
     Ok(versions
         .into_iter()
         .filter(|v| {
-            !blocked.contains(&v.id)
+            heads.contains(&v.id)
+                && !blocked.contains(&v.id)
                 && selected.contains(&v.document)
                 && (draft.mode == "history" || v.current)
         })

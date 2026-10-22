@@ -107,15 +107,22 @@ impl Registry {
                     warnings.push(format!("{} waits for its document history/review to finish. Review organization again afterward.",old.relative));
                     continue;
                 }
-                let version: Option<String> = self
-                    .db
-                    .query_row(
-                        "SELECT id FROM document_versions WHERE document_id=?1 AND sha256=?2",
-                        params![old.document_id, old.last_hash],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(error)?;
+                let version = {
+                    let mut q = self.db.prepare("SELECT id,source_relative FROM document_versions WHERE document_id=?1 AND sha256=?2 ORDER BY number DESC").map_err(error)?;
+                    let rows = q
+                        .query_map(params![old.document_id, old.last_hash], |r| {
+                            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        })
+                        .map_err(error)?
+                        .collect::<std::result::Result<Vec<_>, _>>()
+                        .map_err(error)?;
+                    rows.into_iter()
+                        .find(|(_, relative)| {
+                            crate::path_selection::normalized(relative)
+                                == crate::path_selection::normalized(&old.relative)
+                        })
+                        .map(|(id, _)| id)
+                };
                 let Some(version) = version else {
                     warnings.push(format!(
                         "{} has no matching verified snapshot and will stay in place.",

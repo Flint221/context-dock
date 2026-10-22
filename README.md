@@ -1,3 +1,9 @@
+# Filename versions and save revisions (0.9.1)
+
+Editing or saving `Document_v4.md` or `Document_v4.docx` updates that version's saved revision and cloud content without increasing **Versions**. A higher filename suffix such as `v5` creates the next visible version, including when its bytes match v4. History shows the latest saved revision of each filename version. Earlier snapshots remain intact for recovery and existing evidence links; no old history is deleted. Files without a version suffix remain one working version. A decreasing suffix requires review.
+
+Cloud current/history policies index the latest revision of each selected filename version, replacing outdated revision associations only through the existing verified cloud workflow. Upgrade to schema 011 preserves IDs, snapshots, saved chats and cloud references; older apps must not reopen the upgraded registry. See [filename-version verification](docs/ContextDock_Filename_Versions_v1.md).
+
 # ContextDock 0.9.0 project workspace
 
 Projects now have a sticky header with the project name and **Files & tracking**, **Cloud sync**, and **Ask AI** tabs. Files & tracking opens with saved selection counts, tracked document families, cloud indexing coverage and local issues needing attention. Red marks failures, amber marks indexing or waiting, and green marks completed indexing. Folder selection comes before tracking controls and document lists. Tab changes preserve state and protect unsaved folder choices with the existing save/discard prompt.
@@ -6,7 +12,7 @@ This installer also includes readable archive folders and exact original filenam
 
 # ContextDock
 
-ContextDock 0.9.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.9.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 ## Unified folder selection (0.8.1)
 

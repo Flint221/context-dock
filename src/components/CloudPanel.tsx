@@ -1,3 +1,4 @@
+import { versionName } from "../format";
 import { CloudLink } from "./CloudLink";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -272,9 +273,9 @@ export function CloudPanel({
             configuration is successfully saved.
           </p>
           <p>
-            1. Save and test your OpenAI key in Settings. 2. Select files in
-            the folder tree and enable tracking. 3. Review and confirm cloud
-            changes to start syncing.
+            1. Save and test your OpenAI key in Settings. 2. Select files in the
+            folder tree and enable tracking. 3. Review and confirm cloud changes
+            to start syncing.
           </p>
         </div>
       )}
@@ -295,9 +296,10 @@ export function CloudPanel({
         </div>
       )}
       <p>
-        Cloud sync follows the saved folder selection and uploads tracked documents automatically.
-        Discovery alone never uploads files. Pausing stops the next request; an
-        in-flight request may finish. Local tracking continues independently.
+        Cloud sync follows the saved folder selection and uploads tracked
+        documents automatically. Discovery alone never uploads files. Pausing
+        stops the next request; an in-flight request may finish. Local tracking
+        continues independently.
       </p>
       {view && (
         <>
@@ -397,11 +399,15 @@ export function CloudPanel({
             <div className="cloud-family-list">
               <p>
                 <strong>
-                  Folder-selected tracked documents · {draft.documents.length} eligible
+                  Folder-selected tracked documents · {draft.documents.length}{" "}
+                  eligible
                 </strong>
               </p>
               {selectionMissing && (
-                <p>Select files in the folder tree and enable tracking to continue.</p>
+                <p>
+                  Select files in the folder tree and enable tracking to
+                  continue.
+                </p>
               )}
               {view.families.map((f) => (
                 <div className="cloud-family" key={f.id}>
@@ -604,11 +610,11 @@ export function CloudPanel({
           </p>
           <p>
             Excluding files in the folder tree removes their index entries and
-            retains uploaded Files for re-selection. Turning project Cloud sync off
-            deletes its owned stores and uploaded Files. Document removals run
-            even while uploads stay paused and report success only after remote
-            absence is verified. API data is not used for model training by
-            default. Storage/processing charges may apply, and free storage
+            retains uploaded Files for re-selection. Turning project Cloud sync
+            off deletes its owned stores and uploaded Files. Document removals
+            run even while uploads stay paused and report success only after
+            remote absence is verified. API data is not used for model training
+            by default. Storage/processing charges may apply, and free storage
             allowances are shared across your account.
           </p>
           <p>
@@ -650,7 +656,9 @@ export function CloudPanel({
                     );
                     return;
                   }
-                  const nextAction = afterReview ?? (draft.enabled && !saved.started ? "start" : null);
+                  const nextAction =
+                    afterReview ??
+                    (draft.enabled && !saved.started ? "start" : null);
                   if (nextAction && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
                     await perform(nextAction);
@@ -679,7 +687,8 @@ export function CloudPanel({
           </div>
           <p>
             Confirmation starts initial sync. Changes to an already-started
-            index queue only the changes shown above; a paused index stays paused.
+            index queue only the changes shown above; a paused index stays
+            paused.
           </p>
         </Modal>
       )}
@@ -773,7 +782,8 @@ export function CloudPanel({
                 hits.map((hit, i) => (
                   <article className="cloud-result" key={`${hit.fileId}:${i}`}>
                     <strong>
-                      {hit.familyName} · v{hit.number}
+                      {hit.familyName} ·{" "}
+                      {versionName(hit.sourceName, hit.number)}
                     </strong>
                     <p>
                       Score {hit.score ?? "not supplied"} ·{" "}
@@ -788,15 +798,16 @@ export function CloudPanel({
           <h3>Known cloud versions</h3>
           <p>
             Versions required by the saved folder selection and version policy
-            stay in sync. Files excluded in the folder selection can be selected again
-            to restore their index entries. Uploaded Files remain separate
+            stay in sync. Files excluded in the folder selection can be selected
+            again to restore their index entries. Uploaded Files remain separate
             resources until project cleanup. Failed/uncertain rows require
             reconciliation.
           </p>
           {view.jobs.map((job) => (
             <article className="cloud-result" key={job.id}>
               <strong>
-                {job.familyName} · v{job.number} · {job.state}
+                {job.familyName} · {versionName(job.sourceName, job.number)} ·{" "}
+                {job.state}
               </strong>
               <p>
                 Raw {bytes(job.rawBytes)} · indexed {bytes(job.usage_bytes)} ·{" "}
@@ -823,7 +834,11 @@ export function CloudPanel({
                     job.desired === 1 ||
                     ["removed", "purged"].includes(job.state)
                   }
-                  title={job.desired === 1 ? "Exclude the file in the folder tree or change the version policy first." : undefined}
+                  title={
+                    job.desired === 1
+                      ? "Exclude the file in the folder tree or change the version policy first."
+                      : undefined
+                  }
                   onClick={() => manage("remove", job)}
                 >
                   Remove association

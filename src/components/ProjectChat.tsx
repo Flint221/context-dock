@@ -1,3 +1,4 @@
+import { versionName } from "../format";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageSquare, Plus, Send, Trash2 } from "lucide-react";
 import { chat, type Chat, type ChatSummary } from "../chat";
@@ -236,8 +237,8 @@ export function ProjectChat({
                         >
                           <strong>
                             [{source.citation}]{" "}
-                            {source.sourceName ?? source.familyName} · v
-                            {source.number}
+                            {source.sourceName ?? source.familyName} ·{" "}
+                            {versionName(source.sourceName, source.number)}
                           </strong>
                         </div>
                       ))}

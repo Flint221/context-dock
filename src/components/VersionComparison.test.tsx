@@ -242,7 +242,7 @@ it("keeps one dialog across repeated history transitions and ignores responses a
       close={vi.fn()}
     />,
   );
-  await screen.findByText(/Capture a second version/);
+  await screen.findByText(/Increase the filename version/);
   await act(async () => finish(result));
   expect(screen.queryByText("New goal")).not.toBeInTheDocument();
   expect(screen.getAllByRole("dialog")).toHaveLength(1);
@@ -303,4 +303,29 @@ it("reports version-loading failure without a permanent spinner", async () => {
   expect(
     await screen.findByRole("button", { name: "Compare Versions" }),
   ).toBeEnabled();
+});
+
+it("shows the filename version for a frequently saved document without presenting revisions as versions", async () => {
+  vi.mocked(registry.versions).mockResolvedValue([
+    { ...versions[0], number: 97, sourceName: "Master_v4.md" },
+  ]);
+  render(
+    <DocumentHistory
+      family={{
+        ...family,
+        currentNumber: 97,
+        currentLabel: "v4",
+        versionCount: 1,
+      }}
+      close={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByText("v4", { selector: "strong" }),
+  ).toBeInTheDocument();
+  expect(screen.queryByText("v97")).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Compare Versions" }),
+  ).not.toBeInTheDocument();
+  expect(screen.getByText(/Increase the filename version/)).toBeInTheDocument();
 });

@@ -236,6 +236,8 @@ export function TrackingPanel({
           </h2>
           <p>
             Discovery reads metadata. Tracking saves immutable local snapshots.
+            Same-version saves sync as revisions without increasing Versions.
+            Increase the filename suffix (v4 → v5) to create a new version.
             Archival organizes replaced sources.
           </p>
         </div>
@@ -440,9 +442,7 @@ export function TrackingPanel({
                             }
                           >
                             {f.currentLabel ||
-                              (f.currentNumber
-                                ? `Capture ${f.currentNumber}`
-                                : "—")}
+                              (f.currentNumber ? "Working copy" : "—")}
                           </td>
                           <td>{f.versionCount}</td>
                           <td>{date(f.lastCaptured)}</td>

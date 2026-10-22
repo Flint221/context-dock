@@ -84,7 +84,7 @@ impl Registry {
             )
             .map_err(error)?;
         let mut q=self.db.prepare("SELECT d.id,d.family_name,d.kind,d.tracking_state,d.active_source_id,COALESCE(s.name,(SELECT source_name FROM document_versions WHERE id=d.current_version_id)),s.status,v.number,(SELECT COUNT(*) FROM document_versions h WHERE h.document_id=d.id),(SELECT MAX(captured_at) FROM document_versions h WHERE h.document_id=d.id),EXISTS(SELECT 1 FROM pending_matches m JOIN source_files f ON f.id=m.source_id WHERE f.document_id=d.id) FROM documents d LEFT JOIN source_files s ON s.id=d.active_source_id LEFT JOIN document_versions v ON v.id=d.current_version_id WHERE d.project_id=?1 AND (d.merged_into IS NULL OR d.tracking_state='grouped_history') ORDER BY d.family_name COLLATE NOCASE").map_err(error)?;
-        let families = q
+        let mut families = q
             .query_map([project], |r| {
                 let active_filename: Option<String> = r.get(5)?;
                 let current_label = active_filename
@@ -108,6 +108,9 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
+        for family in &mut families {
+            family.version_count = crate::versioning::heads(&self.db, &family.id)?.len() as i64;
+        }
         let mut q=self.db.prepare("SELECT id,document_id,name,relative_path,status,disposition FROM source_files WHERE project_id=?1 AND status!='archived' ORDER BY relative_path COLLATE NOCASE").map_err(error)?;
         let sources = q
             .query_map([project], |r| {
@@ -237,6 +240,14 @@ impl Registry {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
         Ok(rows)
+    }
+    pub fn published_versions(&self, document: &str) -> Result<Vec<Version>> {
+        let heads = crate::versioning::heads(&self.db, document)?;
+        Ok(self
+            .versions(document)?
+            .into_iter()
+            .filter(|v| heads.contains(&v.id))
+            .collect())
     }
     pub fn version_location(&self, version: &str, archive: bool) -> Result<String> {
         let(project,snapshot,relative,hash):(String,String,Option<String>,String)=self.db.query_row("SELECT d.project_id,v.snapshot_relative,v.archive_relative,v.sha256 FROM document_versions v JOIN documents d ON d.id=v.document_id WHERE v.id=?1",[version],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).map_err(error)?;

@@ -1,3 +1,4 @@
+import { versionName } from "../format";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { registry } from "../services/registry";
 import type { Version } from "../types";
@@ -7,7 +8,7 @@ import { OperationStatus } from "./OperationStatus";
 
 const PAGE_SIZE = 100;
 function label(v: Version) {
-  return `v${v.number} · ${date(v.capturedAt)} · ${v.sourceName}`;
+  return `${versionName(v.sourceName, v.number)} · ${date(v.capturedAt)} · ${v.sourceName}`;
 }
 type Row = { left: DiffLine | null; right: DiffLine | null };
 // Pair replacement regions; a single-sided insertion/removal keeps the opposite side blank.
@@ -167,7 +168,7 @@ export function VersionComparison({
     if (!result) return;
     try {
       const value = summary
-        ? `${result.documentName}: v${result.earlier.number} → v${result.later.number}. ${result.addedLines} lines added, ${result.removedLines} removed, ${result.changedBlocks} change blocks. Text ${result.textEquivalent ? "equivalent" : "differs"}; bytes ${result.bytesIdentical ? "identical" : "differ"}.`
+        ? `${result.documentName}: ${versionName(result.earlier.sourceName, result.earlier.number)} → ${versionName(result.later.sourceName, result.later.number)}. ${result.addedLines} lines added, ${result.removedLines} removed, ${result.changedBlocks} change blocks. Text ${result.textEquivalent ? "equivalent" : "differs"}; bytes ${result.bytesIdentical ? "identical" : "differ"}.`
         : result.blocks
             .filter((b) => b.kind === "change")
             .flatMap((b) =>
@@ -280,7 +281,8 @@ export function VersionComparison({
         <>
           <div className="diff-summary" role="status">
             <strong>
-              v{result.earlier.number} → v{result.later.number}
+              {versionName(result.earlier.sourceName, result.earlier.number)} →{" "}
+              {versionName(result.later.sourceName, result.later.number)}
             </strong>
             <span>+{result.addedLines} lines added</span>
             <span>−{result.removedLines} lines removed</span>
@@ -396,8 +398,17 @@ export function VersionComparison({
             {mode === "split" ? (
               <>
                 <div className="diff-row diff-column-head">
-                  <strong>Earlier · v{result.earlier.number}</strong>
-                  <strong>Later · v{result.later.number}</strong>
+                  <strong>
+                    Earlier ·{" "}
+                    {versionName(
+                      result.earlier.sourceName,
+                      result.earlier.number,
+                    )}
+                  </strong>
+                  <strong>
+                    Later ·{" "}
+                    {versionName(result.later.sourceName, result.later.number)}
+                  </strong>
                 </div>
                 {rows.slice(start, start + PAGE_SIZE).map((row, i) => (
                   <div className="diff-row" key={start + i}>

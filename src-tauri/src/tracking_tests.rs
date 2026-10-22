@@ -271,7 +271,8 @@ fn current_filename_label_is_independent_of_snapshot_count_and_cloud_sequence() 
     let family = view.families.iter().find(|x| x.id == id).unwrap();
     assert_eq!(family.current_label.as_deref(), Some("v6"));
     assert_eq!(family.current_number, Some(4));
-    assert_eq!(family.version_count, 4);
+    assert_eq!(family.version_count, 3);
+    assert_eq!(f.r.published_versions(&id).unwrap().len(), 3);
 }
 
 #[test]
@@ -385,7 +386,7 @@ fn initial_grouping_respects_selection_ambiguity_and_identical_bytes() {
     f.r.configure_tracking(&f.project, true, false, ids)
         .unwrap();
     assert_eq!(f.document("Report_v1.md"), f.document("Report_v2.md"));
-    assert_eq!(f.count(&f.document("Report_v1.md")), 1);
+    assert_eq!(f.count(&f.document("Report_v1.md")), 2);
     assert_eq!(
         f.r.tracking_view(&f.project)
             .unwrap()
@@ -782,6 +783,7 @@ fn capture_recovers_before_and_after_finalization_without_duplicate_versions() {
             previous_version: None,
             previous_source: None,
             may_archive: false,
+            version_key: None,
         };
         f.r.db.execute("INSERT INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?1,'capture',?4,?5,?5)",rusqlite::params![id,f.project,plan.document,serde_json::to_string(&plan).unwrap(),models::now()]).unwrap();
         if phase > 0 {
@@ -1163,4 +1165,121 @@ fn archive_copy_recovers_partial_staging_and_final_link_without_touching_current
         }
         assert!(f.r.recover_operations(&f.project, true).unwrap().is_empty());
     }
+}
+
+#[test]
+fn repeated_markdown_and_word_saves_are_revisions_until_filename_version_increases() {
+    let mut f = Fixture::new(&[
+        ("Notes_v4.md", "Original"),
+        ("Spec_v4.docx", "original docx bytes"),
+    ]);
+    f.enable(false);
+    let ids = [f.document("Notes_v4.md"), f.document("Spec_v4.docx")];
+    let first = ids
+        .iter()
+        .map(|id| f.r.versions(id).unwrap()[0].snapshot_path.clone())
+        .collect::<Vec<_>>();
+    for n in 0..12 {
+        fs::write(
+            f.root.join("Notes_v4.md"),
+            format!("Capitalization edit {n}"),
+        )
+        .unwrap();
+        fs::write(
+            f.root.join("Spec_v4.docx"),
+            format!("Picture position and package metadata {n}"),
+        )
+        .unwrap();
+        f.scan();
+        for id in &ids {
+            assert_eq!(f.r.published_versions(id).unwrap().len(), 1);
+            let view = f.r.tracking_view(&f.project).unwrap();
+            let family = view
+                .families
+                .iter()
+                .find(|family| &family.id == id)
+                .unwrap();
+            assert_eq!(family.version_count, 1);
+            assert_eq!(family.current_label.as_deref(), Some("v4"));
+        }
+    }
+    assert_eq!(fs::read_to_string(&first[0]).unwrap(), "Original");
+    assert_eq!(
+        fs::read_to_string(&first[1]).unwrap(),
+        "original docx bytes"
+    );
+    let count = f.r.versions(&ids[0]).unwrap().len();
+    fs::OpenOptions::new()
+        .write(true)
+        .open(f.root.join("Notes_v4.md"))
+        .unwrap()
+        .set_modified(std::time::SystemTime::now())
+        .unwrap();
+    f.scan();
+    assert_eq!(f.r.versions(&ids[0]).unwrap().len(), count);
+    let db = f.r.store.join("registry.db");
+    f.r = Registry::open(&db).unwrap();
+    f.scan();
+    for id in &ids {
+        assert_eq!(f.r.published_versions(id).unwrap().len(), 1);
+    }
+    // A filename bump counts even when the exported bytes are unchanged.
+    fs::rename(f.root.join("Notes_v4.md"), f.root.join("Notes_v5.md")).unwrap();
+    f.scan();
+    assert_eq!(f.r.published_versions(&ids[0]).unwrap().len(), 2);
+    let latest = f.r.published_versions(&ids[0]).unwrap();
+    assert_eq!(latest[0].source_name, "Notes_v5.md");
+    assert_eq!(latest[0].sha256, latest[1].sha256);
+    // Reverting v5 to v4 bytes still updates v5, rather than reusing v4's identity.
+    fs::write(f.root.join("Notes_v5.md"), "Original").unwrap();
+    f.scan();
+    let versions = f.r.published_versions(&ids[0]).unwrap();
+    assert_eq!(versions.len(), 2);
+    assert_eq!(
+        versions.iter().find(|v| v.current).unwrap().source_name,
+        "Notes_v5.md"
+    );
+}
+#[test]
+fn unnumbered_saves_and_equivalent_numeric_labels_do_not_inflate_versions() {
+    assert_eq!(
+        crate::versioning::key("Notes_v04.0.md"),
+        crate::versioning::key("Notes_v4.md")
+    );
+    assert_ne!(
+        crate::versioning::key("Notes_v4.1.md"),
+        crate::versioning::key("Notes_v4.md")
+    );
+    let mut f = Fixture::new(&[("Working.md", "first")]);
+    f.enable(false);
+    let id = f.document("Working.md");
+    fs::write(f.root.join("Working.md"), "second").unwrap();
+    f.scan();
+    fs::write(f.root.join("Working.md"), "first").unwrap();
+    f.scan();
+    assert_eq!(f.r.published_versions(&id).unwrap().len(), 1);
+    let saved = f.r.published_versions(&id).unwrap();
+    assert_eq!(
+        fs::read_to_string(&saved[0].snapshot_path).unwrap(),
+        "first"
+    );
+    assert!(saved[0].current);
+}
+
+#[test]
+fn lowering_a_filename_version_requires_review_without_inflating_its_history() {
+    let mut f = Fixture::new(&[("Notes_v4.md", "four")]);
+    f.enable(false);
+    let id = f.document("Notes_v4.md");
+    fs::rename(f.root.join("Notes_v4.md"), f.root.join("Notes_v3.md")).unwrap();
+    fs::write(f.root.join("Notes_v3.md"), "older content").unwrap();
+    f.scan();
+    assert_eq!(f.r.published_versions(&id).unwrap().len(), 1);
+    let view = f.r.tracking_view(&f.project).unwrap();
+    assert_eq!(view.reviews.len(), 1);
+    assert!(view.reviews[0].explanation.contains("decreased"));
+    assert_eq!(
+        fs::read_to_string(&f.r.versions(&id).unwrap()[0].snapshot_path).unwrap(),
+        "four"
+    );
 }

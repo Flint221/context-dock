@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Copy, FolderOpen } from "lucide-react";
 import type { Family, Version } from "../types";
 import { registry } from "../services/registry";
-import { date, displayPath, size } from "../format";
+import { versionName, date, displayPath, size } from "../format";
 import { Modal } from "./Modal";
 import { VersionComparison } from "./VersionComparison";
 export function DocumentHistory({
@@ -62,8 +62,9 @@ export function DocumentHistory({
       ) : (
         <>
           <p>
-            Each captured version preserves exact file bytes. Opening a saved
-            location verifies its SHA-256 hash first.
+            Each filename version shows its latest saved revision. Earlier
+            snapshots stay preserved locally. Opening a saved location verifies
+            its SHA-256 hash first.
           </p>
           <div className="history-actions">
             <button
@@ -91,8 +92,9 @@ export function DocumentHistory({
           {notice && <p role="status">{notice}</p>}
           {versions?.length === 1 ? (
             <p>
-              Capture a second version to compare changes. Identical file bytes
-              reuse their existing captured version.
+              Increase the filename version (for example v4 to v5) to compare
+              versions. Identical file bytes reuse their existing captured
+              version.
             </p>
           ) : null}
           {error && (
@@ -115,7 +117,7 @@ export function DocumentHistory({
               {versions.map((v) => (
                 <article className="version-card" key={v.id}>
                   <div className="section-heading">
-                    <strong>v{v.number}</strong>
+                    <strong>{versionName(v.sourceName, v.number)}</strong>
                     <span className={`badge ${v.current ? "available" : ""}`}>
                       {v.current
                         ? "Current"

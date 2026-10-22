@@ -323,7 +323,7 @@ fn bad_word_reports_path_and_reason_while_other_files_finish_without_retry_loop(
         s(failed, "error").contains("Drafts\\Bad.docx")
             || s(failed, "error").contains("Drafts/Bad.docx")
     );
-    assert!(s(failed, "error").contains("version 1"));
+    assert!(s(failed, "error").contains("saved revision 1"));
     assert!(s(failed, "error").contains("end directory is missing"));
     assert_eq!(
         s(
@@ -469,6 +469,21 @@ impl Fixture {
         for _ in 0..7 {
             self.step(api);
         }
+    }
+    fn bump(&mut self) {
+        fs::rename(
+            self.root.join("Master_Context.md"),
+            self.root.join("Master_Context_v2.md"),
+        )
+        .unwrap();
+        fs::write(
+            self.root.join("Master_Context_v2.md"),
+            "# Explicit filename version two",
+        )
+        .unwrap();
+        self.r
+            .reconcile(&self.id, "manual_refresh", &HashSet::new(), true)
+            .unwrap();
     }
     fn edit(&mut self) {
         fs::write(
@@ -819,7 +834,7 @@ fn credentials_are_validated_without_echoing_input() {
 #[test]
 fn history_policy_round_trip_detaches_and_restores_original_captures_without_duplicate_files() {
     let mut f = Fixture::new();
-    f.edit();
+    f.bump();
     let api = Mock::default();
     let mut history = f.draft();
     history.mode = "history".into();
@@ -916,7 +931,7 @@ fn folder_selection_round_trip_removes_all_family_versions_while_paused_and_rest
 ) {
     use std::sync::{atomic::AtomicBool, Arc};
     let mut f = Fixture::new();
-    f.edit();
+    f.bump();
     fs::write(f.root.join("Other.md"), "Independent family").unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
@@ -949,7 +964,7 @@ fn folder_selection_round_trip_removes_all_family_versions_while_paused_and_rest
     f.r.db
         .execute("UPDATE cloud_projects SET paused=1,sync_requested=0", [])
         .unwrap();
-    f.exclude_file("Master_Context.md");
+    f.exclude_file("Master_Context_v2.md");
     assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 2);
     assert_eq!(
         n(&cloud::project(&f.r.db, &f.id).unwrap(), "sync_requested"),
@@ -980,7 +995,7 @@ fn folder_selection_round_trip_removes_all_family_versions_while_paused_and_rest
         .all(|c| c.starts_with("GET ") || c.starts_with("DELETE /vector_stores/vs_test/files/")));
     assert_eq!(api.0.borrow().files.len(), 3);
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "paused"), 1);
-    f.select_file("Master_Context.md");
+    f.select_file("Master_Context_v2.md");
     f.step(&api);
     assert_eq!(api.0.borrow().associations.len(), 1);
     f.r.db
@@ -1408,7 +1423,7 @@ fn history_policy_reattaches_a_completed_current_only_replacement() {
     f.enable();
     let api = Mock::default();
     f.sync(&api);
-    f.edit();
+    f.bump();
     f.r.db
         .execute("UPDATE cloud_projects SET sync_requested=1", [])
         .unwrap();
@@ -1430,7 +1445,7 @@ fn history_mode_keeps_both_versions_and_sets_current_metadata() {
     f.enable();
     let api = Mock::default();
     f.sync(&api);
-    f.edit();
+    f.bump();
     let mut d = f.draft();
     d.mode = "history".into();
     f.apply(d);
@@ -2300,7 +2315,7 @@ fn path_exclusions_filter_historical_versions_and_block_questions_until_cloud_re
     let api = Mock::default();
     f.enable();
     f.sync(&api);
-    f.edit();
+    f.bump();
     let mut draft = f.draft();
     draft.mode = "history".into();
     f.apply(draft);
@@ -2698,4 +2713,168 @@ fn disconnect_key_requires_active_project_cleanup_before_any_vault_access() {
         cloud::rows(&f.r.db, "SELECT status FROM cloud_connection", &[]).unwrap()[0]["status"],
         "connected"
     );
+}
+
+#[test]
+fn same_version_saves_replace_cloud_content_in_current_and_history_modes() {
+    for mode in ["current", "history"] {
+        let mut f = Fixture::new();
+        fs::write(f.root.join("Illustrated_v4.docx"), word_package(5)).unwrap();
+        f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+            .unwrap();
+        f.select_file("Illustrated_v4.docx");
+        let word =
+            f.r.snapshot()
+                .unwrap()
+                .documents
+                .into_iter()
+                .find(|d| d.name == "Illustrated_v4.docx")
+                .unwrap()
+                .document_id;
+        let mut draft = f.draft();
+        draft.mode = mode.into();
+        draft.documents.push(word.clone());
+        f.apply(draft);
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET started=1,paused=0,sync_requested=1",
+                [],
+            )
+            .unwrap();
+        let api = Mock::default();
+        for _ in 0..12 {
+            f.step(&api);
+        }
+        assert_eq!(api.0.borrow().associations.len(), 2);
+        let old = f.r.published_versions(&word).unwrap()[0].id.clone();
+        // Changing only the image/package bytes must sync, but stay at v4.
+        let edited = word_package(7);
+        fs::write(f.root.join("Illustrated_v4.docx"), &edited).unwrap();
+        f.edit();
+        f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+            .unwrap();
+        assert_eq!(f.r.published_versions(&word).unwrap().len(), 1);
+        assert_ne!(f.r.published_versions(&word).unwrap()[0].id, old);
+        f.r.db
+            .execute("UPDATE cloud_projects SET sync_requested=1", [])
+            .unwrap();
+        for _ in 0..20 {
+            f.step(&api);
+        }
+        assert_eq!(api.0.borrow().associations.len(), 2);
+        assert!(api
+            .0
+            .borrow()
+            .files
+            .iter()
+            .any(|(_, bytes)| bytes == &edited));
+        assert!(api
+            .0
+            .borrow()
+            .associations
+            .iter()
+            .all(|a| a["attributes"]["version"] != old));
+        assert_eq!(
+            cloud::families(&f.r.db, &f.id)
+                .unwrap()
+                .iter()
+                .find(|d| s(d, "id") == word)
+                .unwrap()["versionCount"],
+            1
+        );
+        assert_eq!(f.r.versions(&word).unwrap().len(), 2);
+        let originals = f.r.versions(&word).unwrap();
+        assert_eq!(
+            fs::read(&originals[1].snapshot_path).unwrap(),
+            word_package(5)
+        );
+        assert!(
+            f.r.db
+                .query_row("SELECT COUNT(*) FROM document_versions", [], |r| r
+                    .get::<_, i64>(0))
+                .unwrap()
+                >= 4
+        );
+    }
+}
+
+#[test]
+fn schema_ten_upgrade_preserves_snapshot_and_cloud_references_and_allows_identical_exports() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let before = cloud::rows(&f.r.db, "SELECT id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,archive_relative,reason FROM document_versions", &[]).unwrap();
+    let jobs = f.jobs();
+    let installation = cloud::install(&f.r.db).unwrap();
+    let bytes = fs::read(&f.r.versions(&f.doc).unwrap()[0].snapshot_path).unwrap();
+    f.r.db.execute_batch("ALTER TABLE document_versions DROP COLUMN version_key; DROP INDEX version_content_lookup; CREATE UNIQUE INDEX legacy_content_unique ON document_versions(document_id,sha256); PRAGMA user_version=10;").unwrap();
+    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    assert_eq!(
+        cloud::rows(&f.r.db, "SELECT id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,archive_relative,reason FROM document_versions", &[]).unwrap(),
+        before
+    );
+    assert_eq!(f.jobs(), jobs);
+    assert_eq!(cloud::install(&f.r.db).unwrap(), installation);
+    assert_eq!(
+        fs::read(&f.r.versions(&f.doc).unwrap()[0].snapshot_path).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        f.r.db
+            .query_row("PRAGMA foreign_keys", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+    assert!(cloud::rows(&f.r.db, "PRAGMA foreign_key_check", &[])
+        .unwrap()
+        .is_empty());
+    fs::rename(
+        f.root.join("Master_Context.md"),
+        f.root.join("Master_Context_v2.md"),
+    )
+    .unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(f.r.published_versions(&f.doc).unwrap().len(), 2);
+    assert_eq!(
+        f.r.versions(&f.doc).unwrap()[0].sha256,
+        f.r.versions(&f.doc).unwrap()[1].sha256
+    );
+}
+
+#[test]
+fn revision_migration_rolls_back_when_old_history_references_are_invalid() {
+    let f = Fixture::new();
+    let db = f.r.store.join("test.db");
+    f.r.db.execute_batch("PRAGMA foreign_keys=OFF; ALTER TABLE document_versions DROP COLUMN version_key; DROP INDEX version_content_lookup; CREATE UNIQUE INDEX legacy_content_unique ON document_versions(document_id,sha256); PRAGMA user_version=10;").unwrap();
+    f.r.db
+        .execute(
+            "INSERT INTO cloud_exclusions(project_id,version_id) VALUES(?1,'missing-version')",
+            [&f.id],
+        )
+        .unwrap();
+    assert!(Registry::open(&db)
+        .err()
+        .unwrap()
+        .contains("No migration changes were committed"));
+    assert_eq!(
+        f.r.db
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        10
+    );
+    let columns = cloud::rows(&f.r.db, "PRAGMA table_info(document_versions)", &[]).unwrap();
+    assert!(!columns.iter().any(|c| s(c, "name") == "version_key"));
+    assert_eq!(
+        f.r.db
+            .query_row(
+                "SELECT COUNT(*) FROM cloud_exclusions WHERE version_id='missing-version'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        1
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
 }

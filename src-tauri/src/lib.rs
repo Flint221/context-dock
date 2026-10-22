@@ -48,6 +48,7 @@ mod tracking_models;
 mod tracking_queries;
 #[cfg(test)]
 mod tracking_tests;
+mod versioning;
 use models::Snapshot;
 use registry::Registry;
 use std::{
@@ -243,7 +244,10 @@ async fn document_versions(
     state: tauri::State<'_, Store>,
     document: String,
 ) -> Result<Vec<tracking_models::Version>, String> {
-    work(state.inner().clone(), move |r| r.versions(&document)).await
+    work(state.inner().clone(), move |r| {
+        r.published_versions(&document)
+    })
+    .await
 }
 #[tauri::command]
 async fn compare_versions(

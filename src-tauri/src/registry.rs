@@ -21,13 +21,23 @@ impl Registry {
             "PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;",
         )
         .map_err(error)?;
+        let version: i64 = db
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(error)?;
+        if version > 11 {
+            return Err("This database requires a newer ContextDock version.".into());
+        }
+        if version < 11 {
+            db.pragma_update(None, "foreign_keys", false)
+                .map_err(error)?;
+        }
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 10 {
+        if version > 11 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -75,8 +85,24 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/010_unified_selection.sql"))
                 .map_err(error)?;
         }
-        tx.pragma_update(None, "user_version", 10).map_err(error)?;
+        if version < 11 {
+            tx.execute_batch(include_str!("../migrations/011_save_revisions.sql"))
+                .map_err(error)?;
+        }
+        let invalid: bool = tx
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if invalid {
+            return Err("Registry migration found invalid history references. No migration changes were committed.".into());
+        }
+        tx.pragma_update(None, "user_version", 11).map_err(error)?;
         tx.commit().map_err(error)?;
+        db.pragma_update(None, "foreign_keys", true)
+            .map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
         Ok(Self { db, store })

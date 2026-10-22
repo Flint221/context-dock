@@ -466,7 +466,7 @@ impl Registry {
             .map_err(error)?;
         Ok(())
     }
-    fn queue_review(
+    pub(crate) fn queue_review(
         &self,
         source: &Source,
         stage: &storage::Staged,
