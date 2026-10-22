@@ -787,8 +787,8 @@ export function CloudPanel({
           )}
           <h3>Known cloud versions</h3>
           <p>
-            Individually removed versions stay excluded from automatic sync.
-            Files excluded in the folder selection can be selected again
+            Versions required by the saved folder selection and version policy
+            stay in sync. Files excluded in the folder selection can be selected again
             to restore their index entries. Uploaded Files remain separate
             resources until project cleanup. Failed/uncertain rows require
             reconciliation.
@@ -820,8 +820,10 @@ export function CloudPanel({
                   disabled={
                     busy ||
                     !job.file_id ||
+                    job.desired === 1 ||
                     ["removed", "purged"].includes(job.state)
                   }
+                  title={job.desired === 1 ? "Exclude the file in the folder tree or change the version policy first." : undefined}
                   onClick={() => manage("remove", job)}
                 >
                   Remove association

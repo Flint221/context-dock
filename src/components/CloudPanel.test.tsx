@@ -605,6 +605,14 @@ it("shows an actionable configuration failure inside its consent dialog", async 
   );
   expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeEnabled();
 });
+it("prevents removing an association still required by folder selection", async () => {
+  view.enabled = 1;
+  view.jobs = [{ id: "j1", version_id: "v1", desired: 1, file_id: "file-owned", familyName: "Master Context", number: 1, state: "indexed", error: null, usage_bytes: 42, rawBytes: 100 }];
+  const user = userEvent.setup();
+  render(<CloudPanel project="p1" />);
+  await user.click(await screen.findByRole("button", { name: "View Cloud Index / Test Search" }));
+  expect(screen.getByRole("button", { name: "Remove association" })).toBeDisabled();
+});
 it("allows an explicitly confirmed association cleanup while sync is paused without resuming uploads", async () => {
   const user = userEvent.setup();
   view.enabled = 0;
