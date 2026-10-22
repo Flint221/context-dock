@@ -19,6 +19,10 @@ struct Remote {
     calls: Vec<String>,
     fail: Option<ApiError>,
     processing: bool,
+    omit_create_attributes: bool,
+    attribute_reads_pending: usize,
+    omit_list_attributes: bool,
+    create_mismatch: Option<&'static str>,
     ignore_store_delete: bool,
     shared_file: bool,
     lose_file_delete_reply: bool,
@@ -99,12 +103,28 @@ impl CloudApi for Mock {
                 r.associations.clear();
                 return Err(missing());
             }
-            return Ok(json!({"data":r.associations,"has_more":false}));
+            let mut entries = r.associations.clone();
+            if r.omit_list_attributes {
+                for entry in &mut entries {
+                    entry["attributes"] = Value::Null;
+                }
+            }
+            return Ok(json!({"data":entries,"has_more":false}));
         }
         if path == "/vector_stores/vs_test/files" && method == "POST" {
             let body = body.unwrap();
-            let v = json!({"id":body["file_id"],"vector_store_id":"vs_test","attributes":body["attributes"],"status":if r.processing{"in_progress"}else{"completed"},"usage_bytes":42});
+            let mut v = json!({"id":body["file_id"],"vector_store_id":"vs_test","attributes":body["attributes"],"status":if r.processing{"in_progress"}else{"completed"},"usage_bytes":42});
             r.associations.push(v.clone());
+            if r.omit_create_attributes {
+                v["attributes"] = Value::Null;
+            }
+            if let Some(field) = r.create_mismatch {
+                if matches!(field, "id" | "vector_store_id") {
+                    v[field] = json!("foreign");
+                } else {
+                    v["attributes"][field] = json!("foreign");
+                }
+            }
             return Ok(v);
         }
         if let Some(file) = path.strip_prefix("/vector_stores/vs_test/files/") {
@@ -124,7 +144,14 @@ impl CloudApi for Mock {
                     r.associations[index]["attributes"] = body.unwrap()["attributes"].clone();
                     Ok(r.associations[index].clone())
                 }
-                _ => Ok(r.associations[index].clone()),
+                _ => {
+                    let mut v = r.associations[index].clone();
+                    if r.attribute_reads_pending > 0 {
+                        r.attribute_reads_pending -= 1;
+                        v["attributes"] = Value::Null;
+                    }
+                    Ok(v)
+                }
             };
         }
         if let Some(file) = path.strip_prefix("/files/") {
@@ -1389,6 +1416,200 @@ fn repeated_sync_deduplicates_store_files_and_associations() {
             .count(),
         1
     );
+}
+#[test]
+fn incomplete_attachment_receipt_is_retrieved_without_a_second_sync_or_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().omit_create_attributes = true;
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    let remote = api.0.borrow();
+    assert_eq!(remote.files.len(), 1);
+    assert_eq!(remote.associations.len(), 1);
+    assert_eq!(
+        remote
+            .calls
+            .iter()
+            .filter(|c| *c == "POST /vector_stores/vs_test/files")
+            .count(),
+        1
+    );
+    assert!(!remote.calls.iter().any(|c| c.starts_with("DELETE ")));
+}
+#[test]
+fn delayed_word_verification_survives_restart_and_other_files_keep_syncing() {
+    let mut f = Fixture::new();
+    let bytes = word_package(13 * 1024 * 1024);
+    fs::write(f.root.join("Illustrated_v1.docx"), &bytes).unwrap();
+    f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
+        .unwrap();
+    f.select_file("Illustrated_v1.docx");
+    f.enable();
+    let api = Mock::default();
+    {
+        let mut r = api.0.borrow_mut();
+        r.omit_create_attributes = true;
+        r.attribute_reads_pending = 20;
+    }
+    f.sync(&api);
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexing"));
+    assert!(f.jobs().iter().all(|j| s(j, "error").is_empty()));
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 0);
+    assert!(crate::chat::authorize(&f.r.db, &f.id, "bound").is_err());
+    api.0.borrow_mut().attribute_reads_pending = 0;
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET next_at=?1",
+            [chrono::Utc::now().timestamp() + 3600],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET next_at=0 WHERE document_id=?1",
+            [&f.doc],
+        )
+        .unwrap();
+    f.sync(&api);
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 1);
+    assert!(f
+        .jobs()
+        .iter()
+        .any(|j| s(j, "state") == "indexing" && s(j, "sourcePath").ends_with(".docx")));
+    // A fresh connection models restart; neither sync nor retry is requested.
+    let mut db = cloud::connect(&f.r.store.join("test.db")).unwrap();
+    api.0.borrow_mut().attribute_reads_pending = 20;
+    api.0.borrow_mut().omit_list_attributes = true;
+    // Reconciliation on restart must hydrate list entries before verifying them.
+    db.execute("UPDATE cloud_projects SET reconcile_requested=1", [])
+        .unwrap();
+    cloud_sync::step(&mut db, &f.r.store, &f.id, &api, "bound").unwrap();
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexing"));
+    api.0.borrow_mut().attribute_reads_pending = 0;
+    db.execute("UPDATE cloud_jobs SET next_at=0", []).unwrap();
+    for _ in 0..7 {
+        cloud_sync::step(&mut db, &f.r.store, &f.id, &api, "bound").unwrap();
+    }
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexed"));
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|c| *c == "UPLOAD")
+            .count(),
+        2
+    );
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c.starts_with("DELETE ")));
+    assert_eq!(fs::read(f.root.join("Illustrated_v1.docx")).unwrap(), bytes);
+}
+#[test]
+fn incomplete_verification_is_bounded_and_does_not_authorize_deletion() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().omit_create_attributes = true;
+    api.0.borrow_mut().attribute_reads_pending = 1000;
+    api.0.borrow_mut().omit_list_attributes = true;
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "association_status"), "verifying");
+    let job = f.jobs().remove(0);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert!(cloud_sync::remove_owned(&f.r.db, &p, &job, &api).is_err());
+    f.r.db
+        .execute("UPDATE cloud_jobs SET poll_count=120,next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    let job = f.jobs().remove(0);
+    assert_eq!(s(&job, "state"), "failed");
+    assert!(
+        s(&job, "error").contains("verification attributes are still incomplete after 120 polls")
+    );
+    assert!(s(&job, "error").contains("Master_Context.md"));
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c.starts_with("DELETE ")));
+    assert_eq!(api.0.borrow().files.len(), 1);
+}
+#[test]
+fn partial_attributes_wait_but_a_present_conflicting_hash_fails() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    api.0.borrow_mut().processing = true;
+    f.sync(&api);
+    api.0.borrow_mut().associations[0]["attributes"]
+        .as_object_mut()
+        .unwrap()
+        .remove("sha256");
+    f.r.db
+        .execute("UPDATE cloud_jobs SET next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(s(&f.jobs()[0], "association_status"), "verifying");
+    api.0.borrow_mut().associations[0]["attributes"]["sha256"] = json!("foreign");
+    f.r.db
+        .execute("UPDATE cloud_jobs SET next_at=0", [])
+        .unwrap();
+    f.step(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "failed");
+    assert!(s(&f.jobs()[0], "error").contains("sha256"));
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c.starts_with("DELETE ")));
+}
+#[test]
+fn actual_attachment_identity_conflicts_fail_without_retrying_or_overwriting_attributes() {
+    for field in [
+        "id",
+        "vector_store_id",
+        "contextdock",
+        "project",
+        "document",
+        "version",
+        "sha256",
+    ] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        api.0.borrow_mut().create_mismatch = Some(field);
+        f.sync(&api);
+        let job = f.jobs().remove(0);
+        assert_eq!(s(&job, "state"), "failed", "{field}");
+        assert!(s(&job, "error").contains(field));
+        assert_eq!(api.0.borrow().files.len(), 1);
+        assert_eq!(
+            api.0
+                .borrow()
+                .calls
+                .iter()
+                .filter(|c| c.starts_with("POST /vector_stores/vs_test/files"))
+                .count(),
+            1
+        );
+        assert!(!api
+            .0
+            .borrow()
+            .calls
+            .iter()
+            .any(|c| c.starts_with("DELETE ")));
+    }
 }
 #[test]
 fn current_only_replacement_waits_for_completed_indexing() {

@@ -58,14 +58,12 @@ export function ProjectDetails({
   const inaccessible = documents.filter((d) => d.status === "unavailable");
   return (
     <>
-      {tab === "files" && (
-        <ProjectSummary
-          selection={selection}
-          tracking={tracking}
-          cloud={folderLost ? null : cloud}
-          unavailable={folderLost}
-        />
-      )}
+      <ProjectSummary
+        selection={selection}
+        tracking={tracking}
+        cloud={folderLost ? null : cloud}
+        unavailable={folderLost}
+      />
       <div className="project-utilities">
         <button className="back" disabled={busy} onClick={back}>
           <ArrowLeft size={16} /> All projects

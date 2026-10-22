@@ -353,7 +353,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.9.1")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.9.2")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -643,6 +643,7 @@ it("organizes project sections, guards unsaved tab changes and retains the folde
   expect(
     screen.getByRole("region", { name: "Project overview" }),
   ).toHaveTextContent("Selected files1");
+  const overview = screen.getByRole("region", { name: "Project overview" });
   expect(
     screen.queryByRole("region", { name: "Cloud sync" }),
   ).not.toBeInTheDocument();
@@ -664,10 +665,18 @@ it("organizes project sections, guards unsaved tab changes and retains the folde
   expect(
     screen.getByRole("region", { name: "Cloud sync" }),
   ).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Project overview" })).toBe(
+    overview,
+  );
+  expect(overview).toHaveTextContent("Selected files0");
   expect(
     screen.queryByRole("region", { name: "Ask project" }),
   ).not.toBeInTheDocument();
   await user.click(ai);
+  expect(screen.getByRole("region", { name: "Project overview" })).toBe(
+    overview,
+  );
+  expect(overview).toHaveTextContent("Selected files0");
   expect(
     screen.getByRole("region", { name: "Ask project" }),
   ).toBeInTheDocument();

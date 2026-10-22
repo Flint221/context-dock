@@ -51,6 +51,45 @@ fn owns_association(remote: &Value, attrs: &Value, store: &str) -> ApiResult<()>
     }
     Ok(())
 }
+// Creation/list responses can omit optional attributes while indexing settles.
+// Missing evidence is pending, never permission to search, replace or delete.
+fn association_verified(remote: &Value, attrs: &Value, store: &str, file: &str) -> ApiResult<bool> {
+    for (field, expected) in [("id", file), ("vector_store_id", store)] {
+        if remote[field] != expected {
+            return Err(ApiError::local(&format!(
+                "Index file identity mismatch ({field}). No destructive changes were made."
+            )));
+        }
+    }
+    let mut complete = true;
+    if !remote["attributes"].is_null() && !remote["attributes"].is_object() {
+        return Err(ApiError::local(
+            "Index returned invalid verification attributes. No destructive changes were made.",
+        ));
+    }
+    for field in ["contextdock", "project", "document", "version", "sha256"] {
+        let value = &remote["attributes"][field];
+        if value.is_null() {
+            complete = false;
+        } else if value != &attrs[field] {
+            return Err(ApiError::local(&format!(
+                "Index contains a foreign or mismatched file ({field}). No destructive changes were made."
+            )));
+        }
+    }
+    Ok(complete)
+}
+fn wait_for_association(db: &Connection, j: &Value, verification: bool) -> ApiResult<()> {
+    if n(j, "poll_count") >= 120 {
+        let reason = if verification {
+            "verification attributes are still incomplete"
+        } else {
+            "processing is still in progress"
+        };
+        return Err(ApiError::local(&format!("Index {reason} after 120 polls (about 30 minutes). Retry/Reconcile to resume checking the existing File; no new upload is needed.")));
+    }
+    execute(db,"UPDATE cloud_jobs SET state='indexing',phase='poll',association_status=?3,poll_count=poll_count+1,error=NULL,next_at=?2 WHERE id=?1",&[&s(j,"id"),&(chrono::Utc::now().timestamp()+15),&if verification { "verifying" } else { "in_progress" }])
+}
 fn create_store(db: &Connection, p: &Value, api: &dyn CloudApi) -> ApiResult<()> {
     let pid = s(p, "project_id");
     let expected = metadata(db, p)?;
@@ -173,8 +212,8 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     let mut existing = association(api, store, file)?;
     if s(j, "phase") == "retry_attach" {
         if let Some(remote) = &existing {
-            owns_association(remote, &attrs, store)?;
             if matches!(s(remote, "status"), "failed" | "cancelled") {
+                owns_association(remote, &attrs, store)?;
                 api.request(
                     "DELETE",
                     &format!("/vector_stores/{store}/files/{file}"),
@@ -184,7 +223,7 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
             }
         }
     }
-    let remote = match existing {
+    let mut remote = match existing {
         Some(v) => v,
         None => {
             // Check File existence first: a missing File must never be reported as indexed.
@@ -196,7 +235,16 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
             )?
         }
     };
-    owns_association(&remote, &attrs, store)?;
+    if !association_verified(&remote, &attrs, store, file)? {
+        // Read the existing association instead of trusting an incomplete POST
+        // receipt or replaying an upload/attachment. Conflicting values fail above.
+        if let Some(full) = association(api, store, file)? {
+            remote = full;
+        }
+        if !association_verified(&remote, &attrs, store, file)? {
+            return wait_for_association(db, j, true);
+        }
+    }
     let status = s(&remote, "status");
     match status {
         "completed" => {
@@ -207,12 +255,7 @@ fn attach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
                 "Snapshot indexing completed; remote association verified.",
             )
         }
-        "in_progress" => {
-            if n(j, "poll_count") >= 120 {
-                return Err(ApiError::local("Index processing exceeded 120 polls (about 30 minutes). Retry/Reconcile to resume checking the existing File; no new upload is needed."));
-            }
-            execute(db,"UPDATE cloud_jobs SET state='indexing',phase='poll',association_status='in_progress',poll_count=poll_count+1,next_at=?2 WHERE id=?1",&[&s(j,"id"),&(chrono::Utc::now().timestamp()+15)])
-        }
+        "in_progress" => wait_for_association(db, j, false),
         "failed" | "cancelled" => {
             execute(
                 db,
@@ -267,14 +310,36 @@ pub fn remove_owned(
     cloud::owned_store(api, db, p).map_err(|e| e.message)?;
     detach(db, p, j, api).map_err(|e| e.message)
 }
-fn reconcile(db: &Connection, p: &Value, api: &dyn CloudApi) -> ApiResult<()> {
+fn reconcile(db: &Connection, p: &Value, api: &dyn CloudApi, allow_pending: bool) -> ApiResult<()> {
     let store = cloud::owned_store(api, db, p)?;
-    let associations = cloud_api::list(api, &format!("/vector_stores/{}/files", s(p, "store_id")))?;
+    let mut associations =
+        cloud_api::list(api, &format!("/vector_stores/{}/files", s(p, "store_id")))?;
     let jobs = cloud::jobs(db, s(p, "project_id")).map_err(local)?;
-    for remote in &associations {
+    for remote in &mut associations {
         let job=jobs.iter().find(|j|s(j,"file_id")==s(remote,"id")).ok_or_else(||ApiError::local("Index contains an unrecognized association. Reconcile it in OpenAI before continuing."))?;
-        owns_association(remote, &identity(db, p, job)?, s(p, "store_id"))?;
+        let attrs = identity(db, p, job)?;
+        let store = s(p, "store_id");
+        let file = s(job, "file_id");
+        if !association_verified(remote, &attrs, store, file)? {
+            if let Some(full) = association(api, store, file)? {
+                *remote = full;
+            }
+            if !association_verified(remote, &attrs, store, file)? {
+                if allow_pending
+                    && n(job, "desired") == 1
+                    && !matches!(
+                        s(job, "state"),
+                        "failed" | "uncertain" | "removed" | "purged"
+                    )
+                {
+                    wait_for_association(db, job, true)?;
+                } else {
+                    owns_association(remote, &attrs, store)?;
+                }
+            }
+        }
     }
+    let jobs = cloud::jobs(db, s(p, "project_id")).map_err(local)?;
     for job in jobs.iter().filter(|j| s(j, "state") == "indexed") {
         let remote = associations
             .iter()
@@ -391,7 +456,7 @@ pub fn step(
             &[&id, &store["usage_bytes"].as_i64()],
         )?;
         if n(&p, "reconcile_requested") == 1 {
-            reconcile(db, &p, api)?;
+            reconcile(db, &p, api, true)?;
         }
         if n(&p, "started") != 1 {
             execute(db,"UPDATE cloud_projects SET sync_requested=0,status='ready',error=NULL WHERE project_id=?1",&[&id])?;
@@ -551,7 +616,7 @@ fn job_failure(db: &Connection, j: &Value, e: &ApiError) -> ApiResult<()> {
 }
 fn delete_index(db: &Connection, p: &Value, api: &dyn CloudApi) -> ApiResult<()> {
     // List and verify every association before deleting anything.
-    reconcile(db, p, api)?;
+    reconcile(db, p, api, false)?;
     let jobs = cloud::jobs(db, s(p, "project_id")).map_err(local)?;
     if let Some(j) = jobs
         .iter()
