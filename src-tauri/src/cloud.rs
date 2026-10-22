@@ -76,7 +76,14 @@ pub fn families(db: &Connection, id: &str) -> Result<Vec<Value>> {
     for family in &mut families {
         let excluded = blocked.contains(s(family, "id"));
         family["pathExcluded"] = json!(excluded as i64);
-        family["selected"] = json!((!excluded && s(family, "trackingState") == "tracked") as i64);
+        // A previously captured selected family must not silently disappear
+        // from the desired index if tracking state becomes inconsistent.
+        // Keep it selected and let eligibility freeze sync for review.
+        family["selected"] = json!(
+            (!excluded
+                && (s(family, "trackingState") == "tracked" || n(family, "versionCount") > 0))
+                as i64
+        );
         if excluded {
             family["eligible"] = json!(0);
         }
@@ -128,6 +135,8 @@ fn desired_selection(
             if hashed_size.is_none() {
                 return Err("Recheck the reassigned folder's documents before syncing or asking questions. Use Refresh documents to capture any changed files.".into());
             }
+        } else {
+            return Err("A selected tracked document has no active source. Resolve its local tracking state before cloud sync; existing index entries are retained.".into());
         }
     }
     if !["current", "history"].contains(&draft.mode.as_str())
