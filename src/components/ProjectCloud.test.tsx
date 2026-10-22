@@ -19,6 +19,21 @@ vi.mock("../chat", () => ({ chat: { action: vi.fn() } }));
 let view: CloudView;
 let chats: Chat[];
 let changed: () => void;
+it("includes selected documents awaiting a cloud job in coverage", async () => {
+  connected();
+  view.indexed = 9;
+  view.pending = 0;
+  view.failed = 0;
+  view.families = Array.from({ length: 10 }, (_, i) => ({
+    ...view.families[0], id: `doc-${i}`, name: `Document ${i}`,
+    selected: 1, eligible: 1, currentNumber: 1, cloudNumber: i === 9 ? null : 1,
+  }));
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByRole("progressbar", { name: "Indexed versions" })).toHaveAttribute("aria-valuenow", "90");
+  expect(screen.getByText(/9 of 10 indexed/)).toBeInTheDocument();
+  expect(screen.getByText(/1 awaiting cloud sync/)).toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});
 it("shows a file-specific failure while other versions are still syncing", async () => {
   connected();
   view.pending = 2;

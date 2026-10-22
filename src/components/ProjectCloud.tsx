@@ -82,8 +82,14 @@ export function ProjectCloud({ project }: { project: string }) {
   const cleanupNeeded =
     !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
   const retained = !!view && !enabled && hasCloudData(view);
-  const indexedTotal = view ? view.indexed + view.pending + view.failed : 0;
   const selected = view?.families.filter((f) => f.selected && f.eligible) ?? [];
+  const indexedTotal = view
+    ? Math.max(view.indexed + view.pending + view.failed, selected.length)
+    : 0;
+  const awaitingSelection = view?.families.filter((f) => f.pathExcluded).length ?? 0;
+  const awaitingCapture = view?.families.filter((f) => !f.pathExcluded && f.versionCount === 0).length ?? 0;
+  const awaitingUpload = selected.filter((f) => f.currentNumber !== f.cloudNumber).length;
+  const needsAttention = view?.families.filter((f) => f.selected && !f.eligible && f.versionCount > 0).length ?? 0;
   const pathsExcluded = !!view?.families.some(
     (f) => f.selected && f.pathExcluded,
   );
@@ -224,6 +230,12 @@ export function ProjectCloud({ project }: { project: string }) {
           message="Saving and checking cloud status…"
           success={notice}
         />
+        {view && stateKnown && (
+          <p className="tracking-note">
+            Folder coverage: {awaitingSelection} excluded or awaiting selection · {awaitingCapture} awaiting capture · {awaitingUpload} awaiting cloud sync · {needsAttention} need local review.
+            Upload failures are reported separately below.
+          </p>
+        )}
         {view &&
           stateKnown &&
           !cleanupNeeded &&
