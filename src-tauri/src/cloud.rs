@@ -410,10 +410,10 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
     tx.execute("UPDATE cloud_jobs SET desired=0 WHERE project_id=?1", [id])
         .map_err(error)?;
     for v in wanted {
-        tx.execute("UPDATE cloud_jobs SET phase=CASE WHEN file_id IS NOT NULL THEN 'attach' ELSE phase END,state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' ELSE state END,desired=1,next_at=0,error=NULL WHERE project_id=?1 AND version_id=?2 AND phase IN ('selection_remove','path_remove','remove')", params![id,v.id]).map_err(error)?;
+        tx.execute("UPDATE cloud_jobs SET phase=CASE WHEN file_id IS NOT NULL THEN 'attach' ELSE phase END,state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' ELSE state END,desired=1,next_at=0,error=NULL WHERE project_id=?1 AND version_id=?2 AND state!='purged' AND phase IN ('selection_remove','path_remove','remove')", params![id,v.id]).map_err(error)?;
         let job = uuid::Uuid::new_v4().to_string();
         let ext = if v.kind == "word" { "docx" } else { "md" };
-        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,state=CASE WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
+        tx.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(project_id,version_id) DO UPDATE SET desired=1,remote_name=CASE WHEN state='purged' THEN excluded.remote_name ELSE remote_name END,phase=CASE WHEN state='purged' THEN 'upload' ELSE phase END,state=CASE WHEN state='purged' THEN 'pending' WHEN state='removed' THEN CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END ELSE state END,next_at=CASE WHEN state='purged' THEN 0 ELSE next_at END,error=CASE WHEN state='purged' THEN NULL ELSE error END",params![job,id,v.document,v.id,format!("cd_{install}_{id}_{}_{job}.{ext}",v.id),models::now()]).map_err(error)?;
     }
     tx.commit().map_err(error)
 }

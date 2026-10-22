@@ -1857,6 +1857,11 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     assert!(api.0.borrow().files.is_empty());
     assert_eq!(s(&f.jobs()[0], "state"), "purged");
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+    f.select_file("Master_Context.md");
+    f.sync(&api);
+    assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
 }
 #[test]
 fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
