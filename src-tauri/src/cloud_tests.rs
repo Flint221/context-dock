@@ -961,12 +961,13 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
 }
 
 #[test]
-fn pure_opt_out_can_be_saved_without_source_or_credentials_and_only_authorizes_narrow_deletion() {
+fn saved_folder_opt_out_with_unavailable_source_only_authorizes_narrow_deletion() {
     use std::sync::{atomic::AtomicBool, Arc};
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
+    f.exclude_file("Master_Context.md");
     fs::rename(&f.root, f.root.with_file_name("unavailable")).unwrap();
     f.r.db
         .execute("UPDATE cloud_projects SET paused=1", [])
@@ -974,18 +975,6 @@ fn pure_opt_out_can_be_saved_without_source_or_credentials_and_only_authorizes_n
     f.r.db
         .execute("UPDATE cloud_connection SET status='disconnected'", [])
         .unwrap();
-    let mut none = f.draft();
-    none.documents.clear();
-    let plan =
-        cloud_commands::action_impl(&mut f.r.db, Some(&f.id), "preview", &json!({"draft":none}))
-            .unwrap();
-    cloud_commands::action_impl(
-        &mut f.r.db,
-        Some(&f.id),
-        "apply",
-        &json!({"draft":none,"token":plan["token"],"consent":true}),
-    )
-    .unwrap();
     assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
     let guarded = cloud_commands::ProjectApi::new(
         &api,
@@ -1134,13 +1123,16 @@ fn cloud_configuration_verification_rolls_back_a_silently_ignored_save() {
     let mut f = Fixture::new();
     f.enable();
     let mut draft = f.draft();
-    draft.automatic = true;
+    draft.mode = "history".into();
     let plan = cloud::preview(&f.r.db, &f.id, &draft).unwrap();
     f.r.db.execute_batch("CREATE TRIGGER ignore_cloud_settings BEFORE UPDATE ON cloud_projects BEGIN SELECT RAISE(IGNORE); END;").unwrap();
     assert!(cloud::apply(&mut f.r.db, &f.id, &draft, &plan.token)
         .unwrap_err()
         .contains("verification failed"));
-    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 0);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "mode"),
+        "current"
+    );
 }
 #[test]
 fn no_api_requests_for_local_only_or_paused() {
@@ -1164,11 +1156,13 @@ fn credential_scope_cannot_cross_project_binding() {
     assert!(api.0.borrow().calls.is_empty());
 }
 #[test]
-fn selection_is_project_scoped_and_untracked_is_ineligible() {
+fn legacy_selection_cannot_select_foreign_documents_and_untracked_is_ineligible() {
     let f = Fixture::new();
     let mut d = f.draft();
     d.documents = vec!["foreign-document".into()];
-    assert!(cloud::preview(&f.r.db, &f.id, &d).is_err());
+    let desired = cloud::desired(&f.r.db, &f.id, &d).unwrap();
+    assert_eq!(desired.len(), 1);
+    assert_eq!(desired[0].document, f.doc);
     f.r.db
         .execute("UPDATE documents SET tracking_state='ignored'", [])
         .unwrap();
@@ -1346,14 +1340,15 @@ fn history_mode_keeps_both_versions_and_sets_current_metadata() {
     );
 }
 #[test]
-fn auto_sync_off_requires_sync_now_for_new_versions() {
+fn legacy_automatic_false_does_not_disable_sync_for_new_versions() {
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
     f.sync(&api);
     f.edit();
-    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
-    assert_eq!(api.0.borrow().files.len(), 1);
+    assert!(cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 2);
 }
 #[test]
 fn auto_sync_detects_new_committed_version() {
@@ -1984,6 +1979,7 @@ fn search_waits_for_deselected_associations_to_be_removed() {
 #[test]
 fn initial_empty_selection_is_rejected_without_enabling_project() {
     let mut f = Fixture::new();
+    f.exclude_file("Master_Context.md");
     let mut draft = f.draft();
     draft.documents.clear();
     assert!(cloud::preview(&f.r.db, &f.id, &draft)
@@ -1992,7 +1988,9 @@ fn initial_empty_selection_is_rejected_without_enabling_project() {
         .contains("Select at least one"));
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"), 0);
     // Emptying an existing index remains an explicit supported selection change.
+    f.select_file("Master_Context.md");
     f.enable();
+    f.exclude_file("Master_Context.md");
     assert_eq!(cloud::preview(&f.r.db, &f.id, &draft).unwrap().files, 0);
 }
 #[test]

@@ -59,6 +59,17 @@ impl Fixture {
             .reconcile(&self.project, "manual_refresh", &HashSet::new(), true)
             .unwrap();
     }
+    fn select_new(&mut self, path: &str) {
+        assert!(!crate::path_selection::allowed(&self.r.db, &self.project, path).unwrap());
+        let revision = crate::path_selection::revision(&self.r.db, &self.project).unwrap();
+        let path = crate::path_selection::normalized(path);
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.project).unwrap();
+        rules.retain(|rule| rule.kind != "file" || rule.path != path);
+        self.r
+            .save_path_selection(&self.project, revision, rules)
+            .unwrap();
+        self.scan();
+    }
     fn document(&self, name: &str) -> String {
         self.r
             .snapshot()
@@ -353,6 +364,16 @@ fn initial_grouping_respects_selection_ambiguity_and_identical_bytes() {
         ("Decimal_v1.10.md", "ten"),
         ("Decimal_v1.2.md", "two"),
     ]);
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(
+        &f.project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Report_v3.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
     let ids =
         f.r.snapshot()
             .unwrap()
@@ -607,6 +628,7 @@ fn ambiguous_families_and_other_directories_require_review_and_manual_associatio
     let id = f.document("Design_Notes_v1.md");
     fs::write(f.root.join("Design_Notes_v3.md"), "third").unwrap();
     f.scan();
+    f.select_new("Design_Notes_v3.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     assert_eq!(review.candidate_ids.len(), 2);
     assert!(f.root.join("Design_Notes_v1.md").exists());
@@ -620,6 +642,7 @@ fn ambiguous_families_and_other_directories_require_review_and_manual_associatio
     fs::create_dir(f.root.join("other")).unwrap();
     fs::write(f.root.join("other/Design_Notes_v5.md"), "other workstream").unwrap();
     f.scan();
+    f.select_new("other/Design_Notes_v5.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     f.r.resolve_match(&f.project, &review.source_id, "new", None)
         .unwrap();
@@ -642,6 +665,7 @@ fn identical_content_copy_needs_review_but_rename_preserves_identity_without_new
     assert!(f.r.tracking_view(&f.project).unwrap().reviews.is_empty());
     fs::copy(f.root.join("Renamed.md"), f.root.join("Copy.md")).unwrap();
     f.scan();
+    f.select_new("Copy.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     assert!(review.explanation.contains("Identical"));
     f.r.resolve_match(&f.project, &review.source_id, "assign", Some(id.clone()))
