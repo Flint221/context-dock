@@ -256,6 +256,7 @@ fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_loc
     fs::write(f.root.join("Illustrated.docx"), &bytes).unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Illustrated.docx");
     let doc =
         f.r.snapshot()
             .unwrap()
@@ -292,6 +293,7 @@ fn bad_word_reports_path_and_reason_while_other_files_finish_without_retry_loop(
     fs::write(f.root.join("Drafts/Bad.docx"), bad).unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Drafts/Bad.docx");
     let doc =
         f.r.snapshot()
             .unwrap()
@@ -476,6 +478,18 @@ impl Fixture {
         .unwrap();
         self.r
             .reconcile(&self.id, "manual_refresh", &HashSet::new(), true)
+            .unwrap();
+    }
+    fn select_file(&mut self, path: &str) {
+        let revision = crate::path_selection::revision(&self.r.db, &self.id).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.id).unwrap();
+        let path = crate::path_selection::normalized(path);
+        rules.retain(|rule| rule.kind != "file" || rule.path != path);
+        self.r
+            .save_path_selection(&self.id, revision, rules)
+            .unwrap();
+        self.r
+            .reconcile(&self.id, "test", &HashSet::new(), true)
             .unwrap();
     }
     fn jobs(&self) -> Vec<Value> {
@@ -2057,6 +2071,7 @@ fn saved_folder_exclusion_removes_from_index_while_paused_and_reinclude_reuses_o
     fs::create_dir_all(f.root.join("Drafts/Nested")).unwrap();
     fs::write(f.root.join("Drafts/Nested/notes.md"), "nested notes").unwrap();
     f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.select_file("Drafts/Nested/notes.md");
     let nested =
         f.r.snapshot()
             .unwrap()

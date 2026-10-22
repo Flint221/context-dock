@@ -269,6 +269,10 @@ fn consistency_uses_only_explicit_same_project_family_versions() {
         true,
     )
     .unwrap();
+    let revision = crate::path_selection::revision(&f.r.db, &f.p).unwrap();
+    f.r.save_path_selection(&f.p, revision, vec![]).unwrap();
+    f.r.reconcile(&f.p, "test", &std::collections::HashSet::new(), true)
+        .unwrap();
     let sources = f.r.source_ids(&f.p).unwrap();
     f.r.configure_tracking(&f.p, true, false, sources).unwrap();
     let versions = ai::view(&f.r, &f.p).unwrap()["versions"]
