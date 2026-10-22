@@ -902,18 +902,8 @@ fn opted_out_documents_are_removed_before_unrelated_additions_even_if_new_source
     fs::write(f.root.join("Replacement.md"), "New family").unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
-    let other =
-        f.r.snapshot()
-            .unwrap()
-            .documents
-            .iter()
-            .find(|d| d.name == "Replacement.md")
-            .unwrap()
-            .document_id
-            .clone();
-    let mut changed = f.draft();
-    changed.documents = vec![other];
-    f.apply(changed);
+    f.select_file("Replacement.md");
+    f.exclude_file("Master_Context.md");
     fs::remove_file(f.root.join("Replacement.md")).unwrap();
     api.0.borrow_mut().calls.clear();
     f.step(&api);
@@ -1054,12 +1044,10 @@ fn lost_upload_response_is_recovered_after_document_opt_out_and_reselection_with
             [],
         )
         .unwrap();
-    let mut none = f.draft();
-    none.documents.clear();
-    f.apply(none);
+    f.exclude_file("Master_Context.md");
     f.sync(&api);
     assert_eq!(s(&f.jobs()[0], "state"), "removed");
-    f.apply(f.draft());
+    f.select_file("Master_Context.md");
     f.sync(&api);
     assert_eq!(api.0.borrow().files.len(), 1);
     assert_eq!(
