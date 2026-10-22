@@ -86,6 +86,45 @@ async function ready() {
   );
   return user;
 }
+it("shows a new file as excluded until its selection is saved", async () => {
+  saved.entries.push({
+    path: "Team_Tasks.md",
+    kind: "file",
+    status: "available",
+    new: true,
+  });
+  saved.exclusions.push({ path: "team_tasks.md", kind: "file" });
+  vi.mocked(registry.savePaths).mockImplementation(
+    async (_project, revision, exclusions) => {
+      saved = {
+        ...saved,
+        revision: revision + 1,
+        exclusions: structuredClone(exclusions),
+        entries: saved.entries.map((entry) =>
+          entry.path === "Team_Tasks.md" ? { ...entry, new: false } : entry,
+        ),
+      };
+    },
+  );
+  const user = await ready();
+  const checkbox = screen.getByRole("checkbox", {
+    name: "Include Team_Tasks.md",
+  });
+  const row = checkbox.closest(".folder-tree-row") as HTMLElement;
+  expect(checkbox).not.toBeChecked();
+  expect(within(row).getByText("New")).toBeInTheDocument();
+  expect(within(row).getByText("Excluded")).toBeInTheDocument();
+  await user.click(checkbox);
+  expect(saved.exclusions).toHaveLength(1);
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  await waitFor(() =>
+    expect(screen.queryByText("New")).not.toBeInTheDocument(),
+  );
+  expect(saved.exclusions).toEqual([]);
+  expect(
+    screen.getByRole("checkbox", { name: "Include Team_Tasks.md" }),
+  ).toBeChecked();
+});
 it("keeps checkbox edits local until Save, then verifies persistent folder exclusion", async () => {
   const user = await ready();
   await user.click(screen.getByRole("checkbox", { name: "Include Drafts" }));
