@@ -492,6 +492,17 @@ impl Fixture {
             .reconcile(&self.id, "test", &HashSet::new(), true)
             .unwrap();
     }
+    fn exclude_file(&mut self, path: &str) {
+        let revision = crate::path_selection::revision(&self.r.db, &self.id).unwrap();
+        let mut rules = crate::path_selection::rules(&self.r.db, &self.id).unwrap();
+        rules.push(crate::path_selection::Rule {
+            path: path.into(),
+            kind: "file".into(),
+        });
+        self.r
+            .save_path_selection(&self.id, revision, rules)
+            .unwrap();
+    }
     fn jobs(&self) -> Vec<Value> {
         cloud::jobs(&self.r.db, &self.id).unwrap()
     }
@@ -795,7 +806,7 @@ fn cloud_off_stop_intent_survives_an_in_flight_document_removal_failure() {
 }
 
 #[test]
-fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
+fn folder_selection_round_trip_removes_all_family_versions_while_paused_and_restores_the_same_store(
 ) {
     use std::sync::{atomic::AtomicBool, Arc};
     let mut f = Fixture::new();
@@ -803,6 +814,7 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
     fs::write(f.root.join("Other.md"), "Independent family").unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
+    f.select_file("Other.md");
     let other =
         f.r.snapshot()
             .unwrap()
@@ -831,13 +843,11 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
     f.r.db
         .execute("UPDATE cloud_projects SET paused=1,sync_requested=0", [])
         .unwrap();
-    let mut reduced = full.clone();
-    reduced.documents = vec![other.clone()];
-    f.apply(reduced);
+    f.exclude_file("Master_Context.md");
     assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 2);
     assert_eq!(
         n(&cloud::project(&f.r.db, &f.id).unwrap(), "sync_requested"),
-        0
+        1
     );
     api.0.borrow_mut().calls.clear();
     let guarded = cloud_commands::ProjectApi::new(
@@ -864,7 +874,7 @@ fn document_checkbox_round_trip_removes_all_family_versions_while_paused_and_res
         .all(|c| c.starts_with("GET ") || c.starts_with("DELETE /vector_stores/vs_test/files/")));
     assert_eq!(api.0.borrow().files.len(), 3);
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "paused"), 1);
-    f.apply(full);
+    f.select_file("Master_Context.md");
     f.step(&api);
     assert_eq!(api.0.borrow().associations.len(), 1);
     f.r.db
@@ -925,9 +935,7 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
         f.r.db
             .execute("UPDATE cloud_projects SET paused=1", [])
             .unwrap();
-        let mut none = f.draft();
-        none.documents.clear();
-        f.apply(none);
+        f.exclude_file("Master_Context.md");
         api.0.borrow_mut().bad_association_receipt = bad_receipt;
         api.0.borrow_mut().ignore_association_delete = !bad_receipt;
         f.step(&api);
@@ -1981,9 +1989,7 @@ fn search_waits_for_deselected_associations_to_be_removed() {
     f.enable();
     let api = Mock::default();
     f.sync(&api);
-    let mut draft = f.draft();
-    draft.documents.clear();
-    f.apply(draft);
+    f.exclude_file("Master_Context.md");
     assert!(cloud_sync::search(&f.r.db, &f.id, "old selected content", &api, "bound").is_err());
     assert!(api.0.borrow().calls.iter().all(|c| !c.ends_with("/search")));
 }
