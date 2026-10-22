@@ -483,6 +483,85 @@ impl Fixture {
     }
 }
 #[test]
+fn folder_selection_drives_nine_to_ten_cloud_coverage_without_legacy_list() {
+    let mut f = Fixture::new();
+    for i in 1..=8 {
+        fs::write(
+            f.root.join(format!("Document_{i}.md")),
+            format!("document {i}"),
+        )
+        .unwrap();
+    }
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.enable();
+    let api = Mock::default();
+    for _ in 0..50 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 9);
+    assert_eq!(api.0.borrow().files.len(), 9);
+
+    fs::write(f.root.join("CottonTrax_Team_Tasks.md"), "team tasks").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "CottonTrax_Team_Tasks.md").unwrap());
+    for _ in 0..5 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 9);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    for _ in 0..20 {
+        f.step(&api);
+    }
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 10);
+    assert_eq!(api.0.borrow().files.len(), 10);
+    assert_eq!(api.0.borrow().associations.len(), 10);
+    for _ in 0..10 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 10);
+}
+#[test]
+fn reselecting_before_remote_removal_preserves_and_reuses_existing_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "Master_Context.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
+    assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(&f.id, revision, vec![]).unwrap();
+    assert!(cloud::selection_removals(&f.r.db, &f.id)
+        .unwrap()
+        .is_empty());
+    api.0.borrow_mut().calls.clear();
+    for _ in 0..10 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c == "UPLOAD" || c.starts_with("DELETE ")));
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["indexed"], 1);
+}
+#[test]
 #[cfg(windows)]
 fn cloud_runtime_normalizes_windows_database_path_before_guarded_upload() {
     let mut f = Fixture::new();
