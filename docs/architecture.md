@@ -1,3 +1,9 @@
+# Unified folder/cloud eligibility — 0.8.1
+
+Schema 010 adds new_paths and enables automatic syncing for already-enabled cloud projects while retaining paused state and resource identities. Saved folder exclusions control local capture and desired cloud versions. Legacy cloud_documents/cloud_exclusions records are retained for compatibility but no longer independently override saved folder choices. Discovery after the first scan creates explicit exclusions and New markers; saving inclusion clears the marker. Confident single-family inheritance binds the staged-byte match before admitting a path, respects excluded parents and leaves uncertain batches excluded.
+
+The scheduler notices selected captures missing from jobs; queue replay preserves known File/job identities and uncertain upload recovery. Desired-state validation retains previously captured selected families during inconsistent tracking state and blocks unsafe pruning. Request guards recheck tracking before upload/attachment and retain connection, scope, root and path-revision checks. Saved deselection continues through verified path-removal intents under the cloud gate. The cloud UI has a read-only eligibility summary instead of a second document checklist and automatic-sync checkbox. No page reordering is introduced.
+
 # Reviewed reversible archival â€” 0.8.0
 
 Schema 009 adds durable archive-setting intents. Existing enabled projects gain no automatic backfill intent on upgrade. Initial separate archival consent waits for ordered imports/captures to complete before organizing verified superseded sources. The explicit review command refreshes metadata without moving files and binds confirmation to the root/folder revision, path-selection revision, flags, operation payloads and file/snapshot hashes and identities. A stale token requires reload. Selected current sources, excluded paths and unresolved/ambiguous families are not organized.

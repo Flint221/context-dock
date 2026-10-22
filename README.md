@@ -1,6 +1,12 @@
 # ContextDock
 
-ContextDock 0.8.0 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.8.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+
+## Unified folder selection (0.8.1)
+
+The saved folder tree now controls both local tracking and cloud eligibility. Newly discovered unrelated files show **New** and **Excluded** until you select them and **Save changes**. A confidently matched new version follows its selected family; ambiguous matches and excluded parent folders remain excluded. Tracking must be enabled to capture files. Captured selected documents automatically sync when project cloud indexing is enabled, unpaused and connected.
+
+The separate cloud document checklist and automatic-sync checkbox are removed. Existing cloud identities and indexed files are retained during migration; missing selected captures are queued without duplicating known uploads. Folder deselection uses verified cloud cleanup and preserves source files and local history. Page order is unchanged. Registry schema is now 010; older readers must not open an upgraded database. Installing this release does not reset databases automatically.
 
 ## Reversible source archival (0.8.0)
 
@@ -24,7 +30,7 @@ Upload/index failures now identify the original relative path, version and reaso
 
 **Enable tracking → Capture selected and enable** now groups clear numeric exports such as `CottonTrax_Architecture_v1.md` and `_v2.md` into one family. Imports run in numeric order (`v2` before `v10`), and the highest export becomes the active source. Folder and file type must match; unrelated stems, duplicate equivalent version numbers and dates-only names remain separate. History numbers count distinct captured bytes, so identical exports reuse a snapshot and filename suffix gaps do not create missing capture numbers. Original filenames remain visible in history. With archival off, initial imports leave every source in place. With separate archival consent, verified older exports are organized after their snapshots finish; the newest source stays in place.
 
-Removing a project keeps its local history. After re-adding the same folder, **Resume tracking** can repair the old separate-initial-history layout when each member is an unchanged single initial snapshot and no cloud resources remain. Prior snapshot/version IDs, metadata and bytes remain accessible under **Earlier separate histories**; regrouped families need explicit cloud selection again. Edited/multi-version/manual histories or retained cloud resources are preserved separately with a visible explanation. You can also stop/resume tracking after deleting project cloud data instead of removing the registration. Ordered imports resume safely after interruption. See [the acceptance walkthrough](docs/manual-testing-numbered-import.md). Schema 008 prevents older builds from reopening an import-aware registry; do not downgrade after upgrading.
+Removing a project keeps its local history. After re-adding the same folder, **Resume tracking** can repair the old separate-initial-history layout when each member is an unchanged single initial snapshot and no cloud resources remain. Prior snapshot/version IDs, metadata and bytes remain accessible under **Earlier separate histories**; regrouped families follow the saved folder selection for cloud eligibility. Edited/multi-version/manual histories or retained cloud resources are preserved separately with a visible explanation. You can also stop/resume tracking after deleting project cloud data instead of removing the registration. Ordered imports resume safely after interruption. See [the acceptance walkthrough](docs/manual-testing-numbered-import.md). Schema 008 prevents older builds from reopening an import-aware registry; do not downgrade after upgrading.
 
 ## Folder tree and saved exclusions (0.7.0)
 
@@ -209,7 +215,7 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.6.3_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.8.1_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
