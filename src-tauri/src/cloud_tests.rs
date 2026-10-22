@@ -668,6 +668,60 @@ fn tracking_off_prevents_sync_and_next_guarded_upload() {
     assert!(api.0.borrow().calls.is_empty());
 }
 #[test]
+fn unified_selection_upgrade_preserves_choices_and_syncs_missing_selected_capture() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let store = s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id").to_owned();
+    fs::write(f.root.join("Selected.md"), "selected before upgrade").unwrap();
+    fs::write(f.root.join("Excluded.md"), "excluded before upgrade").unwrap();
+    f.r.reconcile(&f.id, "test", &HashSet::new(), true).unwrap();
+    f.select_file("Selected.md");
+    let selected =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .into_iter()
+            .find(|d| d.name == "Selected.md")
+            .unwrap()
+            .document_id;
+    assert_eq!(f.r.versions(&selected).unwrap().len(), 1);
+    f.r.db
+        .execute(
+            "INSERT OR IGNORE INTO cloud_documents(project_id,document_id) VALUES(?1,?2)",
+            params![f.id, f.doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute("UPDATE cloud_projects SET auto_sync=0,sync_requested=0", [])
+        .unwrap();
+    f.r.db
+        .execute_batch("DROP TABLE new_paths; PRAGMA user_version=9;")
+        .unwrap();
+    let db = f.r.store.join("test.db");
+    drop(f.r);
+    f.r = Registry::open(&db).unwrap();
+    assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 1);
+    assert!(crate::path_selection::allowed(&f.r.db, &f.id, "Selected.md").unwrap());
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "Excluded.md").unwrap());
+    assert_eq!(f.r.versions(&selected).unwrap().len(), 1);
+    for _ in 0..15 {
+        f.step(&api);
+    }
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(api.0.borrow().associations.len(), 2);
+    assert_eq!(
+        s(&cloud::project(&f.r.db, &f.id).unwrap(), "store_id"),
+        store
+    );
+    assert!(f
+        .jobs()
+        .iter()
+        .any(|j| s(j, "document_id") == selected && s(j, "state") == "indexed"));
+}
+
+#[test]
 fn migration_defaults_cloud_off_and_preserves_local_preferences() {
     let f = Fixture::new();
     let p = cloud::project(&f.r.db, &f.id).unwrap();
