@@ -96,7 +96,7 @@ beforeEach(() => {
     },
   );
 });
-it("initializes only selected sources with archival off by default", async () => {
+it("initializes folder-selected sources with archival off by default", async () => {
   const user = userEvent.setup();
   render(<TrackingPanel project={project} changed={changed} />);
   await user.click(
@@ -109,13 +109,12 @@ it("initializes only selected sources with archival off by default", async () =>
   expect(
     dialog.getByRole("checkbox", { name: /Also enable automatic archival/ }),
   ).not.toBeChecked();
-  await user.click(
-    dialog.getByRole("checkbox", { name: "Technical_Documentation.md" }),
-  );
+  expect(dialog.getByText("Technical_Documentation.md")).toBeInTheDocument();
+  expect(dialog.queryByRole("checkbox", { name: "Technical_Documentation.md" })).not.toBeInTheDocument();
   await user.click(dialog.getByText("Capture selected and enable"));
   await waitFor(() =>
     expect(registry.configureTracking).toHaveBeenCalledWith("p", true, false, [
-      "s1",
+      "s1", "s2",
     ]),
   );
   await screen.findByRole("button", { name: "Disable tracking" });

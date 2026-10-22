@@ -272,9 +272,9 @@ export function CloudPanel({
             configuration is successfully saved.
           </p>
           <p>
-            1. Save and test your OpenAI key in Settings. 2. Select documents
-            below. 3. Review and confirm cloud changes. 4. Click Start Initial
-            Sync.
+            1. Save and test your OpenAI key in Settings. 2. Select files in
+            the folder tree and enable tracking. 3. Review and confirm cloud
+            changes to start syncing.
           </p>
         </div>
       )}
@@ -603,8 +603,8 @@ export function CloudPanel({
             association removals.
           </p>
           <p>
-            Individual document opt-outs remove their index entries and retain
-            uploaded Files for re-selection. Turning project Cloud sync off
+            Excluding files in the folder tree removes their index entries and
+            retains uploaded Files for re-selection. Turning project Cloud sync off
             deletes its owned stores and uploaded Files. Document removals run
             even while uploads stay paused and report success only after remote
             absence is verified. API data is not used for model training by
@@ -650,9 +650,10 @@ export function CloudPanel({
                     );
                     return;
                   }
-                  if (afterReview && draft.enabled) {
+                  const nextAction = afterReview ?? (draft.enabled && !saved.started ? "start" : null);
+                  if (nextAction && draft.enabled) {
                     setNotice("Cloud configuration saved. Requesting sync…");
-                    await perform(afterReview);
+                    await perform(nextAction);
                     setNotice("Cloud configuration saved. Sync requested.");
                     return;
                   }
@@ -677,9 +678,8 @@ export function CloudPanel({
             </button>
           </div>
           <p>
-            New projects still require Start Initial Sync after confirmation.
-            Changes to an already-started index queue only the changes shown
-            above.
+            Confirmation starts initial sync. Changes to an already-started
+            index queue only the changes shown above; a paused index stays paused.
           </p>
         </Modal>
       )}

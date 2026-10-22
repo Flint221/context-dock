@@ -165,7 +165,7 @@ it("opens policy review immediately and restores the saved policy on cancel or c
     return undefined as never;
   });
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   for (const button of ["Cancel", "Close dialog"]) {
     await user.selectOptions(
       screen.getByLabelText("Version policy"),
@@ -215,7 +215,7 @@ it("reviews the upload limit once editing finishes, keeps errors visible, and ca
     .mockResolvedValueOnce(changePlan as never)
     .mockRejectedValueOnce("Review a fresh preview");
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   const input = screen.getByLabelText("Soft upload limit (MiB)");
   await user.clear(input);
   await user.type(input, "25");
@@ -477,7 +477,7 @@ it("rejects stale responses after project panel unmount", async () => {
   const old = render(<CloudPanel project="old" />);
   old.unmount();
   render(<CloudPanel project="new" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   await act(async () => finish({ ...view, store_id: "vs_old" }));
   expect(screen.queryByText("vs_old")).not.toBeInTheDocument();
   expect(
@@ -648,7 +648,7 @@ it("shows an actionable configuration failure inside its consent dialog", async 
     } as never)
     .mockRejectedValueOnce("Review a fresh preview");
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   await user.click(
     screen.getByRole("button", { name: "Select all eligible documents" }),
   );
@@ -685,7 +685,7 @@ it("allows an explicitly confirmed association cleanup while sync is paused with
     },
   ];
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   await user.click(
     screen.getByRole("button", { name: "View Cloud Index / Test Search" }),
   );
@@ -750,7 +750,7 @@ it("shows why initial sync is disabled until a nonempty selection is saved, then
     return undefined as never;
   });
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   expect(
     screen.getByRole("button", { name: "Review cloud changes" }),
   ).toBeDisabled();
@@ -820,7 +820,7 @@ it("explains queued configuration changes for an already started index without a
     } as never)
     .mockResolvedValueOnce(undefined);
   render(<CloudPanel project="p1" />);
-  await screen.findByLabelText(/Master Context/);
+  await screen.findByText(/Master Context/);
   await user.click(
     screen.getByRole("button", { name: "Review cloud changes" }),
   );
