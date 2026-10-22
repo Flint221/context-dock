@@ -527,6 +527,43 @@ fn folder_selected_tracked_document_does_not_require_legacy_cloud_selection() {
     );
 }
 #[test]
+fn legacy_cloud_list_cannot_bypass_source_validation() {
+    let mut f = Fixture::new();
+    f.enable();
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    f.r.refresh(&f.id).unwrap();
+    let mut old_client = f.draft();
+    old_client.automatic = true;
+    old_client.documents.clear();
+    assert!(!cloud::selection_reduction(
+        &f.r.db,
+        &cloud::project(&f.r.db, &f.id).unwrap(),
+        &old_client
+    )
+    .unwrap());
+    assert!(cloud::preview(&f.r.db, &f.id, &old_client).is_err());
+}
+
+#[test]
+fn tracking_off_prevents_sync_and_next_guarded_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    let guard = cloud_commands::ProjectApi::new(
+        &api,
+        &f.r.store.join("test.db"),
+        &f.id,
+        "bound",
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap();
+    f.r.configure_tracking(&f.id, false, false, vec![]).unwrap();
+    assert!(guard.upload("blocked.md", b"private".to_vec()).is_err());
+    assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    f.step(&api);
+    assert!(api.0.borrow().calls.is_empty());
+}
+#[test]
 fn migration_defaults_cloud_off_and_preserves_local_preferences() {
     let f = Fixture::new();
     let p = cloud::project(&f.r.db, &f.id).unwrap();

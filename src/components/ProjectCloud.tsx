@@ -107,7 +107,7 @@ export function ProjectCloud({ project }: { project: string }) {
           : pathsExcluded && selected.length === 0
             ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
             : selected.length === 0
-              ? "Enable version tracking and select documents for cloud sync."
+              ? "Select files in the folder tree and enable version tracking."
               : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;

@@ -221,7 +221,6 @@ export function CloudPanel({
   const hasChanges =
     !!view &&
     (draft.enabled !== savedDraft(view).enabled ||
-      draft.automatic !== !!view.auto_sync ||
       draft.mode !== view.mode ||
       draft.softLimit !== view.soft_limit ||
       view.families.some(
@@ -789,7 +788,7 @@ export function CloudPanel({
           <h3>Known cloud versions</h3>
           <p>
             Individually removed versions stay excluded from automatic sync.
-            Families unchecked in Project cloud selection can be selected again
+            Files excluded in the folder selection can be selected again
             to restore their index entries. Uploaded Files remain separate
             resources until project cleanup. Failed/uncertain rows require
             reconciliation.

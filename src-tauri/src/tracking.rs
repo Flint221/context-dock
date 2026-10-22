@@ -16,7 +16,7 @@ impl Registry {
         project: &str,
         enabled: bool,
         archive: bool,
-        selected: Vec<String>,
+        _selected: Vec<String>,
     ) -> Result<()> {
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
@@ -34,14 +34,17 @@ impl Registry {
             let _guard = storage::directory_guard(&canonical)?;
             self.refresh(project)?;
         }
-        let selected: HashSet<String> = selected.into_iter().collect();
-        for id in &selected {
-            let s = self.source(id)?;
-            if s.project_id != project
-                || s.status != "available"
-                || !crate::path_selection::allowed(&self.db, project, &s.relative)?
-            {
-                return Err("Select available documents from this project only.".into());
+        // The saved folder selection, not a caller-provided checklist, controls
+        // initial capture. Refresh first so newly discovered paths are reviewed.
+        let mut selected = HashSet::new();
+        if enabled && !initialized {
+            for id in self.source_ids(project)? {
+                let source = self.source(&id)?;
+                if source.status == "available"
+                    && crate::path_selection::allowed(&self.db, project, &source.relative)?
+                {
+                    selected.insert(id);
+                }
             }
         }
         let tx = self.db.transaction().map_err(error)?;
@@ -64,8 +67,6 @@ impl Registry {
                 .map_err(error)?;
                 tx.execute("UPDATE documents SET tracking_state='tracked' WHERE id=(SELECT document_id FROM source_files WHERE id=?1)",[sid]).map_err(error)?;
             }
-            tx.execute("INSERT OR IGNORE INTO path_exclusions SELECT project_id,lower(replace(relative_path,char(92),'/')),'file' FROM source_files WHERE project_id=?1 AND disposition='ignored'",[project]).map_err(error)?;
-            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         }
         tx.execute("UPDATE projects SET tracking_enabled=?1,archive_enabled=?2,tracking_initialized=CASE WHEN ?1 AND tracking_initialized=0 THEN 2 ELSE tracking_initialized END,watch_status=CASE WHEN ?1 THEN CASE WHEN tracking_enabled=0 THEN 'starting' ELSE watch_status END ELSE 'off' END WHERE id=?3",params![enabled,archive,project]).map_err(error)?;
         if archive != was_archive {

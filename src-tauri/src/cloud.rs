@@ -175,17 +175,10 @@ pub fn draft(db: &Connection, p: &Value) -> Result<CloudDraft> {
             .collect(),
     })
 }
-pub fn selection_reduction(db: &Connection, p: &Value, requested: &CloudDraft) -> Result<bool> {
-    let saved = draft(db, p)?;
-    Ok(requested.enabled == saved.enabled
-        && requested.automatic == saved.automatic
-        && requested.mode == saved.mode
-        && requested.soft_limit == saved.soft_limit
-        && requested.documents.len() < saved.documents.len()
-        && requested
-            .documents
-            .iter()
-            .all(|id| saved.documents.contains(id)))
+pub fn selection_reduction(_db: &Connection, _p: &Value, _requested: &CloudDraft) -> Result<bool> {
+    // Document selection now comes exclusively from saved paths; a client-supplied
+    // list can never authorize the legacy opt-out / reduced-validation path.
+    Ok(false)
 }
 pub fn preview(db: &Connection, id: &str, draft: &CloudDraft) -> Result<CloudPlan> {
     let p = project(db, id)?;
@@ -250,22 +243,14 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
                 .into(),
         );
     }
-    tx.execute("DELETE FROM cloud_documents WHERE project_id=?1", [id])
-        .map_err(error)?;
     let selection = families(&tx, id)?
         .into_iter()
         .filter(|f| n(f, "selected") == 1)
         .map(|f| s(&f, "id").to_string())
         .collect::<Vec<_>>();
-    for d in &selection {
-        tx.execute("INSERT INTO cloud_documents VALUES(?1,?2)", params![id, d])
-            .map_err(error)?;
-    }
-    // Explicit document opt-outs are independent of uploads and source availability.
-    // Preserve uncertain uploads without a File ID so re-selection can recover them safely.
-    tx.execute("UPDATE cloud_jobs SET desired=0,phase=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'selection_remove' ELSE phase END,state=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') AND phase!='remove' THEN 'removing' ELSE state END,next_at=0,error=NULL WHERE project_id=?1 AND document_id NOT IN (SELECT document_id FROM cloud_documents WHERE project_id=?1)",[id]).map_err(error)?;
-    tx.execute("UPDATE cloud_jobs SET desired=1,phase='attach',state='uploaded',next_at=0,error=NULL WHERE project_id=?1 AND phase='selection_remove' AND document_id IN (SELECT document_id FROM cloud_documents WHERE project_id=?1) AND NOT EXISTS(SELECT 1 FROM cloud_exclusions e WHERE e.project_id=?1 AND e.version_id=cloud_jobs.version_id)",[id]).map_err(error)?;
-    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=?3,mode=?4,soft_limit=?5,scope=?6,store_op=COALESCE(store_op,?7),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN ?8 THEN sync_requested WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.automatic,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string(),reduction]).map_err(error)?;
+    // Existing cloud_documents rows are retained for compatibility, but never
+    // authorize a document or schedule a removal under the unified selection.
+    tx.execute("UPDATE cloud_projects SET enabled=?2,auto_sync=1,mode=?3,soft_limit=?4,scope=?5,store_op=COALESCE(store_op,?6),store_state=CASE WHEN store_state='none' THEN 'pending' ELSE store_state END,status=CASE WHEN ?2 THEN 'ready_to_create' ELSE 'disconnected' END,paused=CASE WHEN ?2 THEN paused ELSE 1 END,sync_requested=CASE WHEN started=1 THEN 1 ELSE 0 END,revision=revision+1,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",params![id,draft.enabled,draft.mode,draft.soft_limit,bound,uuid::Uuid::new_v4().to_string()]).map_err(error)?;
     activity(
         &tx,
         id,
@@ -277,7 +262,7 @@ pub fn apply(db: &mut Connection, id: &str, draft: &CloudDraft, token: &str) -> 
         id,
         &[
             ("enabled", draft.enabled as i64),
-            ("auto_sync", draft.automatic as i64),
+            ("auto_sync", 1),
             ("soft_limit", draft.soft_limit),
         ],
     )?;

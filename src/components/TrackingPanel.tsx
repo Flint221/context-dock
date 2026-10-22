@@ -90,7 +90,6 @@ export function TrackingPanel({
     };
   }, []);
   const [initialize, setInitialize] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
   const [archive, setArchive] = useState(false);
   const [history, setHistory] = useState<string | null>(null);
   const [limit, setLimit] = useState(100);
@@ -286,7 +285,6 @@ export function TrackingPanel({
                     kind: "tracking",
                   });
                 else {
-                  setSelected(eligible.map((s) => s.id));
                   setArchive(false);
                   setChoiceLimit(100);
                   setInitialize(true);
@@ -600,46 +598,21 @@ export function TrackingPanel({
           }}
         >
           <p>
-            Select files to track. Clear numbered sequences such as
+            The saved folder selection determines which files are tracked.
+            Clear numbered sequences such as
             Report_v1.md, Report_v2.md and Report_v10.md in the same folder and
             file type become one document family, imported in numeric order with
             the newest export active. Unrelated or ambiguous names stay
             separate. Initialization never moves your original files.
           </p>
           <p className="tracking-note">
-            Unselected existing files are ignored for tracking until you include
-            them and Save changes in the folder tree. New unrelated files added
-            later are tracked automatically unless their folder is excluded.
+            Select or exclude files in the folder tree and save your changes.
+            New unrelated files are excluded until you select them.
           </p>
-          <div className="selection-actions">
-            <button
-              disabled={busy}
-              onClick={() => setSelected(eligible.map((s) => s.id))}
-            >
-              Select all
-            </button>
-            <button disabled={busy} onClick={() => setSelected([])}>
-              Clear selection
-            </button>
-            <span>{selected.length} selected</span>
-          </div>
+          <p>{eligible.length} available selected files</p>
           <div className="source-selection">
             {eligible.slice(0, choiceLimit).map((s) => (
-              <label key={s.id} className="tracking-toggle">
-                <input
-                  type="checkbox"
-                  disabled={busy}
-                  checked={selected.includes(s.id)}
-                  onChange={(e) =>
-                    setSelected((ids) =>
-                      e.target.checked
-                        ? [...ids, s.id]
-                        : ids.filter((id) => id !== s.id),
-                    )
-                  }
-                />
-                <span>{s.relativePath}</span>
-              </label>
+              <p key={s.id}>{s.relativePath}</p>
             ))}
             {eligible.length > choiceLimit && (
               <button onClick={() => setChoiceLimit((n) => n + 100)}>
@@ -688,7 +661,7 @@ export function TrackingPanel({
                       project.id,
                       true,
                       archive,
-                      selected,
+                      eligible.map((s) => s.id),
                     ),
                   { enabled: true, archive },
                   () => setInitialize(false),

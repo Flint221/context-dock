@@ -166,6 +166,7 @@ impl Registry {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
         let path_rules = crate::path_selection::rules(&self.db, project)?;
+        let blocked_documents = crate::path_selection::blocked_documents(&self.db, project)?;
         Ok(TrackingView {
             import_notice: self
                 .db
@@ -181,7 +182,7 @@ impl Registry {
             initialized,
             watch_status,
             error: problem,
-            families,
+            families: families.into_iter().filter(|f| !blocked_documents.contains(&f.id)).collect(),
             sources: sources
                 .into_iter()
                 .filter(|s| crate::path_selection::permits(&path_rules, &s.relative_path))
