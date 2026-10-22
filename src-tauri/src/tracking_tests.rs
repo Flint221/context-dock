@@ -628,6 +628,15 @@ fn ambiguous_families_and_other_directories_require_review_and_manual_associatio
     let id = f.document("Design_Notes_v1.md");
     fs::write(f.root.join("Design_Notes_v3.md"), "third").unwrap();
     f.scan();
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.project, "Design_Notes_v3.md").unwrap());
+    assert!(f
+        .r
+        .path_selection(&f.project)
+        .unwrap()
+        .entries
+        .iter()
+        .any(|entry| entry.path == "Design_Notes_v3.md" && entry.new));
+    assert_eq!(f.count(&id), 1);
     f.select_new("Design_Notes_v3.md");
     let review = f.r.tracking_view(&f.project).unwrap().reviews.remove(0);
     assert_eq!(review.candidate_ids.len(), 2);
