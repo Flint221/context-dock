@@ -13,6 +13,7 @@ vi.mock("../services/desktop", () => ({
     native: vi.fn(() => true),
     read: vi.fn(),
     setting: vi.fn(),
+    testNotification: vi.fn(),
     subscribe: vi.fn(),
     pending: vi.fn(),
     preview: vi.fn(),
@@ -55,6 +56,9 @@ beforeEach(() => {
   ];
   vi.mocked(desktop.subscribe).mockResolvedValue(() => {});
   vi.mocked(desktop.read).mockImplementation(async () => ({ ...status }));
+  vi.mocked(desktop.testNotification).mockResolvedValue(
+    "Test notification submitted to Windows. Check Notification Center.",
+  );
   vi.mocked(desktop.pending).mockImplementation(async () =>
     structuredClone(pending),
   );
@@ -74,6 +78,30 @@ beforeEach(() => {
   vi.mocked(desktop.apply).mockImplementation(async (request) => {
     pending = pending.filter((f) => !request.paths.includes(f.path));
   });
+});
+it("tests delivery without changing preferences or approvals and surfaces Windows failures", async () => {
+  const user = userEvent.setup();
+  render(<DesktopSettings />);
+  const button = await screen.findByRole("button", {
+    name: "Send test notification",
+  });
+  await user.click(button);
+  expect(await screen.findByRole("status")).toHaveTextContent(
+    "submitted to Windows",
+  );
+  expect(desktop.setting).not.toHaveBeenCalled();
+  expect(desktop.apply).not.toHaveBeenCalled();
+  vi.mocked(desktop.testNotification).mockRejectedValueOnce(
+    new Error(
+      "Windows notifications are disabled. Enable ContextDock in Windows notification settings.",
+    ),
+  );
+  await user.click(button);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Windows notifications are disabled",
+  );
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(button).not.toBeDisabled();
 });
 it("reads persisted desktop controls and supports reversing each preference", async () => {
   const user = userEvent.setup();

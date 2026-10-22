@@ -36,6 +36,7 @@ mod initial_import;
 mod matching;
 mod models;
 mod monitor;
+mod notifications;
 mod operations;
 mod path_selection;
 #[cfg(test)]
@@ -440,6 +441,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             desktop::desktop_read,
             desktop::desktop_setting,
+            desktop::desktop_test_notification,
             desktop::desktop_ready,
             desktop::desktop_route,
             desktop::desktop_complete,

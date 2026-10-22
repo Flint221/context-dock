@@ -1,6 +1,7 @@
 //! Native lifecycle and notifications remain active when the WebView is hidden.
 use crate::{
     cloud,
+    notifications::{self, Delivery, Queue},
     registry::{error, Result},
     review, Store,
 };
@@ -25,6 +26,8 @@ pub struct Runtime {
     route: Mutex<Option<Value>>,
     pub tray_ready: AtomicBool,
     pub error: Arc<Mutex<Option<String>>>,
+    notification_error: Arc<Mutex<Option<String>>>,
+    retry_notifications: AtomicBool,
     ready: AtomicBool,
     pending_close: Mutex<Option<String>>,
 }
@@ -104,6 +107,8 @@ pub fn request_close(app: &tauri::AppHandle, action: &str) {
 pub fn start(app: &tauri::AppHandle, path: PathBuf) -> std::io::Result<Runtime> {
     let stop = Arc::new(AtomicBool::new(false));
     let error = Arc::new(Mutex::new(None));
+    let notification_error = Arc::new(Mutex::new(None));
+    let worker_notification_error = notification_error.clone();
     let (worker_stop, worker_error, handle) = (stop.clone(), error.clone(), app.clone());
     let worker = thread::Builder::new()
         .name("contextdock-desktop".into())
@@ -112,11 +117,25 @@ pub fn start(app: &tauri::AppHandle, path: PathBuf) -> std::io::Result<Runtime> 
                 return;
             };
             let mut old_pending = String::new();
+            let mut notifications = Queue::default();
             while !worker_stop.load(Ordering::Relaxed) {
-                let result = background_tick(&db, &handle, &mut old_pending);
+                if handle
+                    .try_state::<Runtime>()
+                    .is_some_and(|r| r.retry_notifications.swap(false, Ordering::Relaxed))
+                {
+                    notifications = Queue::default();
+                }
+                let result = background_tick(&db, &handle, &mut old_pending, &mut notifications);
                 if let Err(e) = result {
                     if let Ok(mut slot) = worker_error.lock() {
                         *slot = Some(e);
+                    }
+                }
+                if let Ok(mut slot) = worker_notification_error.lock() {
+                    let current = notifications.error();
+                    if *slot != current {
+                        *slot = current;
+                        let _ = handle.emit("desktop-changed", ());
                     }
                 }
                 for _ in 0..20 {
@@ -133,6 +152,8 @@ pub fn start(app: &tauri::AppHandle, path: PathBuf) -> std::io::Result<Runtime> 
         route: Mutex::new(None),
         tray_ready: AtomicBool::new(false),
         error,
+        notification_error,
+        retry_notifications: AtomicBool::new(false),
         ready: AtomicBool::new(false),
         pending_close: Mutex::new(None),
     })
@@ -234,6 +255,7 @@ fn background_tick(
     db: &rusqlite::Connection,
     app: &tauri::AppHandle,
     old: &mut String,
+    notifications: &mut Queue,
 ) -> Result<()> {
     let entries = review::pending(db)?;
     let total = entries.len();
@@ -271,6 +293,7 @@ fn background_tick(
     }
     let now = chrono::Utc::now().timestamp();
     let active = foreground(app);
+    let mut notice_keys = std::collections::HashSet::new();
     for p in projects {
         let id = cloud::s(&p, "id");
         let files = entries
@@ -288,16 +311,26 @@ fn background_tick(
                 .collect::<Vec<_>>()
                 .join("\n");
             let due = review::notice_due(db, &key, &signature, now, 30)?;
-            if due && !active && review::preference(db, "desktop.approval_notifications", true) {
-                toast(
-                    &format!("{}: files need approval", cloud::s(&p, "name")),
-                    &format!(
-                        "{} new files are waiting. Open ContextDock to review them.",
-                        files.len()
-                    ),
-                    &format!("contextdock://review?project={id}"),
-                    &key,
-                )?;
+            let enabled = review::preference(db, "desktop.approval_notifications", true);
+            if enabled {
+                notice_keys.insert(key.clone());
+            }
+            if due
+                && !active
+                && enabled
+                && notifications.attempt(&key, now, || {
+                    notifications::send(
+                        app,
+                        &format!("{}: files need approval", cloud::s(&p, "name")),
+                        &format!(
+                            "{} new files are waiting. Open ContextDock to review them.",
+                            files.len()
+                        ),
+                        &format!("contextdock://review?project={id}"),
+                        &key,
+                    )
+                })
+            {
                 review::notice_sent(db, &key, now)?;
             }
         }
@@ -312,72 +345,57 @@ fn background_tick(
         if signature == "|||0" {
             db.execute("DELETE FROM desktop_notices WHERE key=?1", [&key])
                 .map_err(error)?;
-        } else if review::notice_due(db, &key, &signature, now, 30)?
-            && !active
-            && review::preference(db, "desktop.problem_notifications", true)
-        {
-            toast(
-                &format!("{} needs attention", cloud::s(&p, "name")),
-                "Open ContextDock to review a tracking, folder or cloud problem.",
-                &format!("contextdock://project?project={id}"),
-                &key,
-            )?;
-            review::notice_sent(db, &key, now)?;
+        } else {
+            let due = review::notice_due(db, &key, &signature, now, 30)?;
+            let enabled = review::preference(db, "desktop.problem_notifications", true);
+            if enabled {
+                notice_keys.insert(key.clone());
+            }
+            if due
+                && !active
+                && enabled
+                && notifications.attempt(&key, now, || {
+                    notifications::send(
+                        app,
+                        &format!("{} needs attention", cloud::s(&p, "name")),
+                        "Open ContextDock to review a tracking, folder or cloud problem.",
+                        &format!("contextdock://project?project={id}"),
+                        &key,
+                    )
+                })
+            {
+                review::notice_sent(db, &key, now)?;
+            }
         }
     }
+    notifications.retain(&notice_keys);
     Ok(())
 }
-#[cfg(windows)]
-fn notifier() -> std::result::Result<windows::UI::Notifications::ToastNotifier, windows::core::Error>
-{
-    windows::UI::Notifications::ToastNotificationManager::CreateToastNotifierWithId(
-        &windows::core::HSTRING::from("com.contextdock.desktop"),
-    )
-}
-#[cfg(windows)]
-fn toast(title: &str, body: &str, route: &str, key: &str) -> Result<()> {
-    use sha2::{Digest, Sha256};
-    use windows::{
-        core::HSTRING,
-        Data::Xml::Dom::XmlDocument,
-        Win32::System::WinRT::{RoInitialize, RoUninitialize, RO_INIT_MULTITHREADED},
-        UI::Notifications::{NotificationSetting, ToastNotification},
-    };
-    fn escape(v: &str) -> String {
-        v.chars()
-            .filter(|c| *c >= ' ' || *c == '\n')
-            .collect::<String>()
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&apos;")
+#[tauri::command]
+pub async fn desktop_test_notification(app: tauri::AppHandle) -> Result<String> {
+    let handle = app.clone();
+    let delivery = tauri::async_runtime::spawn_blocking(move || {
+        notifications::send(
+            &handle,
+            "ContextDock notifications are ready",
+            "This is a test. Click to open Pending approvals. No files were uploaded or approved.",
+            "contextdock://review",
+            "test",
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if delivery == Delivery::Disabled {
+        return Err("Windows notifications are disabled. Enable ContextDock in Windows Settings > System > Notifications, then try again.".into());
     }
-    let initialized = unsafe { RoInitialize(RO_INIT_MULTITHREADED) }.is_ok();
-    let result = (|| -> windows::core::Result<()> {
-        let notifier = notifier()?;
-        if notifier.Setting()? != NotificationSetting::Enabled {
-            return Ok(());
-        }
-        let xml = XmlDocument::new()?;
-        xml.LoadXml(&HSTRING::from(format!("<toast activationType=\"protocol\" launch=\"{}\"><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text></binding></visual></toast>",escape(route),escape(title),escape(body))))?;
-        let toast = ToastNotification::CreateToastNotification(&xml)?;
-        toast.SetTag(&HSTRING::from(
-            &format!("{:x}", Sha256::digest(key.as_bytes()))[..16],
-        ))?;
-        toast.SetGroup(&HSTRING::from("ContextDock"))?;
-        notifier.Show(&toast)
-    })();
-    if initialized {
-        unsafe { RoUninitialize() };
+    let runtime = app.state::<Runtime>();
+    if let Ok(mut error) = runtime.notification_error.lock() {
+        *error = None;
     }
-    result.map_err(|e| format!("Windows notification could not be delivered: {e}"))
+    runtime.retry_notifications.store(true, Ordering::Relaxed);
+    let _ = app.emit("desktop-changed", ());
+    Ok("Test notification submitted to Windows. Check the banner or Notification Center (Windows + N); Do not disturb may hide the banner.".into())
 }
-#[cfg(not(windows))]
-fn toast(_: &str, _: &str, _: &str, _: &str) -> Result<()> {
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn desktop_read(state: tauri::State<'_, Store>, app: tauri::AppHandle) -> Result<Value> {
     let startup = crate::startup::status()?;
@@ -387,6 +405,13 @@ pub async fn desktop_read(state: tauri::State<'_, Store>, app: tauri::AppHandle)
         .lock()
         .ok()
         .and_then(|e| e.clone());
+    let notification_error = app
+        .state::<Runtime>()
+        .notification_error
+        .lock()
+        .ok()
+        .and_then(|e| e.clone());
+    let native_error = native_error.or(notification_error);
     crate::work(state.inner().clone(),move|r|Ok(json!({"keepRunning":review::preference(&r.db,"desktop.keep_running",true),"approvalNotifications":review::preference(&r.db,"desktop.approval_notifications",true),"problemNotifications":review::preference(&r.db,"desktop.problem_notifications",true),"uploadsPaused":uploads_paused(&r.db),"startupRegistered":startup.registered,"startupEnabled":startup.enabled,"pending":review::pending(&r.db)?.len(),"error":native_error}))).await
 }
 #[tauri::command]

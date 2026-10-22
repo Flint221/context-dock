@@ -20,6 +20,8 @@ The review token binds selected paths, current pending metadata, project/folder 
 
 ## Notifications
 
+Version 0.10.1 repairs first-send `ToastNotifier.Setting` failures (`0x80070490`), registers the per-user notification identity/logo, adds **Send test notification** in Settings and backs off failed/disabled submissions without marking them delivered. See [the installed test walkthrough](ContextDock_Tray_Testing_v1.md).
+
 The native worker groups changes for 30 seconds and limits notifications to one per project/category every five minutes. Delivered signatures are persisted, avoiding unchanged reminders after restart. Resolved problems clear their watermark so a recurrence can notify again. Approval and problem notifications default on; routine success notifications are omitted. The foreground window uses in-app counts instead of toasts. Notifications contain project names and counts, without document filenames/content, and Windows suppression remains effective.
 
 Windows toast XML uses protocol activation for narrowly validated `contextdock://review` or `contextdock://project` routes with UUID project IDs. Activation only navigates; it cannot approve, delete, upload or open arbitrary filesystem paths. Installed protocol activation routes to the existing instance through single-instance handling; cold launch reads the same route from arguments. Actual notification delivery and protocol registration depend on the installed application's Windows identity and shortcuts.

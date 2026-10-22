@@ -55,6 +55,7 @@ export const desktop = {
       : Promise.resolve(defaults),
   setting: (key: string, value: boolean) =>
     invoke<void>("desktop_setting", { key, value }),
+  testNotification: () => invoke<string>("desktop_test_notification"),
   subscribe: (handler: () => void) =>
     isTauri() ? listen("desktop-changed", handler) : Promise.resolve(() => {}),
   onRoute: async (handler: (route: DesktopRoute) => void) => {

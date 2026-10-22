@@ -6,6 +6,7 @@ export function DesktopSettings() {
   const [status, setStatus] = useState<DesktopStatus | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [notificationTest, setNotificationTest] = useState("");
   useEffect(() => {
     let active = true;
     let stop: (() => void) | undefined;
@@ -38,6 +39,19 @@ export function DesktopSettings() {
     setError("");
     try {
       await desktop.setting(key, value);
+      setStatus(await desktop.read());
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function testNotification() {
+    setBusy(true);
+    setError("");
+    setNotificationTest("");
+    try {
+      setNotificationTest(await desktop.testNotification());
       setStatus(await desktop.read());
     } catch (e) {
       setError(String(e));
@@ -141,6 +155,19 @@ export function DesktopSettings() {
               />
               Tracking, folder and cloud problems
             </label>
+            <button
+              disabled={busy || !desktop.native()}
+              onClick={() => void testNotification()}
+            >
+              <Bell size={16} /> Send test notification
+            </button>
+            <p>
+              The test works even while this window is open. Click the alert to
+              open Pending approvals. It does not upload or approve files. If a
+              banner is hidden by Do not disturb, check Notification Center
+              (Windows + N).
+            </p>
+            {notificationTest && <p role="status">{notificationTest}</p>}
             <button
               disabled={busy || !desktop.native()}
               onClick={() =>
