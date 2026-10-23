@@ -1,6 +1,6 @@
 [package]
 name = "contextdock"
-version = "0.10.1"
+version = "0.10.2"
 description = "Local-first project document registry"
 authors = ["ContextDock contributors"]
 edition = "2021"

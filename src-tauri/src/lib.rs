@@ -32,6 +32,9 @@ mod extraction;
 mod folder_recovery;
 #[cfg(test)]
 mod folder_recovery_tests;
+mod forget;
+#[cfg(test)]
+mod forget_tests;
 mod initial_import;
 mod matching;
 mod models;
@@ -377,6 +380,53 @@ async fn save_path_selection(
     let _ = app.emit("cloud-changed", &project);
     Ok(())
 }
+#[tauri::command]
+async fn preview_forget_missing(
+    state: tauri::State<'_, Store>,
+    project: String,
+    path: String,
+) -> Result<forget::Plan, String> {
+    work(state.inner().clone(), move |r| {
+        r.preview_forget(&project, &path)
+    })
+    .await
+}
+#[tauri::command]
+async fn forget_missing_file(
+    state: tauri::State<'_, Store>,
+    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
+    app: tauri::AppHandle,
+    project: String,
+    path: String,
+    token: String,
+) -> Result<Vec<String>, String> {
+    let gate = runtime.gate.clone();
+    let store = state.inner().clone();
+    let id = project.clone();
+    let warnings = tauri::async_runtime::spawn_blocking(move || {
+        let _guard = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
+        let mut r = store.0.lock().map_err(|_| "Registry is unavailable.")?;
+        let mut warnings = r.forget_missing(&id, &path, &token)?;
+        if let Err(e) = r.reconcile(
+            &id,
+            "forget_missing",
+            &std::collections::HashSet::new(),
+            true,
+        ) {
+            let _ = r.set_tracking_error(&id, std::slice::from_ref(&e));
+            warnings.push(format!(
+                "Removal saved, but tracking refresh needs attention: {e}"
+            ));
+        }
+        Ok::<Vec<String>, String>(warnings)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.emit("registry-changed", &project);
+    let _ = app.emit("cloud-changed", &project);
+    let _ = app.emit("desktop-changed", ());
+    Ok(warnings)
+}
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -457,6 +507,8 @@ pub fn run() {
             snapshot,
             path_selection_view,
             save_path_selection,
+            preview_forget_missing,
+            forget_missing_file,
             add_project,
             rename_project,
             preview_project_folder,

@@ -12,12 +12,14 @@ import {
   FileText,
   Folder,
   Save,
+  Trash2,
 } from "lucide-react";
 import { registry } from "../services/registry";
-import type { PathRule, PathSelectionView } from "../types";
+import type { ForgetPlan, PathRule, PathSelectionView } from "../types";
 import { useUnsavedChanges } from "../draftGuard";
 import { beginOperation } from "../operations";
 import { OperationStatus } from "./OperationStatus";
+import { Modal } from "./Modal";
 const key = (path: string) => path.replaceAll("\\", "/").toLowerCase();
 const ruleSignature = (rules: PathRule[]) =>
   JSON.stringify(
@@ -95,12 +97,16 @@ function TreeRow({
   rules,
   toggle,
   disabled,
+  forget,
+  forgetDisabled,
   ancestorExcluded = false,
 }: {
   node: Node;
   rules: PathRule[];
   toggle: (node: Node, include: boolean) => void;
   disabled: boolean;
+  forget: (path: string) => void;
+  forgetDisabled: boolean;
   ancestorExcluded?: boolean;
 }) {
   const [open, setOpen] = useState(node.path === "");
@@ -155,6 +161,17 @@ function TreeRow({
         {node.status !== "available" && node.path && (
           <span className="badge missing">{node.status}</span>
         )}
+        {node.kind === "file" && node.status === "missing" && (
+          <button
+            className="danger"
+            aria-label={`Forget missing ${node.path}`}
+            title="Review removal of this missing file and its saved local revisions"
+            disabled={disabled || forgetDisabled}
+            onClick={() => forget(node.path)}
+          >
+            <Trash2 size={15} /> Forget…
+          </button>
+        )}
       </div>
       {node.kind === "folder" && open && (
         <ul>
@@ -168,6 +185,8 @@ function TreeRow({
                   rules={rules}
                   toggle={toggle}
                   disabled={disabled}
+                  forget={forget}
+                  forgetDisabled={forgetDisabled}
                   ancestorExcluded={ancestorExcluded || !included}
                 />
               ))
@@ -208,6 +227,10 @@ export function FolderTree({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [reload, setReload] = useState(0);
+  const [forgetPlan, setForgetPlan] = useState<ForgetPlan | null>(null);
+  const [operationMessage, setOperationMessage] = useState(
+    "Saving and verifying folder selection…",
+  );
   const mounted = useRef(false);
   const guard = useUnsavedChanges();
   const dirty =
@@ -270,6 +293,7 @@ export function FolderTree({
       return false;
     }
     setBusy(true);
+    setOperationMessage("Saving and verifying folder selection…");
     setError("");
     setNotice("");
     try {
@@ -343,6 +367,57 @@ export function FolderTree({
       return include ? remaining : [...remaining, { path, kind: node.kind }];
     });
   };
+  async function previewForget(path: string) {
+    setBusy(true);
+    setOperationMessage("Checking the missing file and its local history…");
+    setError("");
+    setNotice("");
+    try {
+      setForgetPlan(await registry.previewForget(project, path));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function forgetMissing() {
+    if (!forgetPlan || dirty) return;
+    const release = beginOperation(`cloud:${project}`);
+    if (!release) {
+      setError(
+        "Another cloud or folder action is running. Wait for it to finish.",
+      );
+      return;
+    }
+    setBusy(true);
+    setOperationMessage("Removing the missing file and its local history…");
+    setError("");
+    try {
+      const warnings = await registry.forgetMissing(
+        project,
+        forgetPlan.path,
+        forgetPlan.token,
+      );
+      setForgetPlan(null);
+      setNotice(
+        "Missing file and its local history removed from ContextDock. Source files, archives, backups and other documents were not changed.",
+      );
+      if (warnings.length) setError(warnings.join(" "));
+      try {
+        const saved = await registry.paths(project);
+        setView(saved);
+        setDraft(saved.exclusions);
+        await changed();
+      } catch (e) {
+        setError(`Removal saved, but workspace refresh failed. ${String(e)}`);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      release();
+      setBusy(false);
+    }
+  }
   return (
     <section className="panel folder-selection" aria-label="Folder selection">
       <div className="section-heading">
@@ -367,6 +442,12 @@ export function FolderTree({
         New documents are excluded until selected and saved. Checked paths
         follow your Tracking and Cloud sync settings.
       </p>
+      <p>
+        Deleted a file intentionally? Use Forget beside its Missing badge to
+        review permanent removal of its discovery record and saved local
+        revisions. Ignore only excludes it. Save or discard checkbox changes
+        before forgetting a file.
+      </p>
       {error && <p role="alert">{error}</p>}
       {unavailable && (
         <p role="alert">
@@ -376,7 +457,14 @@ export function FolderTree({
       )}
       {!view && !error && <p role="status">Reading folder structure…</p>}
       {view?.warnings.map((warning, i) => (
-        <p className="warning" key={i}>
+        <p
+          className={
+            warning.startsWith("Local snapshot cleanup")
+              ? "error-text"
+              : "warning"
+          }
+          key={i}
+        >
           {warning}
         </p>
       ))}
@@ -393,12 +481,14 @@ export function FolderTree({
             rules={draft}
             toggle={toggle}
             disabled={busy || loading || unavailable || !guard.ready}
+            forget={(path) => void previewForget(path)}
+            forgetDisabled={dirty}
           />
         </ul>
       )}
       <OperationStatus
         busy={busy}
-        message="Saving and verifying folder selection…"
+        message={operationMessage}
         success={notice}
       />
       <div className="toolbar-actions">
@@ -422,6 +512,59 @@ export function FolderTree({
           Reload folder tree
         </button>
       </div>
+      {forgetPlan && (
+        <Modal
+          title="Forget missing file?"
+          close={() => {
+            if (!busy) setForgetPlan(null);
+          }}
+        >
+          <p>
+            <strong>{forgetPlan.path}</strong>
+          </p>
+          <p>
+            Remove this missing file from discovery, pending approvals and local
+            history? This permanently deletes {forgetPlan.revisionCount}{" "}
+            captured local revisions for this exact path. Other versions in its
+            document family stay saved. This cannot be undone in ContextDock.
+          </p>
+          {forgetPlan.revisionCount === 0 && (
+            <p>This file has no captured local history to delete.</p>
+          )}
+          <p>
+            Source files, archive folders, backups, saved chats and reports are
+            not deleted. Cloud data is not deleted by this action. If the file
+            appears again, it will be discovered again under the saved approval
+            rules.
+          </p>
+          {forgetPlan.blockers.map((message) => (
+            <p role="alert" className="error-text" key={message}>
+              {message}
+            </p>
+          ))}
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <div className="actions">
+            <button
+              disabled={busy}
+              data-autofocus
+              onClick={() => setForgetPlan(null)}
+            >
+              Cancel
+            </button>
+            <button
+              className="danger"
+              disabled={busy || dirty || forgetPlan.blockers.length > 0}
+              onClick={() => void forgetMissing()}
+            >
+              {busy ? "Removing…" : "Forget file and local history"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
   );
 }

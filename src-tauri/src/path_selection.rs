@@ -146,7 +146,8 @@ impl Registry {
         crate::folder_recovery::require_ready(&self.db, project)?;
         self.refresh(project)?;
         let exclusions = rules(&self.db, project)?;
-        let (folders, warnings) = scanner::folders(Path::new(&root))?;
+        let (folders, mut warnings) = scanner::folders(Path::new(&root))?;
+        warnings.extend(self.purge_forgotten_snapshots()?);
         let mut entries = BTreeMap::new();
         for path in folders {
             entries.insert(

@@ -16,7 +16,12 @@ import { registry } from "../services/registry";
 import { desktop } from "../services/desktop";
 import type { PathSelectionView } from "../types";
 vi.mock("../services/registry", () => ({
-  registry: { paths: vi.fn(), savePaths: vi.fn() },
+  registry: {
+    paths: vi.fn(),
+    savePaths: vi.fn(),
+    previewForget: vi.fn(),
+    forgetMissing: vi.fn(),
+  },
 }));
 vi.mock("../services/desktop", () => ({
   desktop: { native: vi.fn(() => false), listenClose: vi.fn(), exit: vi.fn() },
@@ -46,6 +51,28 @@ beforeEach(() => {
   vi.mocked(desktop.exit).mockResolvedValue(undefined);
   vi.mocked(registry.paths).mockImplementation(async () =>
     structuredClone(saved),
+  );
+  vi.mocked(registry.previewForget).mockImplementation(
+    async (_project, path) => ({
+      path,
+      revisionCount: 0,
+      bytes: 0,
+      blockers: [],
+      token: "forget-token",
+    }),
+  );
+  vi.mocked(registry.forgetMissing).mockImplementation(
+    async (_project, path) => {
+      saved = {
+        ...saved,
+        revision: saved.revision + 1,
+        entries: saved.entries.filter((e) => e.path !== path),
+        exclusions: saved.exclusions.filter(
+          (e) => e.path !== path.toLowerCase(),
+        ),
+      };
+      return [];
+    },
   );
   vi.mocked(registry.savePaths).mockImplementation(
     async (_project, revision, exclusions) => {
@@ -389,4 +416,111 @@ it("refreshes saved folder coverage after a scan without replacing unsaved check
   expect(
     await screen.findByRole("checkbox", { name: "Include Added.md" }),
   ).toBeChecked();
+});
+
+it("forgets a missing test file only after confirmation and removes its row", async () => {
+  saved.entries.push({
+    path: "Test_v1.md",
+    kind: "file",
+    status: "missing",
+    new: true,
+  });
+  saved.exclusions.push({ path: "test_v1.md", kind: "file" });
+  const user = await ready();
+  await user.click(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  );
+  let dialog = await screen.findByRole("dialog", {
+    name: "Forget missing file?",
+  });
+  expect(dialog).toHaveTextContent("no captured local history");
+  expect(registry.forgetMissing).not.toHaveBeenCalled();
+  await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(screen.getByText("Test_v1.md")).toBeInTheDocument();
+  await user.click(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  );
+  dialog = await screen.findByRole("dialog", { name: "Forget missing file?" });
+  await user.click(
+    within(dialog).getByRole("button", {
+      name: "Forget file and local history",
+    }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByText("Test_v1.md")).not.toBeInTheDocument(),
+  );
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(screen.getByText("Keep.md")).toBeInTheDocument();
+  expect(registry.forgetMissing).toHaveBeenCalledWith(
+    "p",
+    "Test_v1.md",
+    "forget-token",
+  );
+});
+it("requires saving or discarding checkbox drafts before forgetting a file", async () => {
+  saved.entries.push({ path: "Test_v1.md", kind: "file", status: "missing" });
+  const user = await ready();
+  await user.click(screen.getByRole("checkbox", { name: "Include Keep.md" }));
+  expect(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  ).toBeDisabled();
+  await user.click(screen.getByRole("button", { name: "Discard changes" }));
+  expect(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  ).toBeEnabled();
+  expect(
+    screen.queryByRole("button", { name: "Forget missing Keep.md" }),
+  ).not.toBeInTheDocument();
+});
+it("shows retained-history blockers and prevents permanent removal", async () => {
+  saved.entries.push({ path: "Test_v1.md", kind: "file", status: "missing" });
+  vi.mocked(registry.previewForget).mockResolvedValue({
+    path: "Test_v1.md",
+    revisionCount: 3,
+    bytes: 512,
+    blockers: ["Cloud references require verified cleanup first."],
+    token: "token",
+  });
+  const user = await ready();
+  await user.click(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Forget missing file?",
+  });
+  expect(within(dialog).getByRole("alert")).toHaveClass("error-text");
+  expect(dialog).toHaveTextContent("3 captured local revisions");
+  expect(
+    within(dialog).getByRole("button", {
+      name: "Forget file and local history",
+    }),
+  ).toBeDisabled();
+  expect(registry.forgetMissing).not.toHaveBeenCalled();
+});
+it("keeps the confirmation and missing row when the backend rejects a stale review", async () => {
+  saved.entries.push({ path: "Test_v1.md", kind: "file", status: "missing" });
+  vi.mocked(registry.forgetMissing).mockRejectedValueOnce(
+    new Error("File changed. Review again."),
+  );
+  const user = await ready();
+  await user.click(
+    screen.getByRole("button", { name: "Forget missing Test_v1.md" }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: "Forget missing file?",
+  });
+  await user.click(
+    within(dialog).getByRole("button", {
+      name: "Forget file and local history",
+    }),
+  );
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent(
+    "File changed",
+  );
+  expect(
+    screen.getByRole("checkbox", { name: "Include Test_v1.md" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText(/history removed from ContextDock/),
+  ).not.toBeInTheDocument();
 });

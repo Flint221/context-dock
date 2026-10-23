@@ -10,9 +10,14 @@ import type {
   PathRule,
   PathSelectionView,
   ArchivalReview,
+  ForgetPlan,
 } from "../types";
 import type { Comparison } from "../comparison";
 export const registry = {
+  previewForget: (project: string, path: string) =>
+    invoke<ForgetPlan>("preview_forget_missing", { project, path }),
+  forgetMissing: (project: string, path: string, token: string) =>
+    invoke<string[]>("forget_missing_file", { project, path, token }),
   archivalReview: (project: string, enabled: boolean) =>
     invoke<ArchivalReview>("archival_review", { project, enabled }),
   applyArchival: (project: string, enabled: boolean, token: string) =>

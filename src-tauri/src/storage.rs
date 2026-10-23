@@ -258,6 +258,65 @@ pub fn discard_stage(store: &Path, temp: &str) -> Result<()> {
     let p = checked(store, temp, false)?;
     fs::remove_file(&p.path).map_err(io)
 }
+/// Deletes only an explicitly forgotten, unreferenced application snapshot.
+pub fn delete_snapshot(store: &Path, relative: &str, expected: &str) -> Result<()> {
+    if !relative.starts_with("snapshots/")
+        || relative
+            .replace('\\', "/")
+            .split('/')
+            .any(|c| c.is_empty() || c == "." || c == ".." || c.contains(':'))
+    {
+        return Err("Unsafe snapshot cleanup path.".into());
+    }
+    match fs::symlink_metadata(store.join(relative)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(io(e)),
+        Ok(_) => (),
+    }
+    let checked = checked(store, relative, false)?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::{Foundation::GENERIC_READ, Storage::FileSystem::*};
+        let mut file = OpenOptions::new()
+            .read(true)
+            .access_mode(GENERIC_READ | DELETE)
+            .share_mode(FILE_SHARE_READ)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&checked.path)
+            .map_err(io)?;
+        let metadata = file.metadata().map_err(io)?;
+        use std::os::windows::fs::MetadataExt;
+        if !metadata.is_file()
+            || metadata.file_attributes() & 0x400 != 0
+            || hash(&mut file)? != expected
+        {
+            return Err("Snapshot integrity check failed; bytes were retained.".into());
+        }
+        // Windows 10+ deletes the verified handle without changing ACLs or the
+        // read-only attribute on another hard link to these bytes.
+        let info = FILE_DISPOSITION_INFO_EX {
+            Flags: FILE_DISPOSITION_FLAG_DELETE | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+        };
+        if unsafe {
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FileDispositionInfoEx,
+                &info as *const _ as *const _,
+                std::mem::size_of_val(&info) as u32,
+            )
+        } == 0
+        {
+            return Err(io(std::io::Error::last_os_error()));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        verify(&checked.path, expected)?;
+        fs::remove_file(&checked.path).map_err(io)
+    }
+}
 /// Windows renames the verified, write/delete-denied handle itself, never a re-resolved filename.
 #[cfg(windows)]
 pub fn rename_verified(file: &File, destination: &Path) -> Result<()> {

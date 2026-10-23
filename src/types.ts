@@ -44,7 +44,12 @@ export interface PathRule {
 export interface PathSelectionView {
   revision: number;
   exclusions: PathRule[];
-  entries: { path: string; kind: "folder" | "file"; status: string; new?: boolean }[];
+  entries: {
+    path: string;
+    kind: "folder" | "file";
+    status: string;
+    new?: boolean;
+  }[];
   warnings: string[];
   cloudPending: number;
 }
@@ -52,6 +57,13 @@ export interface Snapshot {
   projects: Project[];
   documents: Document[];
   theme: Theme;
+}
+export interface ForgetPlan {
+  path: string;
+  revisionCount: number;
+  bytes: number;
+  blockers: string[];
+  token: string;
 }
 export interface Family {
   id: string;
