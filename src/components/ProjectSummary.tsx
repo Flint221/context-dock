@@ -85,10 +85,11 @@ export function ProjectSummary({
             ? "Indexed"
             : "Indexing / waiting";
   const missing = selected?.filter((e) => e.status !== "available").length ?? 0;
+  const failedOperations = tracking?.operations.filter((o) => o.error) ?? [];
   const attention =
     missing +
     (tracking?.reviews.length ?? 0) +
-    (tracking?.operations.filter((o) => o.error).length ?? 0);
+    failedOperations.length;
   return (
     <section className="panel project-summary" aria-label="Project overview">
       <div>
@@ -139,8 +140,13 @@ export function ProjectSummary({
         <small>
           {unavailable
             ? "Reconnect or reassign"
-            : `${missing} unavailable files · ${tracking?.reviews.length ?? 0} to review`}
+            : `${missing} unavailable files · ${tracking?.reviews.length ?? 0} to review | ${failedOperations.length} archive / file operations`}
         </small>
+        {failedOperations.map((op) => (
+          <small key={op.id} className="error">
+            {op.kind}: {op.destination || op.error}
+          </small>
+        ))}
       </div>
     </section>
   );

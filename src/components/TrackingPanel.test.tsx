@@ -618,3 +618,12 @@ it("restores archived sources while keeping tracking paused", async () => {
     await screen.findByRole("button", { name: "Restore moved files…" }),
   ).toBeEnabled();
 });
+
+it("names the destination of a blocked archive operation", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  view.operations = [{ id: "op", kind: "archive", state: "blocked", error: "Filesystem operation failed", destination: "Old Context Files/Context_v3.md", createdAt: "" }];
+  render(<TrackingPanel project={project} changed={changed} />);
+  expect(await screen.findByText("Old Context Files/Context_v3.md")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Retry pending operations" })).toBeEnabled();
+});

@@ -101,6 +101,7 @@ export interface Activity {
   createdAt: string;
 }
 export interface PendingOperation {
+  destination?: string | null;
   id: string;
   kind: string;
   state: string;

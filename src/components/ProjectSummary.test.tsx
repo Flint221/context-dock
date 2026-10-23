@@ -123,3 +123,13 @@ it("never represents unavailable statuses as zero successful files or green inde
   );
   expect(screen.getAllByText("—")).toHaveLength(3);
 });
+
+it("identifies failed archive operations separately from missing files and reviews", () => {
+  render(<ProjectSummary selection={selection} tracking={{ ...tracking, operations: [
+    { id: "a", kind: "archive", state: "blocked", error: "Unsupported filesystem", destination: "Old Context Files/Context_v3.md", createdAt: "" },
+    { id: "b", kind: "archive", state: "blocked", error: "Unsupported filesystem", destination: "Old Context Files/Tasks_v2.md", createdAt: "" },
+  ] }} cloud={cloud} unavailable={false} />);
+  expect(screen.getByText("Needs attention").parentElement).toHaveTextContent("2 archive / file operations");
+  expect(screen.getByText("archive: Old Context Files/Context_v3.md")).toBeInTheDocument();
+  expect(screen.getByText("archive: Old Context Files/Tasks_v2.md")).toBeInTheDocument();
+});

@@ -2630,6 +2630,7 @@ main > header {
 }
 .project-summary small {
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 .summary-success {
   color: var(--success);

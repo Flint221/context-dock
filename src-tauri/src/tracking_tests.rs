@@ -1133,7 +1133,7 @@ fn archive_copy_recovers_partial_staging_and_final_link_without_touching_current
         let mut f = Fixture::new(&[("Master.md", "one")]);
         f.enable(true);
         let document = f.prepare_replacement("Master.md", "Master.md", "two");
-        let (_, plan) = f.pending_archive();
+        let (operation, plan) = f.pending_archive();
         assert_eq!(plan.mode, "copy");
         let root = PathBuf::from(f.r.path(&f.project).unwrap());
         let original_temp = f.root.join(&plan.temporary);
@@ -1149,6 +1149,17 @@ fn archive_copy_recovers_partial_staging_and_final_link_without_touching_current
                 &plan.destination,
                 "7692c3ad3540bb803c020b3aee66cd8887123234ea0c6e7143c0add73ff431ed",
                 false,
+                (None, |identity| {
+                    let mut receipt = plan.clone();
+                    receipt.old_identity = Some(identity.into());
+                    f.r.db
+                        .execute(
+                            "UPDATE operations SET payload=?1 WHERE id=?2",
+                            params![serde_json::to_string(&receipt).unwrap(), operation],
+                        )
+                        .unwrap();
+                    Ok(())
+                }),
             )
             .unwrap();
         }
@@ -1281,5 +1292,88 @@ fn lowering_a_filename_version_requires_review_without_inflating_its_history() {
     assert_eq!(
         fs::read_to_string(&f.r.versions(&id).unwrap()[0].snapshot_path).unwrap(),
         "four"
+    );
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "explicit external-drive acceptance in a disposable directory"]
+fn windows_exfat_archive_copy_publishes_and_recovers_without_hard_links() {
+    let drive = std::env::var("CONTEXTDOCK_ARCHIVE_TEST_DRIVE").expect("Set an exFAT drive root");
+    let root_dir = tempfile::Builder::new()
+        .prefix("ContextDock_Archive_Test_v1_")
+        .tempdir_in(drive)
+        .unwrap();
+    let root = fs::canonicalize(root_dir.path()).unwrap();
+    let snapshot_dir = tempdir().unwrap();
+    let snapshot = snapshot_dir.path().join("ContextDock_Snapshot_v1.md");
+    fs::write(&snapshot, "one").unwrap();
+    let hash = storage::hash(&mut storage::locked_read(&snapshot, false).unwrap()).unwrap();
+    let destination = "Old Context Files/ContextDock_Test_v1.md";
+    let temporary = "Old Context Files/.ContextDock_Staging_v1.tmp";
+    let mut receipt = None;
+    storage::archive_copy(
+        &snapshot,
+        &root,
+        temporary,
+        destination,
+        &hash,
+        false,
+        (None, |id| {
+            receipt = Some(id.to_string());
+            Ok(())
+        }),
+    )
+    .unwrap();
+    assert!(!root.join(temporary).exists());
+    assert_eq!(fs::read_to_string(root.join(destination)).unwrap(), "one");
+    storage::archive_copy(
+        &snapshot,
+        &root,
+        temporary,
+        destination,
+        &hash,
+        false,
+        (receipt.as_deref(), |_| panic!("must reuse receipt")),
+    )
+    .unwrap();
+    assert!(storage::archive_copy(
+        &snapshot,
+        &root,
+        temporary,
+        destination,
+        &hash,
+        false,
+        (None, |_| Ok(()))
+    )
+    .unwrap_err()
+    .contains("collision"));
+    assert_eq!(fs::read_to_string(snapshot).unwrap(), "one");
+}
+
+#[cfg(windows)]
+#[test]
+fn archive_copy_cannot_publish_without_durable_receipt() {
+    let temp = tempdir().unwrap();
+    let root = fs::canonicalize(temp.path()).unwrap();
+    let snapshot = root.join("ContextDock_Snapshot_v1.md");
+    fs::write(&snapshot, "one").unwrap();
+    let hash = storage::hash(&mut storage::locked_read(&snapshot, false).unwrap()).unwrap();
+    let error = storage::archive_copy(
+        &snapshot,
+        &root,
+        "Archive/.stage.tmp",
+        "Archive/ContextDock_Test_v1.md",
+        &hash,
+        false,
+        (None, |_| Err("journal unavailable".into())),
+    )
+    .unwrap_err();
+    assert!(error.contains("journal unavailable"));
+    assert!(!root.join("Archive/ContextDock_Test_v1.md").exists());
+    assert_eq!(fs::read_to_string(snapshot).unwrap(), "one");
+    assert_eq!(
+        fs::read_to_string(root.join("Archive/.stage.tmp")).unwrap(),
+        "one"
     );
 }

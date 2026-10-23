@@ -154,10 +154,11 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
-        let mut q=self.db.prepare("SELECT id,kind,state,error,created_at FROM operations WHERE project_id=?1 AND state NOT IN ('done','cancelled','restored') ORDER BY created_at").map_err(error)?;
+        let mut q=self.db.prepare("SELECT id,kind,state,error,created_at,CASE kind WHEN 'restore' THEN json_extract(payload,'$.archive.destination') ELSE json_extract(payload,'$.destination') END FROM operations WHERE project_id=?1 AND state NOT IN ('done','cancelled','restored') ORDER BY created_at").map_err(error)?;
         let operations = q
             .query_map([project], |r| {
                 Ok(PendingOperation {
+                    destination: r.get(5)?,
                     id: r.get(0)?,
                     kind: r.get(1)?,
                     state: r.get(2)?,

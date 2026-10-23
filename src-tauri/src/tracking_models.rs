@@ -45,6 +45,7 @@ pub struct Activity {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingOperation {
+    pub destination: Option<String>,
     pub id: String,
     pub kind: String,
     pub state: String,

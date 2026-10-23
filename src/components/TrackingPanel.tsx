@@ -561,6 +561,7 @@ export function TrackingPanel({
                   <strong>
                     {op.kind} · {op.state}
                   </strong>
+                  {op.destination && <p>{op.destination}</p>}
                   <p className={op.error ? "error" : undefined}>
                     {op.error || "Awaiting completion or project permission."}
                   </p>

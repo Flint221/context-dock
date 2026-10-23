@@ -377,11 +377,20 @@ pub fn archive_copy(
     dest_relative: &str,
     expected: &str,
     finalized: bool,
+    receipt: (Option<&str>, impl FnOnce(&str) -> Result<()>),
 ) -> Result<()> {
     let dest = checked(root, dest_relative, true)?;
     let temp = checked(root, temp_relative, true)?;
     if dest.path.exists() {
-        if !finalized && !same_file::is_same_file(&temp.path, &dest.path).unwrap_or(false) {
+        if !finalized
+            && !same_file::is_same_file(&temp.path, &dest.path).unwrap_or(false)
+            && !receipt.0.is_some_and(|identity| {
+                locked_read(&dest.path, false)
+                    .and_then(|f| file_identity(&f))
+                    .as_deref()
+                    == Ok(identity)
+            })
+        {
             return Err(
                 "Archive destination collision. Existing archive files were not overwritten."
                     .into(),
@@ -404,6 +413,21 @@ pub fn archive_copy(
     drop(out);
     drop(source);
     verify(&temp.path, expected)?;
+    #[cfg(windows)]
+    {
+        // Journal the verified staging identity before publishing without replacement.
+        // Handle rename works on exFAT too; no hard-link or source deletion is needed.
+        let mut staged = locked_read(&temp.path, true)?;
+        if hash(&mut staged)? != expected {
+            return Err(
+                "Archive staging changed before publication. Nothing was overwritten.".into(),
+            );
+        }
+        let identity = file_identity(&staged)?;
+        receipt.1(&identity)?;
+        rename_verified(&staged, &dest.path)?;
+    }
+    #[cfg(not(windows))]
     fs::hard_link(&temp.path, &dest.path).map_err(io)?;
     verify(&dest.path, expected)?;
     OpenOptions::new()

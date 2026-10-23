@@ -479,6 +479,7 @@ impl Registry {
                     "Incomplete archive staging retained; retrying into a fresh private temporary.",
                 )?;
             }
+            let saved_identity = plan.old_identity.clone();
             storage::archive_copy(
                 &old.path,
                 root,
@@ -486,6 +487,17 @@ impl Registry {
                 &plan.destination,
                 &old_hash,
                 finalized,
+                (saved_identity.as_deref(), |identity| {
+                    let mut receipt = plan.clone();
+                    receipt.old_identity = Some(identity.into());
+                    self.db
+                        .execute(
+                            "UPDATE operations SET payload=?1,updated_at=?2 WHERE id=?3",
+                            params![encode(&receipt)?, models::now(), id],
+                        )
+                        .map_err(error)?;
+                    Ok(())
+                }),
             )?;
         } else {
             let previous = self.source(&plan.old_source)?;
