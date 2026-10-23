@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import type { Comparison } from "../comparison";
 export const registry = {
+  refreshFolders: () => invoke<void>("refresh_project_folders"),
   previewForget: (project: string, path: string) =>
     invoke<ForgetPlan>("preview_forget_missing", { project, path }),
   forgetMissing: (project: string, path: string, token: string) =>

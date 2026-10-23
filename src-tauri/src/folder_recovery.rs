@@ -8,7 +8,7 @@ use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::{collections::HashMap, fs, path::Path};
 
-pub const LOST: &str = "Folder lost or inaccessible. Please reassign it before working in this project. Your saved history is retained.";
+pub const LOST: &str = "Folder lost or inaccessible. Reconnect the drive and refresh folders, or reassign the folder if it moved. Your saved history is retained.";
 
 pub fn root_guard(path: &str) -> Result<(fs::File, String)> {
     let root = Path::new(path);
@@ -84,6 +84,39 @@ pub struct FolderPlan {
 }
 
 impl Registry {
+    /// Recover only the original directory at its original path. A missing
+    /// saved identity or a replacement directory still requires reassignment.
+    pub fn reconnect_folder(&self, id: &str) -> Result<bool> {
+        let (path,state,saved):(String,String,Option<String>)=self.db.query_row("SELECT path,folder_state,folder_identity FROM projects WHERE id=?1 AND removed_at IS NULL",[id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(error)?;
+        if state == "ready" {
+            return Ok(false);
+        }
+        let Some(saved) = saved else {
+            return Ok(false);
+        };
+        let Ok((_guard, identity)) = root_guard(&path) else {
+            return Ok(false);
+        };
+        if identity != saved {
+            return Ok(false);
+        }
+        let changed=self.db.execute("UPDATE projects SET folder_state='ready',folder_revision=folder_revision+1,status='available',scan_error=NULL,watch_status=CASE WHEN tracking_enabled=1 THEN 'starting' ELSE 'off' END WHERE id=?1 AND removed_at IS NULL AND folder_state!='ready' AND folder_identity=?2",params![id,saved]).map_err(error)?;
+        Ok(changed == 1)
+    }
+    pub fn refresh_folders(&mut self) -> Result<()> {
+        let ids: Vec<String> = crate::cloud::rows(
+            &self.db,
+            "SELECT id FROM projects WHERE removed_at IS NULL ORDER BY id",
+            &[],
+        )?
+        .iter()
+        .map(|p| crate::cloud::s(p, "id").to_string())
+        .collect();
+        for id in ids {
+            self.refresh(&id)?;
+        }
+        Ok(())
+    }
     /// Lightweight health checks include projects whose tracking is off.
     pub fn check_folders(&self) -> Result<Vec<String>> {
         let mut q = self
@@ -113,6 +146,8 @@ impl Registry {
                     }
                     changed.push(id);
                 }
+            } else if self.reconnect_folder(&id)? {
+                changed.push(id);
             }
         }
         Ok(changed)

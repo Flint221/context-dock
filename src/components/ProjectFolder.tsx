@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, FolderOpen } from "lucide-react";
+import { AlertTriangle, FolderOpen, RefreshCw } from "lucide-react";
 import { registry } from "../services/registry";
 import type { FolderPlan, Project } from "../types";
 import { displayPath } from "../format";
@@ -19,26 +19,63 @@ export function ProjectFolder({
     project.folderState === "needs_reassignment" ||
     project.status === "unavailable";
   const [show, setShow] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState("");
+  async function checkSavedFolder() {
+    setChecking(true);
+    setCheckError("");
+    try {
+      await registry.refresh(project.id);
+      const snapshot = await registry.snapshot();
+      await changed();
+      if (
+        snapshot.projects.find((p) => p.id === project.id)?.folderState !==
+        "ready"
+      ) {
+        setCheckError(
+          "The original folder is still unavailable or its identity changed. Check the drive connection and drive letter. Reassign only if the folder moved or was replaced.",
+        );
+      }
+    } catch (e) {
+      setCheckError(String(e));
+    } finally {
+      setChecking(false);
+    }
+  }
   return (
     <>
       {lost ? (
         <section role="alert" className="panel folder-recovery">
           <h2>
-            <AlertTriangle size={20} /> Folder lost — please reassign it
+            <AlertTriangle size={20} /> Folder unavailable
           </h2>
           <p>
             The registered folder is missing, inaccessible, or has been
-            replaced. Find the project folder before working in this project
-            again.
+            replaced. Reconnect your external drive, then check the saved
+            folder.
           </p>
           <p className="full-path">{displayPath(project.path)}</p>
           <p>
-            You can close and reopen ContextDock. This reminder stays until you
-            reassign the folder. Saved history and chats are retained.
+            ContextDock also checks automatically while running and when
+            reopened. The same folder at the same path reconnects without
+            reassignment. If its location or identity changed, use Reassign
+            folder. Saved history and chats are retained.
           </p>
+          {checkError && (
+            <p role="alert" className="error-text">
+              {checkError}
+            </p>
+          )}
+          <button
+            disabled={busy || checking}
+            onClick={() => void checkSavedFolder()}
+          >
+            <RefreshCw size={16} />{" "}
+            {checking ? "Checking saved folder…" : "Check saved folder"}
+          </button>
           <button
             className="primary"
-            disabled={busy}
+            disabled={busy || checking}
             onClick={() => setShow(true)}
           >
             <FolderOpen size={16} /> Reassign folder

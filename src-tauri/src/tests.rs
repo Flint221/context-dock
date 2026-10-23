@@ -108,10 +108,16 @@ fn recursive_discovery_identity_exclusions_and_read_only() {
     assert!(s.documents.iter().all(|d| d.status == "unavailable"));
     fs::rename(temp.path().join("disconnected"), &root).unwrap();
     r.refresh(&id).unwrap();
-    assert_eq!(r.snapshot().unwrap().projects[0].status, "unavailable");
-    let plan = r.folder_plan(&id, root.to_str().unwrap()).unwrap();
-    r.reassign_folder(&id, &plan.path, &plan.token).unwrap();
     assert_eq!(r.snapshot().unwrap().projects[0].status, "available");
+    assert_eq!(
+        r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .filter(|d| d.status == "missing")
+            .count(),
+        1
+    );
 }
 #[test]
 fn invalid_paths_and_names_are_rejected() {

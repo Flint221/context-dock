@@ -138,7 +138,7 @@ export function ProjectSummary({
         </strong>
         <small>
           {unavailable
-            ? "Reassign to continue"
+            ? "Reconnect or reassign"
             : `${missing} unavailable files · ${tracking?.reviews.length ?? 0} to review`}
         </small>
       </div>

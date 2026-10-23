@@ -13,6 +13,7 @@ vi.mock("./services/registry", () => ({
     rename: vi.fn(),
     remove: vi.fn(),
     refresh: vi.fn(),
+    refreshFolders: vi.fn(),
     open: vi.fn(),
     theme: vi.fn(),
     pickFolder: vi.fn(),
@@ -354,7 +355,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.10.2")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.10.3")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -693,4 +694,20 @@ it("organizes project sections, guards unsaved tab changes and retains the folde
   expect(files).toHaveAttribute("aria-selected", "true");
   await user.keyboard("{Enter}");
   expect(cloudTab).toHaveAttribute("aria-selected", "true");
+});
+
+it("refreshes saved folders together without starting reassignment", async () => {
+  const user = userEvent.setup();
+  vi.mocked(registry.refreshFolders).mockResolvedValue();
+  render(<App />);
+  await user.click(
+    await screen.findByRole("button", { name: "Refresh folders" }),
+  );
+  await waitFor(() => expect(registry.refreshFolders).toHaveBeenCalledOnce());
+  expect(
+    await screen.findByText(/Saved project folders checked/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("dialog", { name: "Reassign project folder" }),
+  ).not.toBeInTheDocument();
 });

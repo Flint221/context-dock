@@ -188,6 +188,7 @@ impl Registry {
     }
     pub fn refresh(&mut self, id: &str) -> Result<()> {
         let path = self.path(id)?;
+        self.reconnect_folder(id)?;
         if crate::folder_recovery::require_ready(&self.db, id).is_err() {
             return Ok(());
         }

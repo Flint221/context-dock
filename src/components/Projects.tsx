@@ -33,7 +33,7 @@ export function Projects({
             <span>{p.documentCount} documents</span>
             <span className={`badge ${p.status}`}>
               {p.folderState === "needs_reassignment"
-                ? "Folder lost · Reassign"
+                ? "Folder unavailable"
                 : p.status}
             </span>
           </div>

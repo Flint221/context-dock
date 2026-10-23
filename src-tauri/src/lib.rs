@@ -133,6 +133,10 @@ async fn remove_project(
     .await
 }
 #[tauri::command]
+async fn refresh_project_folders(state: tauri::State<'_, Store>) -> Result<(), String> {
+    work(state.inner().clone(), |r| r.refresh_folders()).await
+}
+#[tauri::command]
 async fn refresh_project(state: tauri::State<'_, Store>, id: String) -> Result<(), String> {
     work(state.inner().clone(), move |r| {
         r.reconcile(
@@ -515,6 +519,7 @@ pub fn run() {
             reassign_project_folder,
             remove_project,
             refresh_project,
+            refresh_project_folders,
             set_theme,
             open_project,
             tracking_view,

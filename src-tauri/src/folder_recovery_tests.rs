@@ -58,7 +58,7 @@ impl Fixture {
 }
 
 #[test]
-fn loss_persists_across_restart_and_returning_root_requires_explicit_reassignment() {
+fn loss_persists_across_restart_but_the_original_returning_root_reconnects() {
     let mut f = Fixture::new(false);
     let target = f.moved();
     assert_eq!(f.r.check_folders().unwrap(), vec![f.id.clone()]);
@@ -68,10 +68,11 @@ fn loss_persists_across_restart_and_returning_root_requires_explicit_reassignmen
     );
     f.r = Registry::open(&f.db).unwrap();
     fs::rename(&target, &f.root).unwrap();
+    // Startup workspace read checks lost roots as well as ready ones.
+    assert_eq!(f.r.snapshot().unwrap().projects[0].folder_state, "ready");
     f.r.refresh(&f.id).unwrap();
-    assert!(folder_recovery::require_ready(&f.r.db, &f.id).is_err());
-    let root = f.root.clone();
-    f.reassign(&root);
+    folder_recovery::require_ready(&f.r.db, &f.id).unwrap();
+    assert_eq!(f.r.source_ids(&f.id).unwrap().len(), 2);
     assert_eq!(f.r.snapshot().unwrap().projects[0].folder_state, "ready");
     assert_eq!(f.r.snapshot().unwrap().projects[0].id, f.id);
 }
@@ -355,5 +356,148 @@ fn watcher_rebinds_to_moved_root_and_tracking_off_projects_also_report_loss() {
             .unwrap()
             == "needs_reassignment"
     });
+    monitor.shutdown();
+}
+
+#[test]
+fn refresh_all_reconnects_original_roots_and_preserves_history_selection_and_cloud_identity() {
+    let mut f = Fixture::new(true);
+    let before = f.r.snapshot().unwrap();
+    let ids: Vec<_> = before.documents.iter().map(|d| d.id.clone()).collect();
+    let versions: i64 =
+        f.r.db
+            .query_row("SELECT count(*) FROM document_versions", [], |r| r.get(0))
+            .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET store_id='vs_retained',paused=1 WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    let revision = crate::path_selection::revision(&f.r.db, &f.id).unwrap();
+    f.r.save_path_selection(
+        &f.id,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "docs".into(),
+            kind: "folder".into(),
+        }],
+    )
+    .unwrap();
+    let second = f.root.parent().unwrap().join("Second project");
+    fs::create_dir(&second).unwrap();
+    fs::write(second.join("Second.md"), "second").unwrap();
+    let other = f.r.add("Second", second.to_str().unwrap()).unwrap();
+    let moved = f.moved();
+    let moved_second = second.with_extension("offline");
+    fs::rename(&second, &moved_second).unwrap();
+    f.r.check_folders().unwrap();
+    fs::rename(&moved, &f.root).unwrap();
+    fs::rename(&moved_second, &second).unwrap();
+    f.r.refresh_folders().unwrap();
+    let after = f.r.snapshot().unwrap();
+    assert!(after.projects.iter().all(|p| p.folder_state == "ready"));
+    assert_eq!(after.projects.len(), 2);
+    assert!(after
+        .projects
+        .iter()
+        .any(|p| p.id == other && !p.tracking_enabled));
+    assert!(ids.iter().all(|id| after
+        .documents
+        .iter()
+        .any(|d| &d.id == id && d.status == "available")));
+    assert_eq!(
+        f.r.db
+            .query_row("SELECT count(*) FROM document_versions", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        versions
+    );
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "docs/Notes.md").unwrap());
+    let cloud = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(s(&cloud, "store_id"), "vs_retained");
+    assert_eq!(cloud::n(&cloud, "paused"), 1);
+}
+#[test]
+fn a_replacement_directory_or_unverified_identity_still_requires_reassignment() {
+    let mut f = Fixture::new(false);
+    let moved = f.moved();
+    f.r.check_folders().unwrap();
+    fs::create_dir_all(f.root.join("docs")).unwrap();
+    fs::copy(moved.join("docs/Notes.md"), f.root.join("docs/Notes.md")).unwrap();
+    fs::copy(moved.join("Other.md"), f.root.join("Other.md")).unwrap();
+    f.r.refresh_folders().unwrap();
+    assert_eq!(
+        f.r.snapshot().unwrap().projects[0].folder_state,
+        "needs_reassignment"
+    );
+    assert!(folder_recovery::require_ready(&f.r.db, &f.id).is_err());
+    let replacement = f.root.with_extension("replacement");
+    fs::rename(&f.root, replacement).unwrap();
+    fs::rename(&moved, &f.root).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE projects SET folder_identity=NULL WHERE id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    f.r.refresh_folders().unwrap();
+    assert_eq!(
+        f.r.snapshot().unwrap().projects[0].folder_state,
+        "needs_reassignment"
+    );
+}
+#[test]
+fn running_monitor_resumes_original_reconnected_folder_without_reassignment() {
+    use std::{
+        sync::{Arc, Mutex},
+        thread,
+        time::Duration,
+    };
+    fn wait(check: impl Fn() -> bool) {
+        for _ in 0..150 {
+            if check() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+        panic!("Monitor did not reach expected state");
+    }
+    let f = Fixture::new(true);
+    let did =
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .find(|d| d.name == "Notes.md")
+            .unwrap()
+            .document_id
+            .clone();
+    let id = f.id.clone();
+    let root = f.root.clone();
+    let offline = root.with_extension("offline");
+    let shared = Arc::new(Mutex::new(f.r));
+    let monitor = crate::monitor::Monitor::start(shared.clone(), |_| {}).unwrap();
+    wait(|| {
+        shared
+            .lock()
+            .unwrap()
+            .tracking_view(&id)
+            .unwrap()
+            .watch_status
+            == "watching"
+    });
+    fs::rename(&root, &offline).unwrap();
+    wait(|| {
+        shared.lock().unwrap().snapshot().unwrap().projects[0].folder_state == "needs_reassignment"
+    });
+    fs::rename(&offline, &root).unwrap();
+    wait(|| {
+        let r = shared.lock().unwrap();
+        r.tracking_view(&id).unwrap().watch_status == "watching"
+            && folder_recovery::require_ready(&r.db, &id).is_ok()
+    });
+    fs::write(root.join("docs/Notes.md"), "Edited after drive reconnect").unwrap();
+    wait(|| shared.lock().unwrap().versions(&did).unwrap().len() == 2);
     monitor.shutdown();
 }

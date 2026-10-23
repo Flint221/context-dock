@@ -12,6 +12,7 @@ vi.mock("../services/registry", () => ({
     previewFolder: vi.fn(),
     reassignFolder: vi.fn(),
     snapshot: vi.fn(),
+    refresh: vi.fn(),
   },
 }));
 vi.mock("./ProjectCloud", () => ({
@@ -90,7 +91,7 @@ it("keeps the loss reminder after remount and blocks project work while recovery
   };
   const first = render(<ProjectDetails {...props} />);
   expect(
-    screen.getByText("Folder lost — please reassign it"),
+    screen.getByRole("heading", { name: "Folder unavailable" }),
   ).toBeInTheDocument();
   expect(screen.queryByText("Project cloud work")).not.toBeInTheDocument();
   expect(screen.queryByText("Project tracking work")).not.toBeInTheDocument();
@@ -98,7 +99,7 @@ it("keeps the loss reminder after remount and blocks project work while recovery
   first.unmount();
   render(<ProjectDetails {...props} />);
   expect(
-    screen.getByText("Folder lost — please reassign it"),
+    screen.getByRole("heading", { name: "Folder unavailable" }),
   ).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Reassign folder" })).toBeEnabled();
 });
@@ -184,7 +185,7 @@ it("picker cancellation and cancelling the review leave the saved registration u
   await user.click(screen.getByRole("button", { name: "Cancel" }));
   expect(registry.reassignFolder).not.toHaveBeenCalled();
   expect(
-    screen.getByText("Folder lost — please reassign it"),
+    screen.getByRole("heading", { name: "Folder unavailable" }),
   ).toBeInTheDocument();
 });
 
@@ -286,4 +287,41 @@ it("shows persistent missing-file warnings after recovery and keeps all large re
   await user.click(screen.getByRole("button", { name: "Next missing files" }));
   await user.click(screen.getByRole("button", { name: "Next missing files" }));
   expect(within(dialog).getByText("missing-204.md")).toBeInTheDocument();
+});
+
+it("checks the saved folder without opening the folder picker", async () => {
+  const user = userEvent.setup();
+  const changed = vi.fn(async () => {});
+  vi.mocked(registry.refresh).mockResolvedValue();
+  state.projects[0] = {
+    ...original,
+    status: "available",
+    folderState: "ready",
+  };
+  render(<ProjectFolder project={original} busy={false} changed={changed} />);
+  await user.click(screen.getByRole("button", { name: "Check saved folder" }));
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect(registry.refresh).toHaveBeenCalledWith(original.id);
+  expect(registry.pickFolder).not.toHaveBeenCalled();
+  expect(registry.reassignFolder).not.toHaveBeenCalled();
+  expect(
+    screen.queryByText(/original folder is still unavailable/),
+  ).not.toBeInTheDocument();
+});
+it("keeps the recovery controls and shows a useful error when the saved folder is still absent", async () => {
+  const user = userEvent.setup();
+  vi.mocked(registry.refresh).mockResolvedValue();
+  state.projects = [original];
+  render(
+    <ProjectFolder
+      project={original}
+      busy={false}
+      changed={vi.fn(async () => {})}
+    />,
+  );
+  await user.click(screen.getByRole("button", { name: "Check saved folder" }));
+  expect(
+    await screen.findByText(/original folder is still unavailable/),
+  ).toHaveClass("error-text");
+  expect(screen.getByRole("button", { name: "Reassign folder" })).toBeEnabled();
 });

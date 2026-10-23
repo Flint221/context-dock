@@ -15,6 +15,7 @@ import {
   FolderOpen,
   LayoutDashboard,
   Plus,
+  RefreshCw,
   Settings,
   ShieldCheck,
 } from "lucide-react";
@@ -366,13 +367,29 @@ function Workspace() {
                     </p>
                   </div>
                   {(page === "dashboard" || page === "projects") && (
-                    <button
-                      className="primary"
-                      disabled={busy || !loaded}
-                      onClick={() => guard.request(() => setAdding(true))}
-                    >
-                      <Plus size={17} /> Add project
-                    </button>
+                    <div className="toolbar-actions">
+                      <button
+                        disabled={busy || !loaded}
+                        onClick={() =>
+                          guard.request(
+                            () =>
+                              void run(
+                                () => registry.refreshFolders(),
+                                "Saved project folders checked. Reconnected folders resume their saved settings.",
+                              ),
+                          )
+                        }
+                      >
+                        <RefreshCw size={17} /> Refresh folders
+                      </button>
+                      <button
+                        className="primary"
+                        disabled={busy || !loaded}
+                        onClick={() => guard.request(() => setAdding(true))}
+                      >
+                        <Plus size={17} /> Add project
+                      </button>
+                    </div>
                   )}
                 </div>
               )}
