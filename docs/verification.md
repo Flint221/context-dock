@@ -1,3 +1,13 @@
+# 0.10.5 - exFAT archive copies and named attention items
+
+Local release checks passed: **236 native tests**, **154 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend build and Windows x64 NSIS packaging. Four explicit Windows checks passed separately, including archive publication/recovery on the actual healthy D: exFAT volume in a disposable directory, for **240 distinct native tests/checks**. The normal run leaves five entries ignored, including that explicit drive test and the existing child fixture. Versions agree at 0.10.5; schema remains 013.
+
+Source commit `1461725` is pushed to main. Read-only installed 0.10.4 evidence confirms Weather Tool v1 removed and v2 indexed/completed with no cloud error. CottonTrax has eleven desired indexed jobs, four obsolete removed jobs and no cloud error. Its remaining two issues are blocked local archive copies for Master Context v3 and Team Tasks v2. Windows archive copy publication previously depended on hard links, unsupported by exFAT. It now uses verified no-overwrite handle rename after durable staging-identity journaling. Tests cover interrupted publication/recovery, journal refusal, preserved snapshots and collisions. The project overview and pending-operation list now identify destinations and distinguish failed archive/file operations from missing files and reviews. See [investigation and acceptance](ContextDock_ExFAT_Archive_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.5_x64-setup.exe`, **4,732,577 bytes**, SHA-256 `FFF916413431A0F1D72FCEA2483891CEB94668F3CC3F0B8B4DCADFA1C4E31769`. File/product version is 0.10.5, built from pushed main. It was not installed against user data. The actual database/WAL evidence copy passed quick_check; original databases, sources, snapshots, archives and backups were unchanged. No live cloud API requests were made. The user should install and retry pending operations for the real project; that acceptance is not claimed. No completed GitHub workflow result is claimed.
+
+---
+
 # 0.10.4 - Pending cloud association removal recovery
 
 Local checks passed: **235 native tests**, **152 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. Three explicit Windows integration checks passed separately, for **238 distinct native tests/checks**. Four entries remain ignored in the standard run, including the child fixture. Package, lockfile and configuration versions agree at 0.10.4; schema remains 013.
