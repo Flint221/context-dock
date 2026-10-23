@@ -753,3 +753,14 @@ it("keeps a typed AI question and a single cloud subscription when switching pro
   expect(cloud.subscribe).toHaveBeenCalledTimes(1);
   expect(chat.action).not.toHaveBeenCalledWith("p1", "ask", expect.anything());
 });
+
+it("blocks ready messaging and questions while indexed cleanup still has an error", async () => {
+  connected();
+  view.pending = 0;
+  view.failed = 0;
+  view.error = "Removal verification is pending for Context_v1.md.";
+  render(<ProjectCloud project="p1" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Removal verification is pending");
+  expect(screen.queryByText("On · Documents ready for questions")).not.toBeInTheDocument();
+  expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
+});

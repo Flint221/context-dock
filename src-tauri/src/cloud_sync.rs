@@ -297,7 +297,10 @@ fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
                 }
             }
             if association(api, store, file)?.is_some() {
-                return Err(ApiError::local("The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."));
+                let mut error=ApiError::local(&format!("Removal verification is pending for {}. OpenAI still reports its index entry after confirming deletion; The entry will be checked again during retry.",s(j,"sourceName")));
+                error.retry = true;
+                error.delay = 5;
+                return Err(error);
             }
         }
     }
@@ -357,6 +360,11 @@ fn reconcile(db: &Connection, p: &Value, api: &dyn CloudApi, allow_pending: bool
     }
     execute(db,"UPDATE cloud_projects SET usage_bytes=?2,reconcile_requested=0,last_sync=?3,status='reconciled',error=NULL WHERE project_id=?1",&[&s(p,"project_id"),&store["usage_bytes"].as_i64(),&models::now()])
 }
+pub fn legacy_removal_wait(p: &Value) -> bool {
+    n(p,"enabled")==1 && n(p,"paused")==0 && n(p,"next_at")==i64::MAX
+        && n(p,"attempts")<=6 && s(p,"status")=="needs_attention"
+        && s(p,"error")=="The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."
+}
 pub fn step(
     db: &mut Connection,
     root: &Path,
@@ -364,7 +372,15 @@ pub fn step(
     api: &dyn CloudApi,
     key_scope: &str,
 ) -> Result<()> {
-    let p = cloud::project(db, id)?;
+    let mut p = cloud::project(db, id)?;
+    if legacy_removal_wait(&p) {
+        db.execute(
+            "UPDATE cloud_projects SET next_at=0,status='retry_wait' WHERE project_id=?1",
+            [id],
+        )
+        .map_err(error)?;
+        p = cloud::project(db, id)?;
+    }
     // Saved document opt-outs can only GET/DELETE their owned associations, including
     // while ordinary uploads are paused or the source folder is unavailable.
     if (n(&p, "enabled") == 1
@@ -402,7 +418,15 @@ pub fn step(
                         params![s(job, "id"), e.message],
                     )
                     .map_err(error)?;
-                    db.execute("UPDATE cloud_projects SET status='selection_removal_failed',error=?2,next_at=?3 WHERE project_id=?1",params![id,format!("Document removal incomplete. Remote references retained for retry. {}",e.message),i64::MAX]).map_err(error)?;
+                    let tries = n(&p, "attempts") + 1;
+                    let retry = e.retry && tries <= 6;
+                    let next = if retry {
+                        chrono::Utc::now().timestamp()
+                            + e.delay.max(2_i64.pow(tries.min(10) as u32)).min(3600)
+                    } else {
+                        i64::MAX
+                    };
+                    db.execute("UPDATE cloud_projects SET status=?2,error=?3,next_at=?4,attempts=?5 WHERE project_id=?1",params![id,if retry {"retry_wait"} else {"selection_removal_failed"},format!("Document removal incomplete. Remote references retained for retry. {}",e.message),next,tries]).map_err(error)?;
                 }
             }
             return Ok(());
@@ -593,7 +617,7 @@ pub fn step(
         } else {
             i64::MAX
         };
-        db.execute("UPDATE cloud_projects SET status=?2,error=?3,next_at=?4,attempts=?5 WHERE project_id=?1",params![id,if e.ambiguous {"uncertain"} else if e.retry {"retry_wait"} else {"needs_attention"},e.message,next,tries]).map_err(error)?;
+        db.execute("UPDATE cloud_projects SET status=?2,error=?3,next_at=?4,attempts=?5 WHERE project_id=?1",params![id,if e.ambiguous {"uncertain"} else if e.retry && tries<=6 {"retry_wait"} else {"needs_attention"},e.message,next,tries]).map_err(error)?;
         cloud::activity(db, id, "error", &e.message)?;
     } else {
         db.execute(

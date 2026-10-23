@@ -379,16 +379,18 @@ pub fn view(db: &Connection, id: &str) -> Result<Value> {
     p["localError"] = json!(local.err());
     p["families"] = json!(families(db, id)?);
     p["activity"]=json!(rows(db,"SELECT kind,message,created_at FROM cloud_activity WHERE project_id=?1 ORDER BY id DESC LIMIT 30",&[&id])?);
-    p["indexed"] = json!(js.iter().filter(|j| s(j, "state") == "indexed").count());
+    p["indexed"] = json!(js
+        .iter()
+        .filter(|j| n(j, "desired") == 1 && s(j, "state") == "indexed")
+        .count());
     p["pending"] = json!(js
         .iter()
-        .filter(
-            |j| !["indexed", "removed", "purged", "failed", "uncertain"].contains(&s(j, "state"))
-        )
+        .filter(|j| n(j, "desired") == 1
+            && !["indexed", "removed", "purged", "failed", "uncertain"].contains(&s(j, "state")))
         .count());
     p["failed"] = json!(js
         .iter()
-        .filter(|j| ["failed", "uncertain"].contains(&s(j, "state")))
+        .filter(|j| n(j, "desired") == 1 && ["failed", "uncertain"].contains(&s(j, "state")))
         .count());
     p["rawBytes"] = json!(js
         .iter()

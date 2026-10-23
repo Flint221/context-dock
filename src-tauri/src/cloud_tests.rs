@@ -1080,11 +1080,19 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
         assert_eq!(cloud::selection_removals(&f.r.db, &f.id).unwrap().len(), 1);
         assert_eq!(
             s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
-            "selection_removal_failed"
+            if bad_receipt {
+                "selection_removal_failed"
+            } else {
+                "retry_wait"
+            }
         );
         assert_eq!(
             cloud::view(&f.r.db, &f.id).unwrap()["status"],
-            "selection_removal_failed"
+            if bad_receipt {
+                "selection_removal_failed"
+            } else {
+                "paused"
+            }
         );
         let db = f.r.store.join("test.db");
         f.r = Registry::open(&db).unwrap();
@@ -2490,7 +2498,7 @@ fn saved_path_removal_can_finish_on_retained_cloud_data_without_enabling_uploads
     f.step(&api);
     assert_eq!(
         cloud::project(&f.r.db, &f.id).unwrap()["status"],
-        "selection_removal_failed"
+        "retry_wait"
     );
     api.0.borrow_mut().ignore_association_delete = false;
     cloud_commands::action_impl(
@@ -2578,7 +2586,7 @@ fn saved_folder_exclusion_removes_from_index_while_paused_and_reinclude_reuses_o
     f.step(&api);
     assert_eq!(
         cloud::project(&f.r.db, &f.id).unwrap()["status"],
-        "selection_removal_failed"
+        "retry_wait"
     );
     assert_eq!(api.0.borrow().associations.len(), 2);
     api.0.borrow_mut().ignore_association_delete = false;
@@ -3174,4 +3182,56 @@ fn revision_migration_rolls_back_when_old_history_references_are_invalid() {
         1
     );
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+
+#[test]
+fn delayed_old_version_removal_retries_after_restart_and_preserves_uploads_and_history() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.bump();
+    api.0.borrow_mut().ignore_association_delete = true;
+    f.sync(&api);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(s(&p, "status"), "retry_wait");
+    assert!(n(&p, "next_at") > chrono::Utc::now().timestamp() && n(&p, "next_at") < i64::MAX);
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(n(&view, "indexed"), 1);
+    assert_eq!(api.0.borrow().files.len(), 2);
+    let db = f.r.store.join("test.db");
+    f.r = Registry::open(&db).unwrap();
+    api.0.borrow_mut().ignore_association_delete = false;
+    f.r.db
+        .execute("UPDATE cloud_projects SET next_at=0", [])
+        .unwrap();
+    f.sync(&api);
+    assert!(s(&cloud::project(&f.r.db, &f.id).unwrap(), "error").is_empty());
+    assert_eq!(api.0.borrow().associations.len(), 1);
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
+}
+#[test]
+fn legacy_removal_stop_resumes_once_but_retries_are_bounded() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    f.bump();
+    api.0.borrow_mut().ignore_association_delete = true;
+    f.sync(&api);
+    f.r.db.execute("UPDATE cloud_projects SET status='needs_attention',next_at=?1,attempts=1,error=?2",params![i64::MAX,"The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."]).unwrap();
+    assert!(cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
+    for _ in 0..7 {
+        f.r.db
+            .execute("UPDATE cloud_projects SET next_at=0", [])
+            .unwrap();
+        f.step(&api);
+    }
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(n(&p, "next_at"), i64::MAX);
+    assert_eq!(s(&p, "status"), "needs_attention");
+    assert!(!cloud_commands::needed(&f.r.db, &p).unwrap());
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
 }

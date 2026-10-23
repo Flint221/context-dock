@@ -114,6 +114,7 @@ export function ProjectCloud({
   );
   const ready =
     enabled &&
+    !view?.error &&
     view?.localReady !== false &&
     view?.connectionStatus === "connected" &&
     !!view.store_id &&

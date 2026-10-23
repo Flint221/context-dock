@@ -188,7 +188,7 @@ fn current_api(db: &Connection) -> Result<(OpenAi, String)> {
     Ok((OpenAi::new(&key)?, scope))
 }
 pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
-    if n(p, "next_at") > chrono::Utc::now().timestamp() {
+    if n(p, "next_at") > chrono::Utc::now().timestamp() && !cloud_sync::legacy_removal_wait(p) {
         return Ok(false);
     }
     if n(p, "enabled") == 1 && n(p, "delete_requested") == 1 {
@@ -224,6 +224,9 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
             }));
     }
     if s(p, "store_id").is_empty() || n(p, "reconcile_requested") == 1 {
+        return Ok(true);
+    }
+    if cloud_sync::legacy_removal_wait(p) {
         return Ok(true);
     }
     let jobs = cloud::jobs(db, s(p, "project_id"))?;
