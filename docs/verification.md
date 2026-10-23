@@ -1,3 +1,13 @@
+# 0.10.4 - Pending cloud association removal recovery
+
+Local checks passed: **235 native tests**, **152 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. Three explicit Windows integration checks passed separately, for **238 distinct native tests/checks**. Four entries remain ignored in the standard run, including the child fixture. Package, lockfile and configuration versions agree at 0.10.4; schema remains 013.
+
+Source commit `caf4b51` is pushed to main. Read-only evidence from the running app showed CC Weather Tool v2 indexed successfully and obsolete v1 removal stopped indefinitely after a still-present verification response. The exact historical stop can resume automatically under existing policies. Acknowledged but unverified removal now uses bounded retries, rechecking ownership and absence before clearing the association. Desired-only counters exclude obsolete entries, and project errors block ready messaging/chat. Invalid receipts and foreign identities remain protected. Mocked restart/exhaustion tests preserve both uploads and local history. See [investigation and installed acceptance](ContextDock_Cloud_Removal_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.4_x64-setup.exe`, **4,734,922 bytes**, SHA-256 `E51F15DDF127564E21C858F132E6D00DB0455AD23957EF93C204B73733C74B23`. File/product version is 0.10.4, built from pushed main. The installer was not executed against user data. A stable database/WAL evidence copy passed quick_check; originals, source files, snapshots, archives, backups, credentials and cloud resources were not modified. Live remote recovery and installed acceptance remain unverified. No completed GitHub workflow result is claimed.
+
+---
+
 # 0.10.3 - External-drive reconnection and folder refresh
 
 Local release checks passed: **233 native tests**, **151 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. Three explicit Windows tray/startup/notification integration tests passed separately, for **236 distinct native tests/checks**; the normal native run leaves those three and the existing child fixture ignored. Version/lock/config values agree at 0.10.3. Schema remains 013 and application identity is unchanged.
