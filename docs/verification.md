@@ -1,3 +1,13 @@
+# 0.10.6 - Grouped unavailable-folder notifications
+
+Local checks passed: **237 native tests**, **12 app tests**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. The five standard ignored tests were not run for this release. Only the frontend version assertion changed; the app suite was run rather than repeating the unchanged component suites. Versions agree at 0.10.6; schema remains 013.
+
+Source commit `4b4433d` is pushed to main. Shared-drive loss is grouped into one unavailable-folder notification with affected project names. The existing thirty-second debounce collects successive monitor observations; per-project problem toasts are suppressed while those folders are unavailable. In-app errors remain intact. Regression coverage checks four projects, staggered detection, sorted identity, restart persistence, valid routing and recovery/rearm. Existing delivery success/backoff policy remains in place. See [alert behavior](ContextDock_Grouped_Alerts_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.6_x64-setup.exe`, **4,744,348 bytes**, SHA-256 `6C77317C38E473125CEE1B540E173B75FEFAC03A4EC777E6BC5A09385E652B23`. File version is 0.10.6. Built from pushed main; not installed against user data. Actual drive unplug, visible grouped banner and installed click remain manual acceptance checks. Project sources, application databases, snapshots, archives, backups and cloud resources were unchanged. No completed GitHub workflow result is claimed.
+
+---
+
 # 0.10.5 - exFAT archive copies and named attention items
 
 Local release checks passed: **236 native tests**, **154 frontend tests across 17 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend build and Windows x64 NSIS packaging. Four explicit Windows checks passed separately, including archive publication/recovery on the actual healthy D: exFAT volume in a disposable directory, for **240 distinct native tests/checks**. The normal run leaves five entries ignored, including that explicit drive test and the existing child fixture. Versions agree at 0.10.5; schema remains 013.
