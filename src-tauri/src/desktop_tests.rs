@@ -385,3 +385,55 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
     assert_eq!(code, 0);
     controller.join().unwrap().unwrap();
 }
+
+#[test]
+fn shared_drive_folder_alert_is_one_durable_batch_and_rearms_after_recovery() {
+    let mut f = Fixture::new();
+    let projects = (0..4).map(|i| serde_json::json!({"id":format!("00000000-0000-4000-8000-{i:012}"),"name":format!("Project {i}"),"folder_state":"needs_reassignment"})).collect::<Vec<_>>();
+    assert!(
+        !desktop::folder_notice(&f.r.db, &projects[..1], 1000)
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    assert!(
+        !desktop::folder_notice(&f.r.db, &projects, 1002)
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    let (due, title, body, route) = desktop::folder_notice(&f.r.db, &projects, 1030)
+        .unwrap()
+        .unwrap();
+    assert!(due);
+    assert_eq!(title, "4 project folders unavailable");
+    for i in 0..4 {
+        assert!(body.contains(&format!("Project {i}")));
+    }
+    assert!(desktop::parse_route(&route).is_some());
+    review::notice_sent(&f.r.db, "problem:unavailable-folders", 1030).unwrap();
+    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    let mut reversed = projects.clone();
+    reversed.reverse();
+    assert!(
+        !desktop::folder_notice(&f.r.db, &reversed, 1400)
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    assert!(desktop::folder_notice(&f.r.db, &[], 1401)
+        .unwrap()
+        .is_none());
+    assert!(
+        !desktop::folder_notice(&f.r.db, &projects, 1500)
+            .unwrap()
+            .unwrap()
+            .0
+    );
+    assert!(
+        desktop::folder_notice(&f.r.db, &projects, 1530)
+            .unwrap()
+            .unwrap()
+            .0
+    );
+}

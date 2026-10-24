@@ -251,6 +251,40 @@ fn foreground(app: &tauri::AppHandle) -> bool {
             && w.is_focused().unwrap_or(false)
     })
 }
+const FOLDER_NOTICE: &str = "problem:unavailable-folders";
+pub(crate) fn folder_notice(
+    db: &rusqlite::Connection,
+    projects: &[Value],
+    now: i64,
+) -> Result<Option<(bool, String, String, String)>> {
+    let mut unavailable = projects
+        .iter()
+        .filter(|p| {
+            !cloud::s(p, "folder_state").is_empty() && cloud::s(p, "folder_state") != "ready"
+        })
+        .collect::<Vec<_>>();
+    unavailable.sort_by_key(|p| cloud::s(p, "id"));
+    if unavailable.is_empty() {
+        db.execute("DELETE FROM desktop_notices WHERE key=?1", [FOLDER_NOTICE])
+            .map_err(error)?;
+        return Ok(None);
+    }
+    let signature = unavailable
+        .iter()
+        .map(|p| cloud::s(p, "id"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let due = review::notice_due(db, FOLDER_NOTICE, &signature, now, 30)?;
+    let names = unavailable
+        .iter()
+        .map(|p| cloud::s(p, "name"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Ok(Some((due,
+        format!("{} project folder{} unavailable", unavailable.len(), if unavailable.len()==1 {""} else {"s"}),
+        format!("{names}. Reconnect the drive or open ContextDock to check the saved folders. Local history is retained."),
+        format!("contextdock://project?project={}", cloud::s(unavailable[0], "id")))))
+}
 fn background_tick(
     db: &rusqlite::Connection,
     app: &tauri::AppHandle,
@@ -275,7 +309,7 @@ fn background_tick(
             "Pause uploads"
         });
     }
-    let projects=cloud::rows(db,"SELECT p.id,p.name,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain')) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[])?;
+    let projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain')) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[])?;
     let problems = projects
         .iter()
         .filter(|p| {
@@ -294,6 +328,21 @@ fn background_tick(
     let now = chrono::Utc::now().timestamp();
     let active = foreground(app);
     let mut notice_keys = std::collections::HashSet::new();
+    if let Some((due, title, body, route)) = folder_notice(db, &projects, now)? {
+        let enabled = review::preference(db, "desktop.problem_notifications", true);
+        if enabled {
+            notice_keys.insert(FOLDER_NOTICE.to_string());
+        }
+        if due
+            && !active
+            && enabled
+            && notifications.attempt(FOLDER_NOTICE, now, || {
+                notifications::send(app, &title, &body, &route, FOLDER_NOTICE)
+            })
+        {
+            review::notice_sent(db, FOLDER_NOTICE, now)?;
+        }
+    }
     for p in projects {
         let id = cloud::s(&p, "id");
         let files = entries
@@ -335,6 +384,12 @@ fn background_tick(
             }
         }
         let key = format!("problem:{id}");
+        if !cloud::s(&p, "folder_state").is_empty() && cloud::s(&p, "folder_state") != "ready" {
+            // A single debounced notification covers shared-drive failures.
+            db.execute("DELETE FROM desktop_notices WHERE key=?1", [&key])
+                .map_err(error)?;
+            continue;
+        }
         let signature = format!(
             "{}|{}|{}|{}",
             cloud::s(&p, "scan_error"),
