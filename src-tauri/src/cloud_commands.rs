@@ -17,6 +17,14 @@ use std::{
     thread,
 };
 use tauri::Emitter;
+// A stale request guard has sent no request. Retry with a fresh guard after the
+// watcher commits its selection; retain the normal bounded sync backoff.
+fn selection_changed(message: &str) -> cloud_api::ApiError {
+    let mut error = cloud_api::ApiError::local(message);
+    error.retry = true;
+    error.delay = 2;
+    error
+}
 /// Recheck persisted authorization between individual outbound requests.
 pub struct ProjectApi<'a> {
     api: &'a dyn CloudApi,
@@ -93,7 +101,7 @@ impl<'a> ProjectApi<'a> {
                 .map_err(|e| cloud_api::ApiError::local(&e))?
                 != self.path_revision
             {
-                return Err(cloud_api::ApiError::local(
+                return Err(selection_changed(
                     "Folder selection changed. No further upload or attachment was sent.",
                 ));
             }
@@ -110,7 +118,7 @@ impl<'a> ProjectApi<'a> {
                     cloud_api::ApiError::local("Cannot check the project folder revision.")
                 })?;
             if revision != self.folder_revision {
-                return Err(cloud_api::ApiError::local(
+                return Err(selection_changed(
                     "The project folder changed. Refresh documents before syncing again.",
                 ));
             }
