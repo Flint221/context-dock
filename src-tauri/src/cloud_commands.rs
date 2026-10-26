@@ -17,6 +17,14 @@ use std::{
     thread,
 };
 use tauri::Emitter;
+// A stale request guard has sent no request. Retry with a fresh guard after the
+// watcher commits its selection; retain the normal bounded sync backoff.
+fn selection_changed(message: &str) -> cloud_api::ApiError {
+    let mut error = cloud_api::ApiError::local(message);
+    error.retry = true;
+    error.delay = 2;
+    error
+}
 /// Recheck persisted authorization between individual outbound requests.
 pub struct ProjectApi<'a> {
     api: &'a dyn CloudApi,
@@ -93,7 +101,7 @@ impl<'a> ProjectApi<'a> {
                 .map_err(|e| cloud_api::ApiError::local(&e))?
                 != self.path_revision
             {
-                return Err(cloud_api::ApiError::local(
+                return Err(selection_changed(
                     "Folder selection changed. No further upload or attachment was sent.",
                 ));
             }
@@ -110,7 +118,7 @@ impl<'a> ProjectApi<'a> {
                     cloud_api::ApiError::local("Cannot check the project folder revision.")
                 })?;
             if revision != self.folder_revision {
-                return Err(cloud_api::ApiError::local(
+                return Err(selection_changed(
                     "The project folder changed. Refresh documents before syncing again.",
                 ));
             }
@@ -290,6 +298,19 @@ pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
     }
     Ok(false)
 }
+/// Older builds treated a stale request guard as permanent. Recover only those
+/// known pre-request interruptions for projects already opted into automatic work.
+pub(crate) fn resume_stale_selection(db: &Connection) -> Result<()> {
+    let tx = db.unchecked_transaction().map_err(error)?;
+    for message in [
+        "Folder selection changed. No further upload or attachment was sent.",
+        "The project folder changed. Refresh documents before syncing again.",
+    ] {
+        tx.execute("UPDATE cloud_projects SET status='queued',error=NULL,next_at=0,attempts=0 WHERE enabled=1 AND paused=0 AND started=1 AND auto_sync=1 AND delete_requested=0 AND status='needs_attention' AND error=?1", [message]).map_err(error)?;
+        tx.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END,error=NULL,next_at=0,attempts=0 WHERE state='failed' AND instr(error,?1)>0 AND phase NOT IN ('remove','selection_remove','path_remove') AND project_id IN (SELECT project_id FROM cloud_projects WHERE enabled=1 AND paused=0 AND started=1 AND auto_sync=1 AND delete_requested=0 AND status NOT IN ('cleanup_pending','cleanup_failed'))", [message]).map_err(error)?;
+    }
+    tx.commit().map_err(error)
+}
 pub(crate) fn runtime_database_path(path: PathBuf) -> std::io::Result<PathBuf> {
     // Match Registry::store before deriving the guarded snapshot root. On Windows,
     // canonicalization adds the verbatim prefix even when the folder never moved.
@@ -302,6 +323,7 @@ impl CloudRuntime {
     pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
         let path = runtime_database_path(path)?;
         if let Ok(db) = cloud::connect(&path) {
+            resume_stale_selection(&db).map_err(std::io::Error::other)?;
             let _=db.execute("UPDATE cloud_projects SET reconcile_requested=1 WHERE enabled=1 AND paused=0 AND started=1",[]);
         }
         let gate = Arc::new(Mutex::new(()));

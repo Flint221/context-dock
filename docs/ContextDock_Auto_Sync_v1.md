@@ -1,0 +1,9 @@
+# ContextDock automatic new-version sync
+
+Version 0.10.7 fixes an interruption that could require pressing Sync again after a new context version was detected. Automatic family matching updates the saved folder selection. If that happens while a cloud request is in flight, the next request correctly rejects the old selection revision. Previous builds classified that guard rejection as a permanent project or file failure, preventing the worker from resuming automatically.
+
+Stale folder-selection and project-folder guards now use the existing bounded retry/backoff. The next worker attempt creates a fresh guard, validates current selection and sources, and queues the latest immutable snapshot. A rejected pre-request upload is not ambiguous and does not justify duplicating an upload. Existing files and cloud associations retain their identities; obsolete associations remain until their desired replacements finish indexing.
+
+On startup, the app also resumes the two exact legacy guard-error cases for enabled, unpaused, started automatic-sync projects. Failed individual upload/attachment jobs carrying those guard errors are requeued using their existing upload/recovery state. Paused projects, cleanup operations, uncertain uploads, and actual foreign/mismatched remote identities are not reset by this recovery.
+
+The regression captures a new filename version during a mocked provider request, using a second registry connection and the actual local reconciliation and guarded request paths. It covers both project reconciliation and a queued upload, verifies the stale request sends no upload, and drives the worker scheduler to completion without a manual Sync command. Startup recovery tests distinguish the recognized guard errors from real remote version-identity conflicts and preserve paused projects. These tests do not use credentials or real cloud traffic. Installed behavior with the user's own drive/cloud account remains an acceptance check.

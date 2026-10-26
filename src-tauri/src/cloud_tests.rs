@@ -3235,3 +3235,179 @@ fn legacy_removal_stop_resumes_once_but_retries_are_bounded() {
     assert_eq!(api.0.borrow().files.len(), 2);
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 2);
 }
+
+#[test]
+fn automatic_new_version_during_cloud_request_retries_with_fresh_selection() {
+    use std::sync::{atomic::AtomicBool, Arc};
+    struct CaptureDuringRequest<'a> {
+        api: &'a Mock,
+        registry: RefCell<Registry>,
+        project: &'a str,
+        root: &'a std::path::Path,
+        captured: std::cell::Cell<bool>,
+    }
+    impl CloudApi for CaptureDuringRequest<'_> {
+        fn request(
+            &self,
+            method: &str,
+            path: &str,
+            body: Option<Value>,
+        ) -> Result<Value, ApiError> {
+            let result = self.api.request(method, path, body);
+            if path == "/vector_stores/vs_test" && !self.captured.replace(true) {
+                fs::write(
+                    self.root.join("Master_Context_v2.md"),
+                    "# Context version two",
+                )
+                .unwrap();
+                self.registry
+                    .borrow_mut()
+                    .reconcile(self.project, "watcher", &HashSet::new(), true)
+                    .unwrap();
+            }
+            result
+        }
+        fn upload(&self, name: &str, bytes: Vec<u8>) -> Result<Value, ApiError> {
+            self.api.upload(name, bytes)
+        }
+        fn content(&self, id: &str) -> Result<Vec<u8>, ApiError> {
+            self.api.content(id)
+        }
+    }
+    for during_upload in [false, true] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        if during_upload {
+            f.edit();
+        } else {
+            f.r.db
+                .execute("UPDATE cloud_projects SET reconcile_requested=1", [])
+                .unwrap();
+        }
+        let path = f.r.store.join("test.db");
+        let racing = CaptureDuringRequest {
+            api: &api,
+            registry: RefCell::new(Registry::open(&path).unwrap()),
+            project: &f.id,
+            root: &f.root,
+            captured: std::cell::Cell::new(false),
+        };
+        let guard = cloud_commands::ProjectApi::new(
+            &racing,
+            &path,
+            &f.id,
+            "bound",
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+        cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &guard, "bound").unwrap();
+        drop(guard);
+        drop(racing);
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        assert_ne!(
+            n(&p, "next_at"),
+            i64::MAX,
+            "selection changes must not permanently stop the project"
+        );
+        assert!(f.jobs().iter().all(|j| s(j, "state") != "failed"));
+        assert_eq!(
+            api.0.borrow().files.len(),
+            1,
+            "stale guard must send no upload"
+        );
+        // Advance the retry clock, without issuing a manual sync command.
+        f.r.db
+            .execute("UPDATE cloud_projects SET next_at=0", [])
+            .unwrap();
+        f.r.db
+            .execute("UPDATE cloud_jobs SET next_at=0", [])
+            .unwrap();
+        for _ in 0..20 {
+            let p = cloud::project(&f.r.db, &f.id).unwrap();
+            if cloud_commands::needed(&f.r.db, &p).unwrap() {
+                let guard = cloud_commands::ProjectApi::new(
+                    &api,
+                    &path,
+                    &f.id,
+                    "bound",
+                    Arc::new(AtomicBool::new(false)),
+                )
+                .unwrap();
+                cloud_sync::step(&mut f.r.db, &f.r.store, &f.id, &guard, "bound").unwrap();
+            }
+        }
+        assert_eq!(api.0.borrow().associations.len(), 1);
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        assert!(matches!(s(&p, "status"), "up_to_date" | "reconciled"));
+        assert!(p["error"].is_null());
+        assert!(f
+            .jobs()
+            .iter()
+            .filter(|j| n(j, "desired") == 1)
+            .all(|j| s(j, "state") == "indexed"));
+        let remote = api.0.borrow();
+        let file = s(&remote.associations[0], "id");
+        assert_eq!(
+            remote
+                .files
+                .iter()
+                .find(|(v, _)| s(v, "id") == file)
+                .unwrap()
+                .1,
+            b"# Context version two"
+        );
+        assert_eq!(
+            remote.files.len(),
+            2,
+            "only the old and latest snapshots are uploaded"
+        );
+    }
+}
+
+#[test]
+fn startup_recovers_only_stale_selection_failures_on_active_automatic_projects() {
+    for job_error in [false, true] {
+        for blocked in [false, true] {
+            for message in [
+                "Folder selection changed. No further upload or attachment was sent.",
+                "The project folder changed. Refresh documents before syncing again.",
+                "Index contains a foreign or mismatched file (version). No destructive changes were made.",
+            ] {
+                let mut f = Fixture::new();
+                f.enable();
+                let api = Mock::default();
+                f.sync(&api);
+                f.bump();
+                cloud::queue(&mut f.r.db, &f.id).unwrap();
+                if job_error {
+                    f.r.db.execute("UPDATE cloud_jobs SET state='failed',error=?1,next_at=?2 WHERE file_id IS NULL", params![format!("Master_Context_v2.md (v2): {message} Other files can continue syncing."), i64::MAX]).unwrap();
+                } else {
+                    f.r.db.execute("UPDATE cloud_projects SET status='needs_attention',error=?1,next_at=?2", params![message, i64::MAX]).unwrap();
+                }
+                if blocked {
+                    f.r.db.execute("UPDATE cloud_projects SET paused=1", []).unwrap();
+                }
+                let before = f.jobs();
+                cloud_commands::resume_stale_selection(&f.r.db).unwrap();
+                let recoverable = !blocked && !message.starts_with("Index contains");
+                let p = cloud::project(&f.r.db, &f.id).unwrap();
+                if job_error {
+                    assert_eq!(f.jobs().iter().any(|j| s(j,"state")=="failed"), !recoverable);
+                } else {
+                    assert_eq!(n(&p,"next_at")==i64::MAX, !recoverable);
+                }
+                if recoverable {
+                    f.sync(&api);
+                    assert_eq!(api.0.borrow().files.len(), 2);
+                    assert_eq!(api.0.borrow().associations.len(), 1);
+                    assert!(f.jobs().iter().filter(|j|n(j,"desired")==1).all(|j|s(j,"state")=="indexed"));
+                } else {
+                    assert_eq!(f.jobs(), before);
+                    assert_eq!(api.0.borrow().files.len(), 1);
+                }
+            }
+        }
+    }
+}
