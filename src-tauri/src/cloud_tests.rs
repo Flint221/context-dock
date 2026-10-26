@@ -3365,3 +3365,49 @@ fn automatic_new_version_during_cloud_request_retries_with_fresh_selection() {
         );
     }
 }
+
+#[test]
+fn startup_recovers_only_stale_selection_failures_on_active_automatic_projects() {
+    for job_error in [false, true] {
+        for blocked in [false, true] {
+            for message in [
+                "Folder selection changed. No further upload or attachment was sent.",
+                "The project folder changed. Refresh documents before syncing again.",
+                "Index contains a foreign or mismatched file (version). No destructive changes were made.",
+            ] {
+                let mut f = Fixture::new();
+                f.enable();
+                let api = Mock::default();
+                f.sync(&api);
+                f.bump();
+                cloud::queue(&mut f.r.db, &f.id).unwrap();
+                if job_error {
+                    f.r.db.execute("UPDATE cloud_jobs SET state='failed',error=?1,next_at=?2 WHERE file_id IS NULL", params![format!("Master_Context_v2.md (v2): {message} Other files can continue syncing."), i64::MAX]).unwrap();
+                } else {
+                    f.r.db.execute("UPDATE cloud_projects SET status='needs_attention',error=?1,next_at=?2", params![message, i64::MAX]).unwrap();
+                }
+                if blocked {
+                    f.r.db.execute("UPDATE cloud_projects SET paused=1", []).unwrap();
+                }
+                let before = f.jobs();
+                cloud_commands::resume_stale_selection(&f.r.db).unwrap();
+                let recoverable = !blocked && !message.starts_with("Index contains");
+                let p = cloud::project(&f.r.db, &f.id).unwrap();
+                if job_error {
+                    assert_eq!(f.jobs().iter().any(|j| s(j,"state")=="failed"), !recoverable);
+                } else {
+                    assert_eq!(n(&p,"next_at")==i64::MAX, !recoverable);
+                }
+                if recoverable {
+                    f.sync(&api);
+                    assert_eq!(api.0.borrow().files.len(), 2);
+                    assert_eq!(api.0.borrow().associations.len(), 1);
+                    assert!(f.jobs().iter().filter(|j|n(j,"desired")==1).all(|j|s(j,"state")=="indexed"));
+                } else {
+                    assert_eq!(f.jobs(), before);
+                    assert_eq!(api.0.borrow().files.len(), 1);
+                }
+            }
+        }
+    }
+}
