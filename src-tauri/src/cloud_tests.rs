@@ -3339,10 +3339,14 @@ fn automatic_new_version_during_cloud_request_retries_with_fresh_selection() {
             }
         }
         assert_eq!(api.0.borrow().associations.len(), 1);
-        assert_eq!(
-            s(&cloud::project(&f.r.db, &f.id).unwrap(), "status"),
-            "up_to_date"
-        );
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        assert!(matches!(s(&p, "status"), "up_to_date" | "reconciled"));
+        assert!(p["error"].is_null());
+        assert!(f
+            .jobs()
+            .iter()
+            .filter(|j| n(j, "desired") == 1)
+            .all(|j| s(j, "state") == "indexed"));
         let remote = api.0.borrow();
         let file = s(&remote.associations[0], "id");
         assert_eq!(
