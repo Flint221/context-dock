@@ -182,7 +182,9 @@ export function ProjectCloud({
                     : retained
                       ? "Paused · Cloud data retained"
                       : enabled
-                        ? ready
+                        ? finishing
+                          ? "On · Finishing cloud sync"
+                          : ready
                           ? "On · Documents ready for questions"
                           : view.failed > 0
                             ? "On · Some files need attention"
