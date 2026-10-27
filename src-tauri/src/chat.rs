@@ -108,6 +108,15 @@ pub fn authorize(db: &Connection, p: &str, scope: &str) -> Result<String> {
         );
     }
     let jobs = cloud::jobs(db, p)?;
+    if jobs.iter().any(|j| {
+        s(j, "association_status") == "removal_pending"
+            && !matches!(s(j, "state"), "removed" | "purged")
+    }) {
+        return Err(
+            "Previous cloud entries are still being removed. Sync will recheck automatically."
+                .into(),
+        );
+    }
     if wanted.iter().any(|v| {
         !jobs.iter().any(|j| {
             s(j, "version_id") == v.id && s(j, "state") == "indexed" && n(j, "remote_current") == 1

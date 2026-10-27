@@ -50,8 +50,10 @@ export function ProjectSummary({
       !!cloud.localError ||
       ["cleanup_pending", "cleanup_failed"].includes(cloud.status));
   const enabled = !!cloud?.enabled && !cloud.paused;
+  const finishing = enabled && cloud?.status === "verifying_removal";
   const complete =
     enabled &&
+    !finishing &&
     total > 0 &&
     cloud?.indexed === total &&
     !cloud.pending &&
@@ -81,7 +83,9 @@ export function ProjectSummary({
           ? cloud.paused
             ? "Paused"
             : "Cloud off"
-          : complete
+          : finishing
+            ? "Finishing sync"
+            : complete
             ? "Indexed"
             : "Indexing / waiting";
   const missing = selected?.filter((e) => e.status !== "available").length ?? 0;

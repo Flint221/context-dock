@@ -282,19 +282,24 @@ fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
     if !file.is_empty() {
         if let Some(v) = association(api, store, file)? {
             owns_association(&v, &identity(db, p, j)?, store)?;
-            match api.request(
-                "DELETE",
-                &format!("/vector_stores/{store}/files/{file}"),
-                None,
-            ) {
-                Ok(receipt) if receipt["deleted"] == true => {}
-                Err(e) if e.missing => {}
-                Err(e) => return Err(e),
-                Ok(_) => {
-                    return Err(ApiError::local(
-                        "OpenAI did not confirm index-entry deletion. Removal remains pending.",
-                    ))
+            if s(j, "association_status") != "removal_pending" {
+                match api.request(
+                    "DELETE",
+                    &format!("/vector_stores/{store}/files/{file}"),
+                    None,
+                ) {
+                    Ok(receipt) if receipt["deleted"] == true => {}
+                    Err(e) if e.missing => {}
+                    Err(e) => return Err(e),
+                    Ok(_) => {
+                        return Err(ApiError::local(
+                            "OpenAI did not confirm index-entry deletion. Removal remains pending.",
+                        ))
+                    }
                 }
+                // Persist the acknowledgement before verifying absence. Later
+                // attempts poll this identity instead of issuing another DELETE.
+                execute(db,"UPDATE cloud_jobs SET association_status='removal_pending',error=NULL WHERE id=?1",&[&s(j,"id")])?;
             }
             if association(api, store, file)?.is_some() {
                 let mut error=ApiError::local(&format!("Removal verification is pending for {}. OpenAI still reports its index entry after confirming deletion; The entry will be checked again during retry.",s(j,"sourceName")));
@@ -305,6 +310,7 @@ fn detach(db: &Connection, p: &Value, j: &Value, api: &dyn CloudApi) -> ApiResul
         }
     }
     execute(db,"UPDATE cloud_jobs SET state='removed',association_status=NULL,remote_current=NULL,error=NULL,next_at=0 WHERE id=?1",&[&s(j,"id")])?;
+    execute(db,"UPDATE cloud_projects SET status='queued',error=NULL,next_at=0 WHERE project_id=?1 AND status='verifying_removal'",&[&s(p,"project_id")])?;
     log(
         db,
         s(p, "project_id"),
@@ -387,11 +393,28 @@ pub(crate) fn source_recovery_ready(db: &Connection, p: &Value) -> Result<bool> 
         });
     Ok(interrupted && cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?).is_ok())
 }
-pub fn legacy_removal_wait(p: &Value) -> bool {
-    n(p,"enabled")==1 && n(p,"paused")==0 && n(p,"next_at")==i64::MAX
-        && n(p,"attempts")<=6 && s(p,"status")=="needs_attention"
-        && s(p,"error")=="The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."
+fn removal_wait(message: &str) -> bool {
+    message.starts_with("Removal verification is pending for ")
+        || message == "The index entry is still present in OpenAI. Removal remains pending; retry after checking the remote state."
 }
+fn record_removal_wait(db: &Connection, id: &str, e: &ApiError) -> Result<bool> {
+    if !e.retry || !removal_wait(&e.message) {
+        return Ok(false);
+    }
+    // A successful deletion awaiting visibility is progress, not a failure.
+    // Pace GET verification across worker ticks and restarts without exhausting
+    // the separate network/authentication failure budget.
+    db.execute("UPDATE cloud_projects SET status='verifying_removal',error=NULL,attempts=0,next_at=?2 WHERE project_id=?1",params![id,chrono::Utc::now().timestamp()+30]).map_err(error)?;
+    Ok(true)
+}
+pub fn legacy_removal_wait(p: &Value) -> bool {
+    n(p, "enabled") == 1
+        && n(p, "paused") == 0
+        && n(p, "next_at") == i64::MAX
+        && s(p, "status") == "needs_attention"
+        && removal_wait(s(p, "error"))
+}
+
 pub fn step(
     db: &mut Connection,
     root: &Path,
@@ -453,6 +476,9 @@ pub fn step(
                     db.execute("UPDATE cloud_projects SET status=CASE WHEN paused=1 THEN 'paused' ELSE 'queued' END,error=NULL,next_at=0,attempts=0 WHERE project_id=?1",[id]).map_err(error)?;
                 }
                 Err(e) => {
+                    if record_removal_wait(db, id, &e)? {
+                        return Ok(());
+                    }
                     db.execute(
                         "UPDATE cloud_jobs SET error=?2 WHERE id=?1",
                         params![s(job, "id"), e.message],
@@ -648,6 +674,9 @@ pub fn step(
             || (n(&current, "paused") == 1 && n(&current, "delete_requested") != 1)
             || connected != 1
         {
+            return Ok(());
+        }
+        if record_removal_wait(db, id, &e)? {
             return Ok(());
         }
         let tries = n(&p, "attempts") + 1;
