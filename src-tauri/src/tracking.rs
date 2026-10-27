@@ -145,6 +145,8 @@ impl Registry {
     pub fn set_tracking_error(&self, project: &str, errors: &[String]) -> Result<()> {
         let message = if errors.is_empty() {
             None
+        } else if errors.iter().all(|e| storage::temporary_editor_read(e)) {
+            Some(EDITOR_WAIT.to_string())
         } else {
             Some(format!(
                 "{} operation(s) need attention. {}",
@@ -705,3 +707,6 @@ impl Registry {
         Ok(())
     }
 }
+
+pub const EDITOR_WAIT: &str =
+    "Documents are temporarily locked or being saved. Tracking will resume when they are readable.";

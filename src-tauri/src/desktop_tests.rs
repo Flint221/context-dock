@@ -437,3 +437,86 @@ fn shared_drive_folder_alert_is_one_durable_batch_and_rearms_after_recovery() {
             .0
     );
 }
+
+#[test]
+fn editor_waits_stay_visible_without_muting_independent_problem_notifications() {
+    let f = Fixture::new();
+    let lock = "Filesystem operation could not complete: The process cannot access the file because it is being used by another process. (os error 32)".to_string();
+    f.r.set_tracking_error(&f.id, &[lock.clone(), lock.clone()])
+        .unwrap();
+    let tracking: String =
+        f.r.db
+            .query_row(
+                "SELECT tracking_error FROM projects WHERE id=?1",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert_eq!(tracking, crate::tracking::EDITOR_WAIT);
+    let wait =
+        serde_json::json!({"tracking_error":tracking,"cloud_error":cloud::SOURCE_BUSY,"failed":0});
+    assert!(desktop::problem_signature(&wait).is_none());
+    assert_eq!(
+        wait["cloud_error"],
+        cloud::SOURCE_BUSY,
+        "the in-app status is preserved"
+    );
+    for (field, value) in [
+        ("scan_error", serde_json::json!("Folder cannot be read")),
+        ("cloud_error", serde_json::json!(cloud::SOURCE_MISSING)),
+        (
+            "cloud_error",
+            serde_json::json!("OpenAI authentication failed"),
+        ),
+        ("failed", serde_json::json!(1)),
+    ] {
+        let mut independent = wait.clone();
+        independent[field] = value;
+        assert!(desktop::problem_signature(&independent).is_some());
+    }
+    f.r.set_tracking_error(&f.id, &[lock, "Snapshot integrity conflict".into()])
+        .unwrap();
+    let mixed: String =
+        f.r.db
+            .query_row(
+                "SELECT tracking_error FROM projects WHERE id=?1",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert!(desktop::problem_signature(
+        &serde_json::json!({"tracking_error":mixed,"cloud_error":cloud::SOURCE_BUSY,"failed":0})
+    )
+    .is_some());
+    f.r.set_tracking_error(
+        &f.id,
+        &["Filesystem operation could not complete: Access is denied. (os error 5)".into()],
+    )
+    .unwrap();
+    let permission: String =
+        f.r.db
+            .query_row(
+                "SELECT tracking_error FROM projects WHERE id=?1",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert!(desktop::problem_signature(
+        &serde_json::json!({"tracking_error":permission,"failed":0})
+    )
+    .is_some());
+    assert!(!crate::storage::temporary_editor_read(
+        "Filesystem operation could not complete: Access is denied. (os error 5)"
+    ));
+    f.r.set_tracking_error(&f.id, &[]).unwrap();
+    assert!(f
+        .r
+        .db
+        .query_row(
+            "SELECT tracking_error FROM projects WHERE id=?1",
+            [&f.id],
+            |r| r.get::<_, Option<String>>(0)
+        )
+        .unwrap()
+        .is_none());
+}

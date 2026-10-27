@@ -285,6 +285,30 @@ pub(crate) fn folder_notice(
         format!("{names}. Reconnect the drive or open ContextDock to check the saved folders. Local history is retained."),
         format!("contextdock://project?project={}", cloud::s(unavailable[0], "id")))))
 }
+/// In-app editor waits stay visible, but are not actionable desktop alerts.
+/// Independent scan, tracking, cloud and upload failures retain their alerts.
+pub(crate) fn problem_signature(project: &Value) -> Option<String> {
+    let tracking = cloud::s(project, "tracking_error");
+    let tracking = if tracking == crate::tracking::EDITOR_WAIT {
+        ""
+    } else {
+        tracking
+    };
+    let remote = cloud::s(project, "cloud_error");
+    let remote = if remote == cloud::SOURCE_BUSY {
+        ""
+    } else {
+        remote
+    };
+    let signature = format!(
+        "{}|{}|{}|{}",
+        cloud::s(project, "scan_error"),
+        tracking,
+        remote,
+        cloud::n(project, "failed")
+    );
+    (signature != "|||0").then_some(signature)
+}
 fn background_tick(
     db: &rusqlite::Connection,
     app: &tauri::AppHandle,
@@ -309,15 +333,10 @@ fn background_tick(
             "Pause uploads"
         });
     }
-    let projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain')) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[])?;
+    let projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain') AND (j.error IS NULL OR instr(j.error,?1)=0)) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[&cloud::SOURCE_BUSY])?;
     let problems = projects
         .iter()
-        .filter(|p| {
-            !cloud::s(p, "scan_error").is_empty()
-                || !cloud::s(p, "tracking_error").is_empty()
-                || !cloud::s(p, "cloud_error").is_empty()
-                || cloud::n(p, "failed") > 0
-        })
+        .filter(|p| problem_signature(p).is_some())
         .count();
     if let Some(icon) = app.tray_by_id("contextdock") {
         let _ = icon.set_tooltip(Some(format!(
@@ -390,17 +409,7 @@ fn background_tick(
                 .map_err(error)?;
             continue;
         }
-        let signature = format!(
-            "{}|{}|{}|{}",
-            cloud::s(&p, "scan_error"),
-            cloud::s(&p, "tracking_error"),
-            cloud::s(&p, "cloud_error"),
-            cloud::n(&p, "failed")
-        );
-        if signature == "|||0" {
-            db.execute("DELETE FROM desktop_notices WHERE key=?1", [&key])
-                .map_err(error)?;
-        } else {
+        if let Some(signature) = problem_signature(&p) {
             let due = review::notice_due(db, &key, &signature, now, 30)?;
             let enabled = review::preference(db, "desktop.problem_notifications", true);
             if enabled {
@@ -421,6 +430,11 @@ fn background_tick(
             {
                 review::notice_sent(db, &key, now)?;
             }
+        } else {
+            // Also retire a previously queued error when only an editor wait
+            // remains, so it cannot be delivered later while Word is open.
+            db.execute("DELETE FROM desktop_notices WHERE key=?1", [&key])
+                .map_err(error)?;
         }
     }
     notifications.retain(&notice_keys);

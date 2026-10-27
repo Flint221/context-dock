@@ -3469,6 +3469,19 @@ fn word_editor_lock_and_owner_file_do_not_create_versions_and_sync_resumes_after
     assert!(api.0.borrow().calls.is_empty());
     let p = cloud::project(&f.r.db, &f.id).unwrap();
     assert_eq!(s(&p, "error"), cloud::SOURCE_BUSY);
+    let tracking: Option<String> =
+        f.r.db
+            .query_row(
+                "SELECT tracking_error FROM projects WHERE id=?1",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    assert_eq!(tracking.as_deref(), Some(crate::tracking::EDITOR_WAIT));
+    assert!(crate::desktop::problem_signature(
+        &json!({"cloud_error":p["error"],"tracking_error":tracking,"failed":0})
+    )
+    .is_none());
     assert!(!cloud_commands::needed(&f.r.db, &p).unwrap());
     drop(editor);
     fs::remove_file(f.root.join("~$ContextDock_Context_v2.docx")).unwrap();
