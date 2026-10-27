@@ -1,0 +1,9 @@
+# ContextDock configured cloud upload limits
+
+Version 0.10.11 removes the separate 16 MiB cap from cloud snapshot verification and cloud DOCX screening. Cloud uploads now use the saved project size limit, normally 50 MiB, within the existing supported 1-byte to 512 MiB range. Snapshot reads stop at that configured limit plus one byte and still verify committed size and SHA-256 before sending the original bytes. The error identifies the configured byte limit. Provider content retrieval used to recover interrupted uploads supports the same absolute range, with snapshot identity/hash checks retained.
+
+Cloud DOCX screening passes the project limit into ZIP preflight. Local comparison keeps its existing 16 MiB raw bound. All callers retain 4 MiB extracted text, 8 MiB body XML, 128 MiB expanded DOCX package, 2048 ZIP entries, 32 MiB per entry, 200:1 expansion ratio, XML depth and unsupported ZIP-layout restrictions. Larger image/package bytes do not enlarge the permitted text/XML expansion.
+
+Startup requeues only failed, desired, pre-upload jobs carrying the exact old limit-rejection format and no remote File ID, when their snapshots now fit an active automatic project's saved limit. Paused/manual projects, ambiguous uploads, known remote files, unrelated validation failures and still-oversized snapshots are preserved. No source, snapshot or remote association is replaced by this recovery.
+
+Regressions cover a 17 MiB illustrated DOCX reaching indexed state and recovering an interrupted upload without duplicate Files, exact 50 MiB acceptance, rejection above the configured setting, bounded settings, legacy recovery guards and unchanged comparison/package bounds. An explicit read-only acceptance test can copy a selected real DOCX into a disposable snapshot and run the production verifier without loading credentials or calling the provider. Installer installation is deferred until the user quits ContextDock.
