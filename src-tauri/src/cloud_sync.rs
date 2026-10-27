@@ -360,6 +360,27 @@ fn reconcile(db: &Connection, p: &Value, api: &dyn CloudApi, allow_pending: bool
     }
     execute(db,"UPDATE cloud_projects SET usage_bytes=?2,reconcile_requested=0,last_sync=?3,status='reconciled',error=NULL WHERE project_id=?1",&[&s(p,"project_id"),&store["usage_bytes"].as_i64(),&models::now()])
 }
+fn source_error(message: &str) -> bool {
+    message.contains(cloud::SOURCE_BUSY) || message.contains(cloud::SOURCE_MISSING)
+}
+/// Probe only local readiness. Never send cloud traffic while an editor holds a
+/// selected source, and never treat genuine remote identity failures as recoverable.
+pub(crate) fn source_recovery_ready(db: &Connection, p: &Value) -> Result<bool> {
+    if n(p, "enabled") != 1
+        || n(p, "paused") == 1
+        || n(p, "started") != 1
+        || n(p, "auto_sync") != 1
+        || n(p, "delete_requested") == 1
+        || matches!(s(p, "status"), "cleanup_pending" | "cleanup_failed")
+    {
+        return Ok(false);
+    }
+    let interrupted = (s(p, "status") == "needs_attention" && source_error(s(p, "error")))
+        || cloud::jobs(db, s(p, "project_id"))?
+            .iter()
+            .any(|j| s(j, "state") == "failed" && source_error(s(j, "error")));
+    Ok(interrupted && cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?).is_ok())
+}
 pub fn legacy_removal_wait(p: &Value) -> bool {
     n(p,"enabled")==1 && n(p,"paused")==0 && n(p,"next_at")==i64::MAX
         && n(p,"attempts")<=6 && s(p,"status")=="needs_attention"
@@ -373,6 +394,19 @@ pub fn step(
     key_scope: &str,
 ) -> Result<()> {
     let mut p = cloud::project(db, id)?;
+    if source_recovery_ready(db, &p)? {
+        let tx = db.unchecked_transaction().map_err(error)?;
+        for j in cloud::jobs(&tx, id)?.iter().filter(|j| {
+            s(j, "state") == "failed"
+                && source_error(s(j, "error"))
+                && !matches!(s(j, "phase"), "remove" | "selection_remove" | "path_remove")
+        }) {
+            tx.execute("UPDATE cloud_jobs SET state=CASE WHEN file_id IS NOT NULL THEN 'uploaded' WHEN phase='recover' THEN 'uploading' ELSE 'pending' END,error=NULL,next_at=0,attempts=0 WHERE id=?1",[s(j,"id")]).map_err(error)?;
+        }
+        tx.execute("UPDATE cloud_projects SET next_at=0,attempts=0,error=NULL,status='queued' WHERE project_id=?1",[id]).map_err(error)?;
+        tx.commit().map_err(error)?;
+        p = cloud::project(db, id)?;
+    }
     if legacy_removal_wait(&p) {
         db.execute(
             "UPDATE cloud_projects SET next_at=0,status='retry_wait' WHERE project_id=?1",

@@ -10,6 +10,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{io::Read, path::Path};
+pub const SOURCE_MISSING: &str = "Selected project files are missing or inaccessible. Restore them and refresh documents before syncing or asking questions.";
+pub const SOURCE_BUSY: &str = "A selected document is temporarily locked or unreadable. Close the editor or wait for saving to finish; automatic sync will resume once it is readable.";
 pub fn connect(path: &Path) -> Result<Connection> {
     let db = Connection::open(path).map_err(error)?;
     db.busy_timeout(std::time::Duration::from_secs(10))
@@ -126,12 +128,12 @@ fn desired_selection(
             if !crate::path_selection::permits(&path_rules, &relative) {
                 continue;
             }
-            if status != "available"
-                || storage::checked(Path::new(&root), &relative, false)
-                    .and_then(|p| storage::locked_read(&p.path, false))
-                    .is_err()
-            {
-                return Err("Selected project files are missing or inaccessible. Restore them and refresh documents before syncing or asking questions.".into());
+            let source = storage::checked(Path::new(&root), &relative, false);
+            if status != "available" || source.is_err() {
+                return Err(SOURCE_MISSING.into());
+            }
+            if storage::locked_read(&source?.path, false).is_err() {
+                return Err(SOURCE_BUSY.into());
             }
             if hashed_size.is_none() {
                 return Err("Recheck the reassigned folder's documents before syncing or asking questions. Use Refresh documents to capture any changed files.".into());

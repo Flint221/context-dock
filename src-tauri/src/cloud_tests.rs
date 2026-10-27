@@ -3411,3 +3411,69 @@ fn startup_recovers_only_stale_selection_failures_on_active_automatic_projects()
         }
     }
 }
+
+#[test]
+#[cfg(windows)]
+fn word_editor_lock_and_owner_file_do_not_create_versions_and_sync_resumes_after_close() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let mut f = Fixture::new();
+    fs::write(f.root.join("ContextDock_Context_v2.docx"), word_package(5)).unwrap();
+    f.r.reconcile(&f.id, "watcher", &HashSet::new(), true)
+        .unwrap();
+    f.select_file("ContextDock_Context_v2.docx");
+    f.enable();
+    let api = Mock::default();
+    for _ in 0..15 {
+        f.step(&api);
+    }
+    let versions: i64 =
+        f.r.db
+            .query_row("SELECT COUNT(*) FROM document_versions", [], |r| r.get(0))
+            .unwrap();
+    let uploaded = api.0.borrow().files.len();
+    let before = f.jobs();
+    let editor = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(3)
+        .open(f.root.join("ContextDock_Context_v2.docx"))
+        .unwrap();
+    fs::write(
+        f.root.join("~$ContextDock_Context_v2.docx"),
+        b"Word owner file",
+    )
+    .unwrap();
+    f.r.reconcile(&f.id, "watcher", &HashSet::new(), true)
+        .unwrap();
+    assert!(!f
+        .r
+        .snapshot()
+        .unwrap()
+        .documents
+        .iter()
+        .any(|d| d.name.starts_with("~$")));
+    api.0.borrow_mut().calls.clear();
+    f.step(&api);
+    assert!(api.0.borrow().calls.is_empty());
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert_eq!(s(&p, "error"), cloud::SOURCE_BUSY);
+    assert!(!cloud_commands::needed(&f.r.db, &p).unwrap());
+    drop(editor);
+    fs::remove_file(f.root.join("~$ContextDock_Context_v2.docx")).unwrap();
+    f.r.reconcile(&f.id, "watcher", &HashSet::new(), true)
+        .unwrap();
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    assert!(cloud_commands::needed(&f.r.db, &p).unwrap());
+    // No manual sync or error-state reset after closing Word.
+    f.sync(&api);
+    assert!(cloud::project(&f.r.db, &f.id).unwrap()["error"].is_null());
+    assert_eq!(api.0.borrow().files.len(), uploaded);
+    assert_eq!(f.jobs(), before);
+    assert_eq!(
+        f.r.db
+            .query_row("SELECT COUNT(*) FROM document_versions", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        versions
+    );
+}

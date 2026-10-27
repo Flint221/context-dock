@@ -196,6 +196,9 @@ fn current_api(db: &Connection) -> Result<(OpenAi, String)> {
     Ok((OpenAi::new(&key)?, scope))
 }
 pub fn needed(db: &Connection, p: &Value) -> Result<bool> {
+    if cloud_sync::source_recovery_ready(db, p)? {
+        return Ok(true);
+    }
     if n(p, "next_at") > chrono::Utc::now().timestamp() && !cloud_sync::legacy_removal_wait(p) {
         return Ok(false);
     }
