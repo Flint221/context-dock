@@ -314,6 +314,12 @@ pub(crate) fn resume_stale_selection(db: &Connection) -> Result<()> {
     }
     tx.commit().map_err(error)
 }
+/// Only the old pre-upload 16 MiB rejection is safe to resume automatically.
+/// Unknown/ambiguous uploads and all other validation failures remain untouched.
+pub(crate) fn resume_legacy_size_failures(db: &Connection) -> Result<()> {
+    db.execute("UPDATE cloud_jobs SET state='pending',next_at=0,attempts=0,error=NULL WHERE state='failed' AND phase='upload' AND file_id IS NULL AND desired=1 AND instr(error,'cloud uploads require a nonempty file within the configured ')>0 AND instr(error,'-byte limit and the 16 MiB application limit. No bytes uploaded.')>0 AND EXISTS(SELECT 1 FROM cloud_projects c JOIN document_versions v ON v.id=cloud_jobs.version_id WHERE c.project_id=cloud_jobs.project_id AND c.enabled=1 AND c.paused=0 AND c.started=1 AND c.auto_sync=1 AND c.delete_requested=0 AND c.status NOT IN ('cleanup_pending','cleanup_failed') AND v.size>0 AND v.size<=c.soft_limit AND c.soft_limit<=?1)",[crate::extraction::MAX_CLOUD_SNAPSHOT as i64]).map_err(error)?;
+    Ok(())
+}
 pub(crate) fn runtime_database_path(path: PathBuf) -> std::io::Result<PathBuf> {
     // Match Registry::store before deriving the guarded snapshot root. On Windows,
     // canonicalization adds the verbatim prefix even when the folder never moved.
@@ -327,6 +333,7 @@ impl CloudRuntime {
         let path = runtime_database_path(path)?;
         if let Ok(db) = cloud::connect(&path) {
             resume_stale_selection(&db).map_err(std::io::Error::other)?;
+            resume_legacy_size_failures(&db).map_err(std::io::Error::other)?;
             let _=db.execute("UPDATE cloud_projects SET reconcile_requested=1 WHERE enabled=1 AND paused=0 AND started=1",[]);
         }
         let gate = Arc::new(Mutex::new(()));

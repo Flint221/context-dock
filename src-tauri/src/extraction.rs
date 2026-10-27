@@ -3,6 +3,9 @@ use crate::registry::Result;
 use quick_xml::{events::Event, name::ResolveResult, NsReader};
 use std::io::{Cursor, Read};
 pub const MAX_SNAPSHOT: usize = 16 * 1024 * 1024;
+// Absolute ceiling for supported cloud settings; each project enforces its own
+// configured (normally 50 MiB) limit before allocating snapshot bytes.
+pub const MAX_CLOUD_SNAPSHOT: usize = 512 * 1024 * 1024;
 pub const MAX_TEXT: usize = 4 * 1024 * 1024;
 const MAX_XML: usize = 8 * 1024 * 1024;
 const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
@@ -13,9 +16,18 @@ pub struct Extracted {
     pub warnings: Vec<String>,
 }
 pub fn extract(bytes: &[u8], kind: &str) -> Result<Extracted> {
+    extract_with_limit(bytes, kind, MAX_SNAPSHOT)
+}
+pub fn extract_cloud(bytes: &[u8], kind: &str, limit: usize) -> Result<Extracted> {
+    if limit == 0 || limit > MAX_CLOUD_SNAPSHOT || bytes.len() > limit {
+        return Err("Snapshot exceeds the configured cloud upload limit.".into());
+    }
+    extract_with_limit(bytes, kind, limit)
+}
+fn extract_with_limit(bytes: &[u8], kind: &str, package_limit: usize) -> Result<Extracted> {
     let (original, mut warnings) = match kind {
         "markdown" => (utf8(bytes)?.to_owned(), vec![]),
-        "word" => (docx(bytes)?, vec!["DOCX body text only: paragraphs/runs, hyperlinks and displayed field results; tables use tabs between cells. Insertions/move-to text included; deletions/move-from text excluded (accepted view). Headers, footers, notes, comments, images/charts, text boxes/drawings, embedded content and field instructions are excluded. Formatting, numbering, hidden-text visibility and layout are not compared; merged cells are read in XML order and nested tables are unsupported. No external resources are loaded.".into()]),
+        "word" => (docx(bytes,package_limit)?, vec!["DOCX body text only: paragraphs/runs, hyperlinks and displayed field results; tables use tabs between cells. Insertions/move-to text included; deletions/move-from text excluded (accepted view). Headers, footers, notes, comments, images/charts, text boxes/drawings, embedded content and field instructions are excluded. Formatting, numbering, hidden-text visibility and layout are not compared; merged cells are read in XML order and nested tables are unsupported. No external resources are loaded.".into()]),
         _ => return Err("This document type does not support local comparison.".into()),
     };
     if original.len() > MAX_TEXT {
@@ -41,9 +53,13 @@ fn utf8(bytes: &[u8]) -> Result<&str> {
         .map_err(|_| "Unsupported text encoding: comparison requires valid UTF-8.".into())
 }
 // Bound central-directory allocations before letting the ZIP parser build its index.
-fn zip_preflight(bytes: &[u8]) -> Result<()> {
-    if bytes.len() > MAX_SNAPSHOT {
-        return Err("DOCX package exceeds the 16 MiB limit.".into());
+fn zip_preflight(bytes: &[u8], package_limit: usize) -> Result<()> {
+    if bytes.len() > package_limit {
+        return Err(if package_limit == MAX_SNAPSHOT {
+            "DOCX package exceeds the 16 MiB limit.".into()
+        } else {
+            format!("DOCX package exceeds the configured {package_limit}-byte upload limit.")
+        });
     }
     let start = bytes.len().saturating_sub(65557);
     let pos = (start..bytes.len().saturating_sub(21))
@@ -84,8 +100,8 @@ fn zip_preflight(bytes: &[u8]) -> Result<()> {
     }
     Ok(())
 }
-fn docx(bytes: &[u8]) -> Result<String> {
-    zip_preflight(bytes)?;
+fn docx(bytes: &[u8], package_limit: usize) -> Result<String> {
+    zip_preflight(bytes, package_limit)?;
     let mut zip =
         zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| format!("Corrupt DOCX ZIP: {e}"))?;
     if zip.len() > 2048

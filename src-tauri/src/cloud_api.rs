@@ -197,7 +197,7 @@ impl CloudApi for OpenAi {
             self.client
                 .get(format!("https://api.openai.com/v1/files/{id}/content")),
             false,
-            16 * 1024 * 1024,
+            crate::extraction::MAX_CLOUD_SNAPSHOT,
         )
     }
 }
