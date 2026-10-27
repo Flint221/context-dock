@@ -90,6 +90,7 @@ export function ProjectCloud({
     }
   }
   const enabled = !!view?.enabled && !view.paused;
+  const finishing = enabled && view?.status === "verifying_removal";
   const cleanupNeeded =
     !!view && ["cleanup_pending", "cleanup_failed"].includes(view.status);
   const retained = !!view && !enabled && hasCloudData(view);
@@ -114,6 +115,7 @@ export function ProjectCloud({
   );
   const ready =
     enabled &&
+    !finishing &&
     !view?.error &&
     view?.localReady !== false &&
     view?.connectionStatus === "connected" &&
@@ -132,6 +134,8 @@ export function ProjectCloud({
         ? "Save and test your OpenAI key in Settings to connect."
         : view.error
           ? view.error
+          : finishing
+            ? "Current versions are indexed. Finishing removal of previous cloud entries; verification continues automatically."
           : pathsExcluded && selected.length === 0
             ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
             : selected.length === 0
@@ -234,6 +238,7 @@ export function ProjectCloud({
           )}
           {error && !setup && !stop && <p role="alert">{error}</p>}
           {view?.error && <p role="alert">{view.error}</p>}
+          {finishing && <p role="status">Current versions are indexed. Finishing removal of previous cloud entries; verification continues automatically.</p>}
           {!!view?.selectionRemovalPending && (
             <div className="banner warning">
               <span>

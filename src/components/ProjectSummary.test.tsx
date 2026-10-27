@@ -133,3 +133,10 @@ it("identifies failed archive operations separately from missing files and revie
   expect(screen.getByText("archive: Old Context Files/Context_v3.md")).toBeInTheDocument();
   expect(screen.getByText("archive: Old Context Files/Tasks_v2.md")).toBeInTheDocument();
 });
+
+it("shows a finishing state instead of an error or ready status during verified removal", () => {
+  render(<ProjectSummary selection={selection} tracking={tracking} unavailable={false}
+    cloud={{...cloud, indexed: 12, pending: 0, failed: 0, error: null, status: "verifying_removal"}} />);
+  expect(screen.getByText("Finishing sync").parentElement).toHaveClass("summary-warning");
+  expect(screen.getByText("12/12").parentElement).toHaveClass("summary-warning");
+});
