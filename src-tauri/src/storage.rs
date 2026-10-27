@@ -82,6 +82,13 @@ pub fn checked(root: &Path, relative: &str, create_parents: bool) -> Result<Chec
         _directories: guards,
     })
 }
+/// Sharing/byte-range locks and capture quiet windows are expected editor waits.
+/// Permission and other I/O failures remain actionable errors.
+pub(crate) fn temporary_editor_read(message: &str) -> bool {
+    message.contains("(os error 32)")
+        || message.contains("(os error 33)")
+        || message == "Document is still being written; capture will be retried."
+}
 pub fn locked_read(path: &Path, for_move: bool) -> Result<File> {
     let mut opts = OpenOptions::new();
     opts.read(true);

@@ -136,8 +136,13 @@ fn desired_selection(
             if !source.path.is_file() {
                 return Err(SOURCE_MISSING.into());
             }
-            if storage::locked_read(&source.path, false).is_err() {
-                return Err(SOURCE_BUSY.into());
+            if let Err(message) = storage::locked_read(&source.path, false) {
+                return Err(if storage::temporary_editor_read(&message) {
+                    SOURCE_BUSY
+                } else {
+                    SOURCE_MISSING
+                }
+                .into());
             }
             if hashed_size.is_none() {
                 return Err("Recheck the reassigned folder's documents before syncing or asking questions. Use Refresh documents to capture any changed files.".into());
