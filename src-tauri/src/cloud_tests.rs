@@ -3477,3 +3477,57 @@ fn word_editor_lock_and_owner_file_do_not_create_versions_and_sync_resumes_after
         versions
     );
 }
+
+#[test]
+fn source_wait_recovery_preserves_pause_manual_policy_and_real_cloud_errors() {
+    for stop in ["none", "paused", "manual", "identity", "authentication"] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        f.r.db
+            .execute(
+                "UPDATE cloud_jobs SET state='failed',error=?1",
+                [cloud::SOURCE_BUSY],
+            )
+            .unwrap();
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET status='file_errors',sync_requested=0",
+                [],
+            )
+            .unwrap();
+        match stop {
+            "paused" => {
+                f.r.db
+                    .execute("UPDATE cloud_projects SET paused=1", [])
+                    .unwrap();
+            }
+            "manual" => {
+                f.r.db
+                    .execute("UPDATE cloud_projects SET auto_sync=0", [])
+                    .unwrap();
+            }
+            "identity" | "authentication" => {
+                f.r.db
+                    .execute(
+                        "UPDATE cloud_projects SET status='needs_attention',error=?1,next_at=?2",
+                        params![stop, i64::MAX],
+                    )
+                    .unwrap();
+            }
+            _ => {}
+        }
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        assert_eq!(
+            cloud_sync::source_recovery_ready(&f.r.db, &p).unwrap(),
+            stop == "none"
+        );
+        assert_eq!(cloud_commands::needed(&f.r.db, &p).unwrap(), stop == "none");
+        if stop == "none" {
+            f.sync(&api);
+            assert_eq!(api.0.borrow().files.len(), 1);
+            assert_eq!(s(&f.jobs()[0], "state"), "indexed");
+        }
+    }
+}

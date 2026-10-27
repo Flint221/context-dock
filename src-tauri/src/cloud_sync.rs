@@ -375,6 +375,9 @@ pub(crate) fn source_recovery_ready(db: &Connection, p: &Value) -> Result<bool> 
     {
         return Ok(false);
     }
+    if !s(p, "error").is_empty() && !source_error(s(p, "error")) {
+        return Ok(false);
+    }
     let interrupted = (s(p, "status") == "needs_attention" && source_error(s(p, "error")))
         || cloud::jobs(db, s(p, "project_id"))?
             .iter()
