@@ -761,7 +761,7 @@ it("blocks ready messaging and questions while indexed cleanup still has an erro
   view.error = "Removal verification is pending for Context_v1.md.";
   render(<ProjectCloud project="p1" />);
   expect(await screen.findByRole("alert")).toHaveTextContent("Removal verification is pending");
-  expect(screen.queryByText("On · Documents ready for questions")).not.toBeInTheDocument();
+  expect(screen.queryByText("On Â· Documents ready for questions")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
 });
 
@@ -773,7 +773,7 @@ it("shows acknowledged cloud removal as automatic finishing work with current ve
   view.failed = 0;
   view.indexed = 1;
   render(<ProjectCloud project="p1" />);
-  expect(await screen.findByText("On · Finishing cloud sync")).toBeInTheDocument();
+  expect(await screen.findByText(/^On .* Finishing cloud sync$/)).toBeInTheDocument();
   expect(screen.getAllByText(/verification continues automatically/).length).toBeGreaterThan(0);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
