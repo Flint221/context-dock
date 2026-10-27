@@ -132,7 +132,11 @@ fn desired_selection(
             if status != "available" || source.is_err() {
                 return Err(SOURCE_MISSING.into());
             }
-            if storage::locked_read(&source?.path, false).is_err() {
+            let source = source?;
+            if !source.path.is_file() {
+                return Err(SOURCE_MISSING.into());
+            }
+            if storage::locked_read(&source.path, false).is_err() {
                 return Err(SOURCE_BUSY.into());
             }
             if hashed_size.is_none() {
