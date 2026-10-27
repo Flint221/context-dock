@@ -2506,7 +2506,7 @@ fn saved_path_removal_can_finish_on_retained_cloud_data_without_enabling_uploads
     f.step(&api);
     assert_eq!(
         cloud::project(&f.r.db, &f.id).unwrap()["status"],
-        "retry_wait"
+        "verifying_removal"
     );
     api.0.borrow_mut().ignore_association_delete = false;
     cloud_commands::action_impl(
@@ -2594,7 +2594,7 @@ fn saved_folder_exclusion_removes_from_index_while_paused_and_reinclude_reuses_o
     f.step(&api);
     assert_eq!(
         cloud::project(&f.r.db, &f.id).unwrap()["status"],
-        "retry_wait"
+        "verifying_removal"
     );
     assert_eq!(api.0.borrow().associations.len(), 2);
     api.0.borrow_mut().ignore_association_delete = false;
