@@ -437,19 +437,24 @@ pub fn queue(db: &mut Connection, id: &str) -> Result<()> {
     tx.commit().map_err(error)
 }
 pub fn verified(root: &Path, v: &CloudVersion, limit: i64) -> Result<Vec<u8>> {
-    if v.size <= 0 || v.size > limit || v.size as usize > extraction::MAX_SNAPSHOT {
-        return Err(format!("Snapshot is {} bytes; cloud uploads require a nonempty file within the configured {}-byte limit and the 16 MiB application limit. No bytes uploaded.", v.size, limit));
+    if limit <= 0 || limit > extraction::MAX_CLOUD_SNAPSHOT as i64 {
+        return Err(
+            "Choose a cloud upload limit between 1 byte and 512 MiB. No bytes uploaded.".into(),
+        );
+    }
+    if v.size <= 0 || v.size > limit {
+        return Err(format!("Snapshot is {} bytes; cloud uploads require a nonempty file within the configured {}-byte upload limit. No bytes uploaded.", v.size, limit));
     }
     let path = storage::checked(root, &v.snapshot, false)?;
     let file = storage::locked_read(&path.path, false)?;
     let mut bytes = Vec::new();
-    file.take(extraction::MAX_SNAPSHOT as u64 + 1)
+    file.take(limit as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "Cannot read immutable snapshot.".to_string())?;
     if bytes.len() as i64 != v.size || format!("{:x}", Sha256::digest(&bytes)) != v.hash {
         return Err("Snapshot integrity verification failed. No bytes uploaded.".into());
     }
-    extraction::extract(&bytes, &v.kind)?;
+    extraction::extract_cloud(&bytes, &v.kind, limit as usize)?;
     // Extraction already validates the 128 MiB expanded package, entry/ratio,
     // body XML and extracted-text limits. Package bytes include images and are
     // not a token count; do not impose the former 4 MiB package screen here.

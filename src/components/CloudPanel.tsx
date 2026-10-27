@@ -392,9 +392,10 @@ export function CloudPanel({
             </div>
             <p>
               The soft limit blocks individual uploads; it does not enforce a
-              billing cap. Application safety limits: 16 MiB raw files, 4 MiB
-              extracted text, 8 MiB DOCX body XML and 128 MiB expanded DOCX
-              packages; OpenAI also enforces type and token limits.
+              billing cap. Cloud uploads use the configured size limit above.
+              Safety limits remain: 4 MiB extracted text, 8 MiB DOCX body XML and
+              128 MiB expanded DOCX packages. Local comparisons support raw files
+              up to 16 MiB; OpenAI also enforces type and token limits.
             </p>
             <div className="cloud-family-list">
               <p>

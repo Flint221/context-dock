@@ -285,9 +285,12 @@ fn file_backoff_does_not_schedule_a_busy_loop_with_automatic_sync() {
 }
 
 #[test]
-fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_local_bytes() {
+fn illustrated_word_above_old_sixteen_mib_cap_resumes_and_syncs_original_bytes() {
     let mut f = Fixture::new();
-    let bytes = word_package(5 * 1024 * 1024);
+    let bytes = word_package(17 * 1024 * 1024);
+    assert!(crate::extraction::extract(&bytes, "word")
+        .unwrap_err()
+        .contains("16 MiB"));
     fs::write(f.root.join("Illustrated.docx"), &bytes).unwrap();
     f.r.reconcile(&f.id, "manual_refresh", &HashSet::new(), true)
         .unwrap();
@@ -310,6 +313,15 @@ fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_loc
         )
         .unwrap();
     let api = Mock::default();
+    cloud::queue(&mut f.r.db, &f.id).unwrap();
+    let legacy = format!("Illustrated.docx: Snapshot is {} bytes; cloud uploads require a nonempty file within the configured 52428800-byte limit and the 16 MiB application limit. No bytes uploaded.",bytes.len());
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET state='failed',error=?1 WHERE document_id=?2",
+            params![legacy, doc],
+        )
+        .unwrap();
+    cloud_commands::resume_legacy_size_failures(&f.r.db).unwrap();
     for _ in 0..12 {
         f.step(&api);
     }
@@ -318,6 +330,11 @@ fn illustrated_word_above_old_four_mib_package_screen_syncs_without_changing_loc
     assert!(api.0.borrow().files.iter().any(|(_, b)| b == &bytes));
     assert_eq!(fs::read(f.root.join("Illustrated.docx")).unwrap(), bytes);
     assert_eq!(f.r.versions(&doc).unwrap().len(), 1);
+    // Recover a lost upload receipt for a file above the old cap, without uploading twice.
+    f.r.db.execute("UPDATE cloud_jobs SET file_id=NULL,state='uploading',phase='recover' WHERE document_id=?1",[&doc]).unwrap();
+    f.sync(&api);
+    assert_eq!(api.0.borrow().files.len(), 2);
+    assert!(f.jobs().iter().all(|j| s(j, "state") == "indexed"));
 }
 
 #[test]
@@ -3555,4 +3572,146 @@ fn source_wait_recovery_preserves_pause_manual_policy_and_real_cloud_errors() {
             assert_eq!(s(&f.jobs()[0], "state"), "indexed");
         }
     }
+}
+
+#[test]
+fn cloud_docx_accepts_exact_configured_limit_and_rejects_one_byte_more() {
+    use sha2::{Digest, Sha256};
+    use std::io::{Cursor, Write};
+    fn package(payload: usize) -> Vec<u8> {
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("word/document.xml", options).unwrap();
+        zip.write_all(br#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Cloud size boundary</w:t></w:r></w:p></w:body></w:document>"#).unwrap();
+        for (i, size) in [payload / 2, payload - payload / 2].into_iter().enumerate() {
+            zip.start_file(format!("word/media/image{i}.png"), options)
+                .unwrap();
+            zip.write_all(&vec![42; size]).unwrap();
+        }
+        zip.finish().unwrap().into_inner()
+    }
+    let limit = 50 * 1024 * 1024;
+    let mut bytes = package(limit - package(0).len());
+    assert_eq!(bytes.len(), limit);
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let name = "ContextDock_Test_Snapshot_v1.docx";
+    fs::write(root.join(name), &bytes).unwrap();
+    let mut version = crate::cloud_models::CloudVersion {
+        id: "test".into(),
+        document: "test".into(),
+        number: 1,
+        kind: "word".into(),
+        hash: format!("{:x}", Sha256::digest(&bytes)),
+        snapshot: name.into(),
+        size: bytes.len() as i64,
+        current: true,
+    };
+    assert_eq!(
+        cloud::verified(&root, &version, limit as i64).unwrap(),
+        bytes
+    );
+    assert!(cloud::verified(&root, &version, (limit - 1) as i64)
+        .unwrap_err()
+        .contains("configured"));
+    bytes.push(0);
+    version.size += 1;
+    fs::write(root.join(name), &bytes).unwrap();
+    let error = cloud::verified(&root, &version, limit as i64).unwrap_err();
+    assert!(error.contains("52428800-byte upload limit"));
+    assert!(!error.contains("16 MiB"));
+    assert!(cloud::verified(&root, &version, 0).is_err());
+    assert!(cloud::verified(&root, &version, 513 * 1024 * 1024).is_err());
+}
+
+#[test]
+fn legacy_size_recovery_does_not_resume_other_failures_or_stopped_projects() {
+    for blocked in [
+        "paused",
+        "manual",
+        "too_small",
+        "uncertain",
+        "remote_file",
+        "other_error",
+    ] {
+        let mut f = Fixture::new();
+        f.enable();
+        cloud::queue(&mut f.r.db, &f.id).unwrap();
+        let legacy="Snapshot is 20 bytes; cloud uploads require a nonempty file within the configured 1-byte limit and the 16 MiB application limit. No bytes uploaded.";
+        f.r.db
+            .execute("UPDATE cloud_jobs SET state='failed',error=?1", [legacy])
+            .unwrap();
+        match blocked {
+            "paused" => {
+                f.r.db
+                    .execute("UPDATE cloud_projects SET paused=1", [])
+                    .unwrap();
+            }
+            "manual" => {
+                f.r.db
+                    .execute("UPDATE cloud_projects SET auto_sync=0", [])
+                    .unwrap();
+            }
+            "too_small" => {
+                f.r.db
+                    .execute("UPDATE cloud_projects SET soft_limit=1", [])
+                    .unwrap();
+            }
+            "uncertain" => {
+                f.r.db
+                    .execute("UPDATE cloud_jobs SET state='uncertain'", [])
+                    .unwrap();
+            }
+            "remote_file" => {
+                f.r.db
+                    .execute("UPDATE cloud_jobs SET file_id='file-known'", [])
+                    .unwrap();
+            }
+            _ => {
+                f.r.db.execute("UPDATE cloud_jobs SET error='Snapshot integrity verification failed. No bytes uploaded.'",[]).unwrap();
+            }
+        }
+        let before = f.jobs();
+        cloud_commands::resume_legacy_size_failures(&f.r.db).unwrap();
+        assert_eq!(f.jobs(), before, "{blocked}");
+    }
+}
+
+#[test]
+#[ignore = "Explicit read-only DOCX acceptance; set CONTEXTDOCK_DOCX_ACCEPTANCE. Uses a disposable snapshot and no cloud requests."]
+fn selected_docx_size_acceptance_uses_disposable_snapshot() {
+    use sha2::{Digest, Sha256};
+    let source = std::path::PathBuf::from(
+        std::env::var_os("CONTEXTDOCK_DOCX_ACCEPTANCE").expect("Set the DOCX source path"),
+    );
+    let bytes = fs::read(&source).unwrap();
+    let hash = format!("{:x}", Sha256::digest(&bytes));
+    let temp = tempdir().unwrap();
+    let root = temp.path().canonicalize().unwrap();
+    let name = "ContextDock_Acceptance_Snapshot_v1.docx";
+    fs::write(root.join(name), &bytes).unwrap();
+    let version = crate::cloud_models::CloudVersion {
+        id: "acceptance".into(),
+        document: "acceptance".into(),
+        number: 1,
+        kind: "word".into(),
+        hash: hash.clone(),
+        snapshot: name.into(),
+        size: bytes.len() as i64,
+        current: true,
+    };
+    assert_eq!(
+        cloud::verified(&root, &version, 50 * 1024 * 1024).unwrap(),
+        bytes
+    );
+    assert_eq!(
+        format!("{:x}", Sha256::digest(fs::read(&source).unwrap())),
+        hash
+    );
+    println!(
+        "Read-only DOCX acceptance passed: {} bytes, SHA-256 {}",
+        bytes.len(),
+        hash
+    );
 }
