@@ -531,7 +531,7 @@ dependencies = [
 
 [[package]]
 name = "contextdock"
-version = "0.10.9"
+version = "0.10.10"
 dependencies = [
  "chrono",
  "notify",
