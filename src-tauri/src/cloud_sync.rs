@@ -371,6 +371,7 @@ pub(crate) fn source_recovery_ready(db: &Connection, p: &Value) -> Result<bool> 
         || n(p, "started") != 1
         || n(p, "auto_sync") != 1
         || n(p, "delete_requested") == 1
+        || crate::desktop::uploads_paused(db)
         || matches!(s(p, "status"), "cleanup_pending" | "cleanup_failed")
     {
         return Ok(false);
@@ -379,9 +380,11 @@ pub(crate) fn source_recovery_ready(db: &Connection, p: &Value) -> Result<bool> 
         return Ok(false);
     }
     let interrupted = (s(p, "status") == "needs_attention" && source_error(s(p, "error")))
-        || cloud::jobs(db, s(p, "project_id"))?
-            .iter()
-            .any(|j| s(j, "state") == "failed" && source_error(s(j, "error")));
+        || cloud::jobs(db, s(p, "project_id"))?.iter().any(|j| {
+            s(j, "state") == "failed"
+                && source_error(s(j, "error"))
+                && !matches!(s(j, "phase"), "remove" | "selection_remove" | "path_remove")
+        });
     Ok(interrupted && cloud::desired(db, s(p, "project_id"), &cloud::draft(db, p)?).is_ok())
 }
 pub fn legacy_removal_wait(p: &Value) -> bool {
