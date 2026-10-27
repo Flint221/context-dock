@@ -776,3 +776,10 @@ it("explains queued configuration changes for an already started index without a
     screen.getByRole("button", { name: "Start Initial Sync" }),
   ).toBeDisabled();
 });
+
+it("explains that cloud uploads honor the configured limit while comparison has a separate bound", async () => {
+  render(<CloudPanel project="p1" />);
+  expect(await screen.findByText(/Cloud uploads use the configured size limit above/)).toBeInTheDocument();
+  expect(screen.getByLabelText("Soft upload limit (MiB)")).toHaveValue(50);
+  expect(screen.getByText(/Local comparisons support raw files/)).toHaveTextContent("16 MiB");
+});
