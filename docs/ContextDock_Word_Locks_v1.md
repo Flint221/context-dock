@@ -1,0 +1,9 @@
+# ContextDock Word editor locks
+
+Version 0.10.8 separates a present but unreadable document from a missing source. Cloud readiness uses an exclusive-against-writers read check to avoid capturing or uploading an actively changing source. A normal editor write handle can make that check fail even though the file still exists. Previously this produced the missing/inaccessible source error and permanently suspended automatic cloud work.
+
+The scheduler now probes local readiness for recognized source failures and resumes opted-in automatic projects when their selected sources are readable again. Existing failed upload/attachment jobs interrupted by the same source check reuse their upload IDs and recovery phase. Pauses, manual sync policy, cleanup, uncertain jobs, and unrelated authentication or remote-identity errors retain their existing controls. No cloud requests are needed for the readiness probe. Existing missing-source errors can also recover after the local source and tracking state are restored.
+
+Standard Word owner files beginning with ~$ were already excluded from discovery. The Windows regression creates an owner file beside a real versioned DOCX and holds an editor-style writable handle on the real document. The owner file never becomes a document. Sync waits without provider requests and resumes after the owner file disappears and the editor closes, with unchanged version count, jobs and uploaded files. A separate regression verifies failed-job recovery and preservation of pause, manual policy and real cloud errors.
+
+This diagnosis confirms the editor-sharing failure using disposable files and native tests. It does not establish that the user's particular temporary filename was captured as a duplicate. Other hidden DOCX filenames remain a separate question requiring the exact filename. No user document or live cloud index was altered during diagnosis.
