@@ -626,7 +626,7 @@ it("shows verification read failures instead of claiming the toggle completed", 
   ).not.toBeInTheDocument();
 });
 
-it("streams provisional text, then replaces it with the saved answer and filename-only sources", async () => {
+it("streams formatted provisional text, then replaces it with the saved answer and filename-only sources", async () => {
   connected();
   chats = [structuredClone(saved)];
   let finish!: (value: Chat) => void;
@@ -653,14 +653,39 @@ it("streams provisional text, then replaces it with the saved answer and filenam
   await user.click(screen.getByRole("button", { name: "Send" }));
   await act(async () => emit("It uses Re"));
   expect(screen.getByText("It uses Re")).toBeInTheDocument();
+  await act(async () => emit("It uses **React** and **partial"));
+  expect(screen.getByText("React").tagName).toBe("STRONG");
+  expect(screen.getByText(/and \*\*partial/)).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Answering…" })).toBeDisabled();
   expect(screen.queryByText("SQLite database")).not.toBeInTheDocument();
   expect(screen.getByText(/Master_Context.md/)).toBeInTheDocument();
   await act(async () => finish(structuredClone(saved)));
   expect(screen.queryByText("It uses Re")).not.toBeInTheDocument();
+  expect(screen.queryByText("React")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeEnabled();
   await act(async () => emit("late callback"));
   expect(screen.queryByText("late callback")).not.toBeInTheDocument();
+});
+
+it("formats an existing saved answer without rewriting the chat or its sources", async () => {
+  connected();
+  const original = structuredClone(saved);
+  original.turns[0].answer = "**SQLite** is *local*. [1][4]";
+  original.turns[0].question = "Keep **my question** literal";
+  chats = [structuredClone(original)];
+  render(<ProjectCloud project="p1" />);
+  expect((await screen.findByText("SQLite")).tagName).toBe("STRONG");
+  expect(screen.getByText("local").tagName).toBe("EM");
+  expect(screen.getByText(/\[1\]\[4\]/)).toBeInTheDocument();
+  expect(screen.getByText("Keep **my question** literal")).toBeInTheDocument();
+  expect(screen.getByText(/Sources · 1/)).toBeInTheDocument();
+  expect(screen.getByText(/Master_Context.md/)).toBeInTheDocument();
+  expect(chats[0]).toEqual(original);
+  expect(vi.mocked(chat.action).mock.calls.map((call) => call[1])).toEqual([
+    "list",
+    "get",
+  ]);
+  expect(cloud.action).not.toHaveBeenCalled();
 });
 
 it("Enter sends a new chat, Shift+Enter adds a line, and composition Enter does not send", async () => {
@@ -760,8 +785,12 @@ it("blocks ready messaging and questions while indexed cleanup still has an erro
   view.failed = 0;
   view.error = "Removal verification is pending for Context_v1.md.";
   render(<ProjectCloud project="p1" />);
-  expect(await screen.findByRole("alert")).toHaveTextContent("Removal verification is pending");
-  expect(screen.queryByText("On · Documents ready for questions")).not.toBeInTheDocument();
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Removal verification is pending",
+  );
+  expect(
+    screen.queryByText("On · Documents ready for questions"),
+  ).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
 });
 
@@ -773,9 +802,15 @@ it("shows acknowledged cloud removal as automatic finishing work with current ve
   view.failed = 0;
   view.indexed = 1;
   render(<ProjectCloud project="p1" />);
-  expect(await screen.findByText(/^On .* Finishing cloud sync$/)).toBeInTheDocument();
-  expect(screen.getAllByText(/verification continues automatically/).length).toBeGreaterThan(0);
+  expect(
+    await screen.findByText(/^On .* Finishing cloud sync$/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getAllByText(/verification continues automatically/).length,
+  ).toBeGreaterThan(0);
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   expect(screen.getByRole("textbox", { name: "Your question" })).toBeDisabled();
-  expect(screen.getByRole("progressbar", { name: "Indexed versions" })).toHaveAttribute("aria-valuenow", "100");
+  expect(
+    screen.getByRole("progressbar", { name: "Indexed versions" }),
+  ).toHaveAttribute("aria-valuenow", "100");
 });
