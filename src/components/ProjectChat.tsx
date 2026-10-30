@@ -5,6 +5,7 @@ import { chat, type Chat, type ChatSummary } from "../chat";
 import { Modal } from "./Modal";
 import { date } from "../format";
 import { OperationStatus } from "./OperationStatus";
+import { ChatAnswer } from "./ChatAnswer";
 
 export function ProjectChat({
   project,
@@ -219,7 +220,7 @@ export function ProjectChat({
                 </div>
                 <div className="chat-answer">
                   <strong>ContextDock</strong>
-                  {turn.answer && <p>{turn.answer}</p>}
+                  {turn.answer && <ChatAnswer text={turn.answer} />}
                   {turn.error && <p role="alert">{turn.error}</p>}
                   {["running", "searching"].includes(turn.state) && (
                     <p>
@@ -262,7 +263,7 @@ export function ProjectChat({
                       preview ? "Writing answer…" : "Searching your documents…"
                     }
                   />
-                  {preview && <p>{preview}</p>}
+                  {preview && <ChatAnswer text={preview} />}
                 </div>
               </>
             )}

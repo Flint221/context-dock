@@ -341,6 +341,80 @@ select:focus-visible {
 .chat-answer {
   padding: 16px 0 0;
 }
+.chat-conversation,
+.chat-answer,
+.chat-markdown {
+  min-width: 0;
+}
+.chat-markdown {
+  margin-top: 8px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.chat-markdown > * + * {
+  margin-top: 12px;
+}
+.chat-markdown :is(p, li) {
+  white-space: pre-wrap;
+}
+.chat-markdown :is(h1, h2, h3, h4, h5, h6) {
+  display: block;
+  font-size: 1.05em;
+  font-weight: 700;
+  line-height: 1.4;
+  margin-bottom: 8px;
+}
+.chat-markdown :is(h1, h2) {
+  font-size: 1.15em;
+}
+.chat-markdown :is(ul, ol) {
+  padding-left: 24px;
+}
+.chat-markdown ul {
+  list-style: disc;
+}
+.chat-markdown ol {
+  list-style: decimal;
+}
+.chat-markdown li + li,
+.chat-markdown li > :is(ul, ol, p) {
+  margin-top: 4px;
+}
+.chat-markdown strong {
+  font-weight: 700;
+  color: var(--text);
+}
+.chat-markdown em {
+  font-style: italic;
+}
+.chat-markdown blockquote {
+  border-left: 3px solid var(--accent);
+  padding-left: 14px;
+}
+.chat-markdown code {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.9em;
+  background: var(--bg);
+  border-radius: 4px;
+  padding: 2px 5px;
+}
+.chat-markdown pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+  overflow-wrap: normal;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+}
+.chat-markdown pre code {
+  font-size: 0.9em;
+  padding: 0;
+}
+.chat-markdown hr {
+  border-top: 1px solid var(--border);
+}
 .chat-question p,
 .chat-answer > p,
 .chat-source p {
