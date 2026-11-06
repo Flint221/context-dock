@@ -189,6 +189,104 @@ fn changing_a_purged_job_invalidates_the_forget_confirmation() {
 }
 
 #[test]
+fn forgetting_excluded_current_file_never_selects_retained_older_history() {
+    for archived in [false, true] {
+        let mut f = Fixture::new(&[
+            ("Report_v1.md", "one"),
+            ("Report_v2.md", "two"),
+            ("Report_v3.md", "three"),
+            ("Report_v4.md", "four"),
+            ("Keep_v1.md", "keep"),
+        ]);
+        for name in ["Report_v1.md", "Report_v2.md", "Report_v3.md"] {
+            fs::remove_file(f.root.join(name)).unwrap();
+            if archived {
+                f.r.db
+                    .execute(
+                        "UPDATE source_files SET status='archived' WHERE name=?1",
+                        [name],
+                    )
+                    .unwrap();
+            }
+        }
+        let view = f.r.path_selection(&f.id).unwrap();
+        let mut rules = view.exclusions;
+        rules.push(path_selection::Rule {
+            path: "Report_v4.md".into(),
+            kind: "file".into(),
+        });
+        f.r.save_path_selection(&f.id, view.revision, rules)
+            .unwrap();
+        f.r.db.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,state,phase,desired,updated_at) SELECT 'job',d.project_id,d.id,v.id,'owned-test','purged','selection_remove',0,'now' FROM documents d JOIN document_versions v ON v.document_id=d.id WHERE v.source_name='Report_v4.md'",[]).unwrap();
+        f.r.db
+            .execute("UPDATE cloud_projects SET enabled=1,started=1", [])
+            .unwrap();
+        fs::remove_file(f.root.join("Report_v4.md")).unwrap();
+        let plan = f.r.preview_forget(&f.id, "Report_v4.md").unwrap();
+        assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+        f.r.forget_missing(&f.id, &plan.path, &plan.token).unwrap();
+        let cloud = crate::cloud::view(&f.r.db, &f.id).unwrap();
+        assert_eq!(cloud["localReady"], true, "{cloud}");
+        assert_eq!(
+            cloud["families"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|r| r["selected"] == 1)
+                .count(),
+            1
+        );
+        let report = cloud["families"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["name"] == "Report")
+            .unwrap();
+        assert_eq!(report["selected"], 0);
+        assert_eq!(report["versionCount"], 3);
+        assert_eq!(f.count("SELECT reconcile_requested FROM cloud_projects"), 1);
+        assert_eq!(f.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+        assert!(f.root.join("Keep_v1.md").exists());
+        drop(f.r);
+        f.r = Registry::open(&f.db).unwrap();
+        assert_eq!(
+            crate::cloud::view(&f.r.db, &f.id).unwrap()["localReady"],
+            true
+        );
+    }
+}
+
+#[test]
+fn legacy_archived_current_source_is_not_selected_but_a_real_missing_source_still_blocks() {
+    let mut f = Fixture::new(&[("Report_v1.md", "old"), ("Keep_v1.md", "keep")]);
+    fs::remove_file(f.root.join("Report_v1.md")).unwrap();
+    f.r.refresh(&f.id).unwrap();
+    assert_eq!(
+        crate::cloud::view(&f.r.db, &f.id).unwrap()["localReady"],
+        false
+    );
+    f.r.db
+        .execute(
+            "UPDATE source_files SET status='archived' WHERE name='Report_v1.md'",
+            [],
+        )
+        .unwrap();
+    f.r.db.execute("DELETE FROM path_exclusions", []).unwrap();
+    let cloud = crate::cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(cloud["localReady"], true);
+    let report = cloud["families"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "Report")
+        .unwrap();
+    assert_eq!(report["selected"], 0);
+    let blocked = path_selection::blocked_versions(&f.r.db, &f.id).unwrap();
+    assert_eq!(blocked.len(), 1);
+    assert_eq!(f.count("SELECT count(*) FROM document_versions"), 2);
+}
+
+#[test]
 fn reappeared_files_changed_history_cloud_references_and_missing_root_prevent_deletion() {
     let mut f = Fixture::new(&[("Test_v1.md", "test")]);
     fs::remove_file(f.root.join("Test_v1.md")).unwrap();
