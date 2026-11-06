@@ -41,7 +41,7 @@ fn absent(api: &dyn CloudApi, path: &str) -> Result<()> {
         Ok(_) => Err("OpenAI still reports the resource exists. Cloud cleanup is incomplete; retry deletion.".into()),
     }
 }
-fn erase(api: &dyn CloudApi, path: &str) -> Result<()> {
+pub(crate) fn erase(api: &dyn CloudApi, path: &str) -> Result<()> {
     match api.request("DELETE", path, None) {
         Ok(receipt) if receipt["deleted"] == true => {}
         Err(e) if e.missing => {}
