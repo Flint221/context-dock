@@ -2324,6 +2324,47 @@ fn explicit_file_purge_reports_the_failed_request_stage_without_deleting() {
 }
 
 #[test]
+fn legacy_archived_only_family_reconciles_without_resurrecting_its_upload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let job = f.jobs().remove(0);
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    f.r.db
+        .execute("UPDATE source_files SET status='archived'", [])
+        .unwrap();
+    f.r.db.execute("DELETE FROM path_exclusions", []).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE cloud_projects SET status='needs_attention',error=?1,reconcile_requested=1",
+            [cloud::SOURCE_MISSING],
+        )
+        .unwrap();
+    f.sync(&api);
+    let view = cloud::view(&f.r.db, &f.id).unwrap();
+    assert_eq!(view["localReady"], true);
+    assert!(view["error"].is_null(), "{view}");
+    assert_eq!(view["indexed"], 0);
+    assert_eq!(view["pending"], 0);
+    assert_eq!(view["families"][0]["selected"], 0);
+    assert_eq!(f.jobs()[0]["desired"], 0);
+    assert_eq!(f.jobs()[0]["file_id"], job["file_id"]);
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|c| c.as_str() == "UPLOAD")
+            .count(),
+        1
+    );
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+
+#[test]
 fn purged_missing_file_can_be_forgotten_only_after_verified_cloud_cleanup() {
     let mut f = Fixture::new();
     f.enable();
