@@ -893,11 +893,23 @@ pub fn purge_owned(
                 .into(),
         );
     }
-    for store in cloud_api::list(api, "/vector_stores").map_err(|e| e.message)? {
+    for store in cloud_api::list(api, "/vector_stores").map_err(|e| {
+        format!(
+            "Could not list vector stores before deleting the uploaded File: {}",
+            e.message
+        )
+    })? {
         cloud_api::valid_id(s(&store, "id"), "vs_").map_err(|e| e.message)?;
         let associations =
-            cloud_api::list(api, &format!("/vector_stores/{}/files", s(&store, "id")))
-                .map_err(|e| e.message)?;
+            cloud_api::list(api, &format!("/vector_stores/{}/files", s(&store, "id"))).map_err(
+                |e| {
+                    format!(
+                        "Could not check vector store {} for shared File references: {}",
+                        s(&store, "id"),
+                        e.message
+                    )
+                },
+            )?;
         if associations.iter().any(|a| s(a, "id") == file) {
             return Err(
                 "Another vector store still references this File. Nothing was deleted.".into(),
@@ -906,21 +918,25 @@ pub fn purge_owned(
     }
     match api.request("GET", &format!("/files/{file}"), None) {
         Ok(remote) => {
-            if s(&remote, "filename") != s(job, "remote_name")
+            // The File ID was recorded from a verified upload/adoption response.
+            // Explicit deletion of that identity must not require content download.
+            if s(&remote, "id") != file
+                || s(&remote, "filename") != s(job, "remote_name")
                 || n(&remote, "bytes") != n(job, "rawBytes")
+                || s(&remote, "purpose") != "assistants"
             {
                 return Err("File ownership cannot be established.".into());
             }
-            let bytes = api.content(file).map_err(|e| e.message)?;
-            let version = cloud::version(db, s(job, "version_id"))?;
-            use sha2::{Digest, Sha256};
-            if format!("{:x}", Sha256::digest(bytes)) != version.hash {
-                return Err("Remote File integrity mismatch; deletion refused.".into());
-            }
-            crate::cloud_cleanup::erase(api, &format!("/files/{file}"))?;
+            crate::cloud_cleanup::erase(api, &format!("/files/{file}"))
+                .map_err(|e| format!("Could not delete or verify uploaded File {file}: {e}"))?;
         }
         Err(e) if e.missing => {}
-        Err(e) => return Err(e.message),
+        Err(e) => {
+            return Err(format!(
+                "Could not verify uploaded File {file} metadata: {}",
+                e.message
+            ))
+        }
     }
     db.execute(
         "UPDATE cloud_jobs SET state='purged',file_id=NULL WHERE id=?1",
