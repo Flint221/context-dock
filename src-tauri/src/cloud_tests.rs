@@ -2257,7 +2257,16 @@ fn purged_missing_file_can_be_forgotten_only_after_verified_cloud_cleanup() {
     let calls = api.0.borrow().calls.len();
     f.r.forget_missing(&f.id, &plan.path, &plan.token).unwrap();
     assert!(f.jobs().is_empty());
-    assert!(f.r.versions(&f.doc).unwrap().is_empty());
+    assert_eq!(
+        f.r.db
+            .query_row(
+                "SELECT count(*) FROM document_versions WHERE document_id=?1",
+                [&f.doc],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
     assert_eq!(api.0.borrow().calls.len(), calls);
     assert!(api.0.borrow().files.is_empty());
     assert_eq!(
