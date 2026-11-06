@@ -214,6 +214,7 @@ impl CloudApi for Mock {
         Ok(file)
     }
     fn content(&self, id: &str) -> std::result::Result<Vec<u8>, ApiError> {
+        self.0.borrow_mut().calls.push(format!("CONTENT {id}"));
         if self.0.borrow().deny_file_content {
             return Err(ApiError::local("OpenAI rejected this file or request. Check supported type, size and account limits."));
         }
@@ -2194,7 +2195,7 @@ fn deleted_remote_file_has_explicit_recovery_with_owned_index() {
     assert_eq!(s(&f.jobs()[0], "state"), "indexed");
 }
 #[test]
-fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
+fn explicit_file_purge_uses_saved_identity_without_downloading_and_preserves_snapshot() {
     let mut f = Fixture::new();
     f.enable();
     let api = Mock::default();
@@ -2211,12 +2212,24 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     f.sync(&api);
     let p = cloud::project(&f.r.db, &f.id).unwrap();
     let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
-    let original = api.0.borrow().files[0].1.clone();
-    api.0.borrow_mut().files[0].1 = b"different bytes".to_vec();
-    assert!(cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).is_err());
-    assert_eq!(api.0.borrow().files.len(), 1);
-    api.0.borrow_mut().files[0].1 = original;
+    api.0.borrow_mut().deny_file_content = true;
+    let content_calls = api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .filter(|c| c.starts_with("CONTENT "))
+        .count();
     cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).unwrap();
+    assert_eq!(
+        api.0
+            .borrow()
+            .calls
+            .iter()
+            .filter(|c| c.starts_with("CONTENT "))
+            .count(),
+        content_calls
+    );
     assert!(api.0.borrow().files.is_empty());
     assert_eq!(s(&f.jobs()[0], "state"), "purged");
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
@@ -2226,6 +2239,90 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     assert_eq!(api.0.borrow().files.len(), 1);
     assert_eq!(api.0.borrow().associations.len(), 1);
 }
+#[test]
+fn explicit_file_purge_refuses_metadata_mismatch_and_preserves_identity() {
+    for (field, wrong) in [
+        ("id", json!("file-other")),
+        ("filename", json!("unrelated.md")),
+        ("bytes", json!(1)),
+        ("purpose", json!("batch")),
+    ] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        let job = f.jobs().remove(0);
+        f.exclude_file("Master_Context.md");
+        f.sync(&api);
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
+        if field == "id" {
+            // Return an inconsistent identity for a GET of the saved File ID.
+            // The wrapper changes only the response; list lookup still finds it.
+            struct WrongIdentity<'a>(&'a Mock);
+            impl CloudApi for WrongIdentity<'_> {
+                fn request(
+                    &self,
+                    method: &str,
+                    path: &str,
+                    body: Option<Value>,
+                ) -> Result<Value, ApiError> {
+                    let mut v = self.0.request(method, path, body)?;
+                    if method == "GET" && path.starts_with("/files/") {
+                        v["id"] = json!("file-other");
+                    }
+                    Ok(v)
+                }
+                fn upload(&self, _: &str, _: Vec<u8>) -> Result<Value, ApiError> {
+                    panic!("Unexpected upload")
+                }
+                fn content(&self, _: &str) -> Result<Vec<u8>, ApiError> {
+                    panic!("Unexpected content download")
+                }
+            }
+            assert!(
+                cloud_commands::purge_owned(&f.r.db, &p, &payload, &WrongIdentity(&api))
+                    .unwrap_err()
+                    .contains("ownership")
+            );
+        } else {
+            api.0.borrow_mut().files[0].0[field] = wrong;
+            assert!(cloud_commands::purge_owned(&f.r.db, &p, &payload, &api)
+                .unwrap_err()
+                .contains("ownership"));
+        }
+        assert_eq!(api.0.borrow().files.len(), 1);
+        assert_eq!(f.jobs()[0]["file_id"], job["file_id"]);
+        assert_eq!(s(&f.jobs()[0], "state"), "removed");
+        assert!(!api
+            .0
+            .borrow()
+            .calls
+            .iter()
+            .any(|c| c.starts_with("DELETE /files/")));
+        assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn explicit_file_purge_reports_the_failed_request_stage_without_deleting() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
+    f.sync(&api);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
+    api.0.borrow_mut().fail = Some(ApiError::local("Synthetic HTTP 400"));
+    let message = cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).unwrap_err();
+    assert!(message.contains("list vector stores"));
+    assert!(message.contains("HTTP 400"));
+    assert_eq!(f.jobs()[0]["file_id"], job["file_id"]);
+    assert_eq!(api.0.borrow().files.len(), 1);
+}
+
 #[test]
 fn purged_missing_file_can_be_forgotten_only_after_verified_cloud_cleanup() {
     let mut f = Fixture::new();
