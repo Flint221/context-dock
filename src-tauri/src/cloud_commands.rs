@@ -917,8 +917,7 @@ pub fn purge_owned(
             if format!("{:x}", Sha256::digest(bytes)) != version.hash {
                 return Err("Remote File integrity mismatch; deletion refused.".into());
             }
-            api.request("DELETE", &format!("/files/{file}"), None)
-                .map_err(|e| e.message)?;
+            crate::cloud_cleanup::erase(api, &format!("/files/{file}"))?;
         }
         Err(e) if e.missing => {}
         Err(e) => return Err(e.message),

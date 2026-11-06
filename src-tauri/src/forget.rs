@@ -95,12 +95,17 @@ impl Registry {
                 &[&s(version, "id")],
             )?;
             if jobs.iter().any(|j| {
+                // A completed explicit purge can retain its attempt/phase history.
+                // Only an unwanted job with no remaining File identity is safe.
+                if s(j, "state") == "purged" {
+                    return cloud::n(j, "desired") != 0 || !s(j, "file_id").is_empty();
+                }
                 !s(j, "file_id").is_empty()
                     || cloud::n(j, "attempts") > 0
                     || !["pending", "excluded"].contains(&s(j, "state"))
                     || s(j, "phase") != "upload"
             }) {
-                blockers.insert("This file has uploaded or unresolved cloud data. Its cloud references must be cleaned up and verified before permanently deleting local history. Ignore or exclude keeps those references safe.".into());
+                blockers.insert("This file has a retained upload or unresolved cloud data. Sync removes excluded files from the index but keeps their uploads. Open Cloud sync > Advanced cloud settings > View Cloud Index / Test Search, then use Delete uploaded File for this revision and verify cleanup before returning here. Ignore or exclude keeps its history safe.".into());
             }
             cloud_state.push(jobs);
             let baseline: bool = self
