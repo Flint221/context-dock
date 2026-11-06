@@ -75,30 +75,37 @@ pub fn revision(db: &Connection, project: &str) -> Result<i64> {
 pub fn blocked_documents(db: &Connection, project: &str) -> Result<HashSet<String>> {
     let rules = rules(db, project)?;
     let mut blocked = HashSet::new();
-    for d in cloud::rows(db,"SELECT d.id,s.relative_path FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1",&[&project])? {
-        if !permits(&rules,cloud::s(&d,"relative_path")) {blocked.insert(cloud::s(&d,"id").to_string());}
+    for d in cloud::rows(db,"SELECT d.id,s.relative_path,s.status FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1",&[&project])? {
+        // Retained archived history is not a live folder selection, even if an
+        // older release promoted it after forgetting the current source.
+        if cloud::s(&d,"status")=="archived" || !permits(&rules,cloud::s(&d,"relative_path")) {blocked.insert(cloud::s(&d,"id").to_string());}
     }
     Ok(blocked)
 }
 pub fn blocked_versions(db: &Connection, project: &str) -> Result<HashSet<String>> {
     let rules = rules(db, project)?;
+    let excluded_documents = blocked_documents(db, project)?;
     let mut blocked = HashSet::new();
-    if rules.is_empty() {
+    if rules.is_empty() && excluded_documents.is_empty() {
         return Ok(blocked);
     }
-    let mut q=db.prepare("SELECT v.id,v.source_relative,s.relative_path FROM document_versions v JOIN documents d ON d.id=v.document_id LEFT JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1").map_err(error)?;
+    let mut q=db.prepare("SELECT v.id,v.source_relative,s.relative_path,d.id FROM document_versions v JOIN documents d ON d.id=v.document_id LEFT JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1").map_err(error)?;
     let rows = q
         .query_map([project], |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1)?,
                 r.get::<_, Option<String>>(2)?,
+                r.get::<_, String>(3)?,
             ))
         })
         .map_err(error)?;
     for row in rows {
-        let (id, path, current) = row.map_err(error)?;
-        if !permits(&rules, &path) || current.is_some_and(|p| !permits(&rules, &p)) {
+        let (id, path, current, document) = row.map_err(error)?;
+        if excluded_documents.contains(&document)
+            || !permits(&rules, &path)
+            || current.is_some_and(|p| !permits(&rules, &p))
+        {
             blocked.insert(id);
         }
     }

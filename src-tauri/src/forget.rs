@@ -25,6 +25,7 @@ struct Review {
     source: String,
     versions: Vec<Value>,
     documents: BTreeSet<String>,
+    excluded_documents: std::collections::HashSet<String>,
 }
 impl Registry {
     fn forget_review(&mut self, project: &str, path: &str) -> Result<Review> {
@@ -128,6 +129,7 @@ impl Registry {
             "SELECT revision FROM cloud_projects WHERE project_id=?1",
             &[&project],
         )?;
+        let excluded_documents = path_selection::blocked_documents(&self.db, project)?;
         let fingerprint = json!([
             project,
             path,
@@ -154,6 +156,7 @@ impl Registry {
             source: s(source, "id").to_string(),
             versions,
             documents,
+            excluded_documents,
         })
     }
     pub fn preview_forget(&mut self, project: &str, path: &str) -> Result<Plan> {
@@ -208,6 +211,10 @@ impl Registry {
         for document in &review.documents {
             tx.execute("UPDATE documents SET current_version_id=(SELECT id FROM document_versions WHERE document_id=?1 ORDER BY number DESC LIMIT 1) WHERE id=?1 AND (current_version_id IS NULL OR NOT EXISTS(SELECT 1 FROM document_versions WHERE id=current_version_id))",[document]).map_err(error)?;
             tx.execute("UPDATE documents SET active_source_id=(SELECT id FROM source_files WHERE document_id=?1 ORDER BY CASE status WHEN 'available' THEN 0 ELSE 1 END,relative_path LIMIT 1) WHERE id=?1 AND (active_source_id IS NULL OR NOT EXISTS(SELECT 1 FROM source_files WHERE id=active_source_id))",[document]).map_err(error)?;
+            if review.excluded_documents.contains(document) {
+                // Forget must not silently select the replacement source/history.
+                tx.execute("INSERT OR IGNORE INTO path_exclusions(project_id,path,kind) SELECT ?1,lower(replace(s.relative_path,char(92),'/')),'file' FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.id=?2",params![project,document]).map_err(error)?;
+            }
             let empty:bool=tx.query_row("SELECT NOT EXISTS(SELECT 1 FROM source_files WHERE document_id=?1) AND NOT EXISTS(SELECT 1 FROM document_versions WHERE document_id=?1)",[document],|r|r.get(0)).map_err(error)?;
             if empty {
                 // Initial import leaves empty merged placeholders. Retained
@@ -241,7 +248,7 @@ impl Registry {
         }
         tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
         tx.execute(
-            "UPDATE cloud_projects SET revision=revision+1 WHERE project_id=?1",
+            "UPDATE cloud_projects SET revision=revision+1,reconcile_requested=CASE WHEN enabled=1 AND started=1 THEN 1 ELSE reconcile_requested END WHERE project_id=?1",
             [project],
         )
         .map_err(error)?;
