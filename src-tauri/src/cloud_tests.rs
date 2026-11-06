@@ -26,6 +26,9 @@ struct Remote {
     ignore_store_delete: bool,
     shared_file: bool,
     lose_file_delete_reply: bool,
+    ignore_file_delete: bool,
+    fail_file_absence: bool,
+    bad_file_delete_receipt: bool,
     ignore_association_delete: bool,
     pending_deletes: HashSet<String>,
     bad_association_receipt: bool,
@@ -163,13 +166,21 @@ impl CloudApi for Mock {
             };
         }
         if let Some(file) = path.strip_prefix("/files/") {
+            if method == "GET" && r.fail_file_absence && r.files.is_empty() {
+                return Err(ApiError::local("Synthetic absence verification failure"));
+            }
             let index = r
                 .files
                 .iter()
                 .position(|f| s(&f.0, "id") == file)
                 .ok_or_else(missing)?;
             if method == "DELETE" {
-                r.files.remove(index);
+                if r.bad_file_delete_receipt {
+                    return Ok(json!({"deleted":false}));
+                }
+                if !r.ignore_file_delete {
+                    r.files.remove(index);
+                }
                 if r.lose_file_delete_reply {
                     r.lose_file_delete_reply = false;
                     return Err(ApiError {
@@ -2215,6 +2226,112 @@ fn explicit_file_purge_checks_references_hash_and_preserves_local_snapshot() {
     assert_eq!(api.0.borrow().files.len(), 1);
     assert_eq!(api.0.borrow().associations.len(), 1);
 }
+#[test]
+fn purged_missing_file_can_be_forgotten_only_after_verified_cloud_cleanup() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let job = f.jobs().remove(0);
+    f.exclude_file("Master_Context.md");
+    f.sync(&api);
+    fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+    let blocked = f.r.preview_forget(&f.id, "Master_Context.md").unwrap();
+    assert!(blocked
+        .blockers
+        .iter()
+        .any(|b| b.contains("retained upload")));
+    assert!(api.0.borrow().associations.is_empty());
+    assert_eq!(api.0.borrow().files.len(), 1);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
+    cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).unwrap();
+    assert_eq!(s(&f.jobs()[0], "state"), "purged");
+    assert!(f
+        .r
+        .forget_missing(&f.id, &blocked.path, &blocked.token)
+        .unwrap_err()
+        .contains("changed"));
+    let plan = f.r.preview_forget(&f.id, "Master_Context.md").unwrap();
+    assert!(plan.blockers.is_empty(), "{:?}", plan.blockers);
+    let calls = api.0.borrow().calls.len();
+    f.r.forget_missing(&f.id, &plan.path, &plan.token).unwrap();
+    assert!(f.jobs().is_empty());
+    assert!(f.r.versions(&f.doc).unwrap().is_empty());
+    assert_eq!(api.0.borrow().calls.len(), calls);
+    assert!(api.0.borrow().files.is_empty());
+    assert_eq!(
+        f.r.db
+            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |r| r
+                .get::<_, i64>(
+                0
+            ))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn file_purge_keeps_identity_and_forget_blocked_until_absence_is_verified() {
+    for failure in [
+        "still_present",
+        "verification_error",
+        "bad_receipt",
+        "lost_reply",
+        "shared",
+    ] {
+        let mut f = Fixture::new();
+        f.enable();
+        let api = Mock::default();
+        f.sync(&api);
+        let job = f.jobs().remove(0);
+        f.exclude_file("Master_Context.md");
+        f.sync(&api);
+        fs::remove_file(f.root.join("Master_Context.md")).unwrap();
+        {
+            let mut remote = api.0.borrow_mut();
+            remote.ignore_file_delete = failure == "still_present";
+            remote.fail_file_absence = failure == "verification_error";
+            remote.bad_file_delete_receipt = failure == "bad_receipt";
+            remote.lose_file_delete_reply = failure == "lost_reply";
+            if failure == "shared" {
+                remote.shared_file = true;
+                remote.associations.push(json!({"id":job["file_id"]}));
+            }
+        }
+        let p = cloud::project(&f.r.db, &f.id).unwrap();
+        let payload = json!({"version":job["version_id"],"confirmation":format!("DELETE {}",s(&job,"file_id")),"noOtherReferences":true});
+        assert!(
+            cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).is_err(),
+            "{failure}"
+        );
+        assert_eq!(s(&f.jobs()[0], "state"), "removed", "{failure}");
+        assert_eq!(f.jobs()[0]["file_id"], job["file_id"]);
+        assert!(!f
+            .r
+            .preview_forget(&f.id, "Master_Context.md")
+            .unwrap()
+            .blockers
+            .is_empty());
+        assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+        {
+            let mut remote = api.0.borrow_mut();
+            remote.ignore_file_delete = false;
+            remote.fail_file_absence = false;
+            remote.bad_file_delete_receipt = false;
+            remote.shared_file = false;
+            remote.associations.clear();
+        }
+        cloud_commands::purge_owned(&f.r.db, &p, &payload, &api).unwrap();
+        assert!(f
+            .r
+            .preview_forget(&f.id, "Master_Context.md")
+            .unwrap()
+            .blockers
+            .is_empty());
+    }
+}
+
 #[test]
 fn ambiguity_freezes_existing_index_instead_of_silently_removing_selection() {
     let mut f = Fixture::new();

@@ -136,6 +136,59 @@ fn forgetting_one_missing_version_keeps_the_other_versions_and_current_source() 
     assert_eq!(f.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
 }
 #[test]
+fn forgetting_cloud_history_requires_a_clean_unwanted_purge() {
+    for (state, file, desired, allowed) in [
+        ("purged", None, 0, true),
+        ("purged", Some("file-retained"), 0, false),
+        ("purged", None, 1, false),
+        ("removed", Some("file-retained"), 0, false),
+        ("removed", None, 0, false),
+        ("uncertain", None, 0, false),
+        ("failed", None, 0, false),
+        ("uploading", None, 0, false),
+    ] {
+        let mut f = Fixture::new(&[("Report_v1.md", "old"), ("Report_v2.md", "current")]);
+        f.r.db.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,file_id,state,phase,attempts,desired,updated_at) SELECT 'job',d.project_id,d.id,v.id,'owned-test',?1,?2,'selection_remove',3,?3,'now' FROM documents d JOIN document_versions v ON v.document_id=d.id WHERE v.source_name='Report_v1.md'",rusqlite::params![file,state,desired]).unwrap();
+        fs::remove_file(f.root.join("Report_v1.md")).unwrap();
+        let plan = f.r.preview_forget(&f.id, "Report_v1.md").unwrap();
+        assert_eq!(
+            plan.blockers.is_empty(),
+            allowed,
+            "{state} {file:?} {desired}"
+        );
+        if allowed {
+            f.r.forget_missing(&f.id, &plan.path, &plan.token).unwrap();
+            assert_eq!(f.count("SELECT count(*) FROM cloud_jobs"), 0);
+            assert_eq!(f.count("SELECT count(*) FROM document_versions"), 1);
+            assert!(f.root.join("Report_v2.md").exists());
+            assert_eq!(f.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
+        } else {
+            assert!(f.r.forget_missing(&f.id, &plan.path, &plan.token).is_err());
+            assert_eq!(f.count("SELECT count(*) FROM document_versions"), 2);
+            assert_eq!(f.count("SELECT count(*) FROM cloud_jobs"), 1);
+        }
+    }
+}
+
+#[test]
+fn changing_a_purged_job_invalidates_the_forget_confirmation() {
+    let mut f = Fixture::new(&[("Test_v1.md", "test")]);
+    f.r.db.execute("INSERT INTO cloud_jobs(id,project_id,document_id,version_id,remote_name,state,phase,attempts,desired,updated_at) SELECT 'job',d.project_id,d.id,v.id,'owned-test','purged','selection_remove',3,0,'now' FROM documents d JOIN document_versions v ON v.document_id=d.id",[]).unwrap();
+    fs::remove_file(f.root.join("Test_v1.md")).unwrap();
+    let plan = f.r.preview_forget(&f.id, "Test_v1.md").unwrap();
+    assert!(plan.blockers.is_empty());
+    f.r.db
+        .execute("UPDATE cloud_jobs SET desired=1", [])
+        .unwrap();
+    assert!(f
+        .r
+        .forget_missing(&f.id, &plan.path, &plan.token)
+        .unwrap_err()
+        .contains("changed"));
+    assert_eq!(f.count("SELECT count(*) FROM document_versions"), 1);
+}
+
+#[test]
 fn reappeared_files_changed_history_cloud_references_and_missing_root_prevent_deletion() {
     let mut f = Fixture::new(&[("Test_v1.md", "test")]);
     fs::remove_file(f.root.join("Test_v1.md")).unwrap();
