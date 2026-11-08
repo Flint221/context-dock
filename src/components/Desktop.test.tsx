@@ -110,10 +110,16 @@ it("shows battery saver separately from manual pause and saves the power prefere
   status.uploadsManuallyPaused = false;
   status.uploadsPaused = true;
   render(<DesktopSettings />);
-  const toggle = await screen.findByRole("checkbox", { name: "Pause uploads during Windows battery saver" });
+  const toggle = await screen.findByRole("checkbox", {
+    name: "Pause uploads during Windows battery saver",
+  });
   expect(toggle).toBeChecked();
-  expect(screen.getByText(/Windows battery saver is currently on/)).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Pause background uploads" })).toBeInTheDocument();
+  expect(
+    screen.getByText(/Windows battery saver is currently on/),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Pause background uploads" }),
+  ).toBeInTheDocument();
   await user.click(toggle);
   expect(desktop.setting).toHaveBeenCalledWith("pauseOnBatterySaver", false);
   expect(desktop.setting).not.toHaveBeenCalledWith("uploadsPaused", false);

@@ -171,10 +171,17 @@ export function DesktopSettings() {
             <button
               disabled={busy || !desktop.native()}
               onClick={() =>
-                void change("uploadsPaused", !(status.uploadsManuallyPaused ?? status.uploadsPaused))
+                void change(
+                  "uploadsPaused",
+                  !(status.uploadsManuallyPaused ?? status.uploadsPaused),
+                )
               }
             >
-              {(status.uploadsManuallyPaused ?? status.uploadsPaused) ? <Play size={16} /> : <Pause size={16} />}{" "}
+              {(status.uploadsManuallyPaused ?? status.uploadsPaused) ? (
+                <Play size={16} />
+              ) : (
+                <Pause size={16} />
+              )}{" "}
               {(status.uploadsManuallyPaused ?? status.uploadsPaused)
                 ? "Resume background uploads"
                 : "Pause background uploads"}
@@ -189,14 +196,17 @@ export function DesktopSettings() {
                 type="checkbox"
                 checked={status.pauseOnBatterySaver ?? true}
                 disabled={busy || !desktop.native()}
-                onChange={(e) => void change("pauseOnBatterySaver", e.target.checked)}
+                onChange={(e) =>
+                  void change("pauseOnBatterySaver", e.target.checked)
+                }
               />
               Pause uploads during Windows battery saver
             </label>
             <p>
               New uploads resume automatically when battery saver turns off.
               Local tracking, indexing checks and confirmed removals continue.
-              {status.batterySaverActive && " Windows battery saver is currently on."}
+              {status.batterySaverActive &&
+                " Windows battery saver is currently on."}
             </p>
           </>
         )}

@@ -33,7 +33,12 @@ it("collapses a burst, filters unrelated projects, and accepts global changes", 
 });
 it("runs one read at a time and preserves changes received during that read", async () => {
   let resolve!: () => void;
-  const read = vi.fn().mockImplementationOnce(() => new Promise<void>((done) => { resolve = done; }));
+  const read = vi.fn().mockImplementationOnce(
+    () =>
+      new Promise<void>((done) => {
+        resolve = done;
+      }),
+  );
   const stop = await subscribeChanges("registry-changed", read);
   emit();
   await vi.advanceTimersByTimeAsync(100);

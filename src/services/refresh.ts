@@ -34,7 +34,12 @@ export async function subscribeChanges(
     }
   };
   const stop = await listen<string | undefined>(event, ({ payload }) => {
-    if (project && typeof payload === "string" && payload && payload !== project)
+    if (
+      project &&
+      typeof payload === "string" &&
+      payload &&
+      payload !== project
+    )
       return;
     pending = true;
     schedule();
