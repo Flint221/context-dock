@@ -30,7 +30,7 @@ export function Projects({
             {displayPath(p.path)}
           </p>
           <div className="card-bottom">
-            <span>{p.documentCount} documents</span>
+            <span>{p.documentCount} source files</span>
             <span className={`badge ${p.status}`}>
               {p.folderState === "needs_reassignment"
                 ? "Folder unavailable"

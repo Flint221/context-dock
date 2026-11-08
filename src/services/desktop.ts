@@ -7,6 +7,9 @@ export interface DesktopStatus {
   approvalNotifications: boolean;
   problemNotifications: boolean;
   uploadsPaused: boolean;
+  uploadsManuallyPaused?: boolean;
+  pauseOnBatterySaver?: boolean;
+  batterySaverActive?: boolean;
   pending: number;
   error: string | null;
 }

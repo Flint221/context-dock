@@ -110,13 +110,14 @@ fn desired_selection(
     let root: String = db
         .query_row("SELECT path FROM projects WHERE id=?1", [id], |r| r.get(0))
         .map_err(error)?;
-    let selected: Vec<String> = families(db, id)?
+    let families = families(db, id)?;
+    let selected: std::collections::HashSet<String> = families
         .iter()
         .filter(|f| n(f, "selected") == 1)
         .map(|f| s(f, "id").to_string())
         .collect();
     if check_sources
-        && families(db, id)?
+        && families
             .iter()
             .any(|f| n(f, "selected") == 1 && n(f, "eligible") != 1)
     {

@@ -25,6 +25,193 @@ struct Fixture {
     r: Registry,
     project: String,
 }
+#[test]
+fn numbered_batches_join_existing_family_in_numeric_order_and_sync_latest_head() {
+    let mut f = Fixture::new(&[("Audit_Report_v1.md", "one")]);
+    f.enable(false);
+    let family = f.document("Audit_Report_v1.md");
+    for (name, text) in [
+        ("Audit_Report_v10.md", "ten"),
+        ("Audit_Report_v2.md", "two"),
+        ("Audit_Report_v3.md", "three"),
+    ] {
+        fs::write(f.root.join(name), text).unwrap();
+    }
+    f.scan();
+    let state = f.r.tracking_view(&f.project).unwrap();
+    assert!(state.reviews.is_empty());
+    assert!(state.error.is_none(), "{:?}", state.error);
+    assert_eq!(f.count(&family), 4);
+    assert_eq!(
+        state
+            .families
+            .iter()
+            .find(|d| d.id == family)
+            .unwrap()
+            .active_filename
+            .as_deref(),
+        Some("Audit_Report_v10.md")
+    );
+    assert!(f
+        .r
+        .path_selection(&f.project)
+        .unwrap()
+        .entries
+        .iter()
+        .all(|e| !e.new));
+    f.scan();
+    assert_eq!(f.count(&family), 4);
+}
+#[test]
+fn unrelated_numbered_batch_waits_for_selection_then_forms_one_family() {
+    let mut f = Fixture::new(&[("Existing.md", "existing")]);
+    f.enable(false);
+    fs::write(f.root.join("Audit_Report_v1.md"), "one").unwrap();
+    fs::write(f.root.join("Audit_Report_v2.md"), "two").unwrap();
+    f.scan();
+    assert_eq!(f.count(&f.document("Audit_Report_v1.md")), 0);
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(&f.project, revision, vec![])
+        .unwrap();
+    f.scan();
+    let family = f.document("Audit_Report_v1.md");
+    assert_eq!(family, f.document("Audit_Report_v2.md"));
+    assert_eq!(f.count(&family), 2);
+    assert!(f.r.tracking_view(&f.project).unwrap().reviews.is_empty());
+}
+#[test]
+fn equivalent_numbered_batch_stays_excluded_until_reviewed() {
+    let mut f = Fixture::new(&[("Audit_Report_v1.md", "one")]);
+    f.enable(false);
+    fs::write(f.root.join("Audit_Report_v2.md"), "two").unwrap();
+    fs::write(f.root.join("Audit_Report_v2.0.md"), "conflict").unwrap();
+    f.scan();
+    assert_eq!(f.count(&f.document("Audit_Report_v1.md")), 1);
+    assert!(!crate::path_selection::allowed(&f.r.db, &f.project, "Audit_Report_v2.md").unwrap());
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(&f.project, revision, vec![])
+        .unwrap();
+    f.scan();
+    assert_eq!(f.r.tracking_view(&f.project).unwrap().reviews.len(), 2);
+}
+#[test]
+fn identical_bytes_in_explicit_new_export_still_form_a_distinct_filename_version() {
+    let mut f = Fixture::new(&[("Audit_Report_v1.md", "same")]);
+    f.enable(false);
+    let family = f.document("Audit_Report_v1.md");
+    fs::write(f.root.join("Audit_Report_v2.md"), "same").unwrap();
+    f.scan();
+    assert_eq!(f.document("Audit_Report_v2.md"), family);
+    assert_eq!(f.count(&family), 2);
+    assert!(f.r.tracking_view(&f.project).unwrap().reviews.is_empty());
+}
+#[test]
+fn moved_numbered_folder_preserves_source_uuids_and_history_without_missing_ghosts() {
+    let mut f = Fixture::new(&[
+        ("Before/Audit_Report_v1.md", "same"),
+        ("Before/Audit_Report_v2.md", "same"),
+    ]);
+    f.enable(false);
+    let before = f.r.snapshot().unwrap().documents;
+    let family = f.document("Audit_Report_v2.md");
+    fs::rename(f.root.join("Before"), f.root.join("After")).unwrap();
+    f.scan();
+    let after = f.r.snapshot().unwrap().documents;
+    assert_eq!(after.len(), before.len());
+    for old in before {
+        let moved = after.iter().find(|s| s.id == old.id).unwrap();
+        assert_eq!(moved.document_id, old.document_id);
+        assert_eq!(moved.status, "available");
+        assert!(moved.relative_path.replace('\\', "/").starts_with("After/"));
+    }
+    assert_eq!(f.count(&family), 2);
+    assert_eq!(
+        f.r.tracking_view(&f.project)
+            .unwrap()
+            .families
+            .iter()
+            .find(|d| d.id == family)
+            .unwrap()
+            .active_filename
+            .as_deref(),
+        Some("Audit_Report_v2.md")
+    );
+    assert!(f.r.tracking_view(&f.project).unwrap().reviews.is_empty());
+}
+#[test]
+fn moved_file_cannot_inherit_selection_into_an_excluded_folder() {
+    let mut f = Fixture::new(&[("Audit_Report_v1.md", "same")]);
+    f.enable(false);
+    let revision = crate::path_selection::revision(&f.r.db, &f.project).unwrap();
+    f.r.save_path_selection(
+        &f.project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "private".into(),
+            kind: "folder".into(),
+        }],
+    )
+    .unwrap();
+    fs::create_dir(f.root.join("private")).unwrap();
+    fs::rename(
+        f.root.join("Audit_Report_v1.md"),
+        f.root.join("private/Audit_Report_v1.md"),
+    )
+    .unwrap();
+    f.scan();
+    assert_eq!(
+        f.r.snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .filter(|s| s.status == "missing")
+            .count(),
+        1
+    );
+    assert!(
+        !crate::path_selection::allowed(&f.r.db, &f.project, "private/Audit_Report_v1.md").unwrap()
+    );
+}
+#[test]
+fn directory_dirty_event_rechecks_same_metadata_children() {
+    let mut f = Fixture::new(&[("docs/Audit_Report_v1.md", "before")]);
+    f.enable(false);
+    let path = f.root.join("docs/Audit_Report_v1.md");
+    let modified = fs::metadata(&path).unwrap().modified().unwrap();
+    fs::write(&path, "after!").unwrap();
+    fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_times(fs::FileTimes::new().set_modified(modified))
+        .unwrap();
+    f.r.reconcile(
+        &f.project,
+        "watcher",
+        &HashSet::from(["docs".into()]),
+        false,
+    )
+    .unwrap();
+    let versions = f.r.versions(&f.document("Audit_Report_v1.md")).unwrap();
+    assert_eq!(
+        fs::read_to_string(&versions[0].snapshot_path).unwrap(),
+        "after!"
+    );
+}
+#[test]
+fn numeric_order_agrees_with_labels_for_parentheses_and_trailing_dates() {
+    for name in [
+        "Audit_Report_(v2).md",
+        "Audit_Report_v2_2026-11-08.md",
+        "Audit_Report_v02.0.md",
+    ] {
+        assert_eq!(
+            crate::matching::version_order(name),
+            Some(vec![2]),
+            "{name}"
+        );
+    }
+}
 impl Fixture {
     fn new(files: &[(&str, &str)]) -> Self {
         let temp = tempdir().unwrap();

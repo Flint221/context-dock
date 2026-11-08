@@ -42,6 +42,43 @@ const project: Project = {
 };
 let view: TrackingView;
 const changed = vi.fn(async () => {});
+it("does not replace verified action results with an older background tracking read", async () => {
+  view.enabled = true;
+  view.initialized = true;
+  view.watchStatus = "watching";
+  const user = userEvent.setup();
+  const { rerender } = render(
+    <TrackingPanel project={project} changed={changed} />,
+  );
+  await screen.findByRole("button", { name: "Scan for changes" });
+  let resolve!: (next: TrackingView) => void;
+  const old = structuredClone(view);
+  old.error = "Obsolete background error";
+  vi.mocked(registry.tracking).mockImplementationOnce(
+    () =>
+      new Promise((done) => {
+        resolve = done;
+      }),
+  );
+  rerender(
+    <TrackingPanel
+      project={{ ...project, trackingRevision: 1 }}
+      changed={changed}
+    />,
+  );
+  await waitFor(() => expect(resolve).toBeDefined());
+  await user.click(screen.getByRole("button", { name: "Scan for changes" }));
+  await waitFor(() => expect(registry.refresh).toHaveBeenCalled());
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Scan for changes" }),
+    ).toBeEnabled(),
+  );
+  await act(async () => resolve(old));
+  expect(
+    screen.queryByText("Obsolete background error"),
+  ).not.toBeInTheDocument();
+});
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(registry.archivalReview).mockImplementation(
@@ -622,8 +659,21 @@ it("restores archived sources while keeping tracking paused", async () => {
 it("names the destination of a blocked archive operation", async () => {
   view.enabled = true;
   view.initialized = true;
-  view.operations = [{ id: "op", kind: "archive", state: "blocked", error: "Filesystem operation failed", destination: "Old Context Files/Context_v3.md", createdAt: "" }];
+  view.operations = [
+    {
+      id: "op",
+      kind: "archive",
+      state: "blocked",
+      error: "Filesystem operation failed",
+      destination: "Old Context Files/Context_v3.md",
+      createdAt: "",
+    },
+  ];
   render(<TrackingPanel project={project} changed={changed} />);
-  expect(await screen.findByText("Old Context Files/Context_v3.md")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Retry pending operations" })).toBeEnabled();
+  expect(
+    await screen.findByText("Old Context Files/Context_v3.md"),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Retry pending operations" }),
+  ).toBeEnabled();
 });

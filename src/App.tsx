@@ -137,7 +137,7 @@ function Workspace() {
   useEffect(() => {
     active.current = true;
     const refresh = () =>
-      void load().catch((e) => {
+      load().catch((e) => {
         if (active.current) setError(String(e));
       });
     refresh();
@@ -298,16 +298,27 @@ function Workspace() {
           <div className="content">
             {desktopStatus?.uploadsPaused && (
               <div role="status" className="banner warning">
-                Background uploads are paused. Tracking, indexing checks and
-                confirmed removals continue.
+                {desktopStatus.batterySaverActive &&
+                desktopStatus.pauseOnBatterySaver !== false &&
+                !desktopStatus.uploadsManuallyPaused
+                  ? "Windows battery saver has paused new uploads. They resume automatically when battery saver turns off."
+                  : "Background uploads are paused. Tracking, indexing checks and confirmed removals continue."}
                 <button
                   onClick={() =>
-                    void desktop
-                      .setting("uploadsPaused", false)
-                      .catch((e) => setError(String(e)))
+                    desktopStatus.batterySaverActive &&
+                    desktopStatus.pauseOnBatterySaver !== false &&
+                    !desktopStatus.uploadsManuallyPaused
+                      ? guard.request(() => setPage("settings"))
+                      : void desktop
+                          .setting("uploadsPaused", false)
+                          .catch((e) => setError(String(e)))
                   }
                 >
-                  Resume uploads
+                  {desktopStatus.batterySaverActive &&
+                  desktopStatus.pauseOnBatterySaver !== false &&
+                  !desktopStatus.uploadsManuallyPaused
+                    ? "Battery saver settings"
+                    : "Resume uploads"}
                 </button>
               </div>
             )}

@@ -52,13 +52,13 @@ export function ProjectCloud({
   useEffect(() => {
     alive.current = true;
     const refresh = () =>
-      void load().catch((e) => {
+      load().catch((e) => {
         if (alive.current) setError(String(e));
       });
     refresh();
     let unsubscribe: (() => void) | undefined;
     void cloud
-      .subscribe(refresh)
+      .subscribe(refresh, project)
       .then((fn) => {
         if (alive.current) unsubscribe = fn;
         else fn();
@@ -68,7 +68,7 @@ export function ProjectCloud({
       alive.current = false;
       unsubscribe?.();
     };
-  }, [load]);
+  }, [load, project]);
   useEffect(() => {
     onStatus?.(stateKnown ? view : null);
   }, [view, stateKnown, onStatus]);
@@ -136,11 +136,11 @@ export function ProjectCloud({
           ? view.error
           : finishing
             ? "Current versions are indexed. Finishing removal of previous cloud entries; verification continues automatically."
-          : pathsExcluded && selected.length === 0
-            ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
-            : selected.length === 0
-              ? "Select files in the folder tree and enable version tracking."
-              : "Your documents are syncing. Questions unlock when the current versions are ready.";
+            : pathsExcluded && selected.length === 0
+              ? "Selected documents are excluded by the folder tree. Include a path and Save changes to make its selected cloud documents eligible again."
+              : selected.length === 0
+                ? "Select files in the folder tree and enable version tracking."
+                : "Your documents are syncing. Questions unlock when the current versions are ready.";
   function enable() {
     if (!view) return;
     void run(async () => {
@@ -185,12 +185,12 @@ export function ProjectCloud({
                         ? finishing
                           ? "On · Finishing cloud sync"
                           : ready
-                          ? "On · Documents ready for questions"
-                          : view.failed > 0
-                            ? "On · Some files need attention"
-                            : pathsExcluded && selected.length === 0
-                              ? "On · Selected paths excluded"
-                              : "On · Preparing your documents"
+                            ? "On · Documents ready for questions"
+                            : view.failed > 0
+                              ? "On · Some files need attention"
+                              : pathsExcluded && selected.length === 0
+                                ? "On · Selected paths excluded"
+                                : "On · Preparing your documents"
                         : "Off · Local version history"}
               </p>
             </div>
@@ -240,7 +240,12 @@ export function ProjectCloud({
           )}
           {error && !setup && !stop && <p role="alert">{error}</p>}
           {view?.error && <p role="alert">{view.error}</p>}
-          {finishing && <p role="status">Current versions are indexed. Finishing removal of previous cloud entries; verification continues automatically.</p>}
+          {finishing && (
+            <p role="status">
+              Current versions are indexed. Finishing removal of previous cloud
+              entries; verification continues automatically.
+            </p>
+          )}
           {!!view?.selectionRemovalPending && (
             <div className="banner warning">
               <span>

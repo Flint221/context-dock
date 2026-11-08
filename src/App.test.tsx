@@ -54,7 +54,9 @@ it("preserves page controls during status updates and resets the scene and scrol
   await user.type(search, "5173");
   const scene = search.closest(".page-scene");
   const scrollCount = vi.mocked(window.scrollTo).mock.calls.length;
-  await act(async () => notify());
+  await act(async () => {
+    void notify();
+  });
   expect(screen.getByRole("searchbox")).toHaveValue("5173");
   expect(search.closest(".page-scene")).toBe(scene);
   expect(window.scrollTo).toHaveBeenCalledTimes(scrollCount);
@@ -355,7 +357,7 @@ it("persists theme changes and displays the real app version", async () => {
   await user.click(screen.getByRole("button", { name: "Settings" }));
   await user.selectOptions(screen.getByLabelText("Theme"), "dark");
   await waitFor(() => expect(registry.theme).toHaveBeenCalledWith("dark"));
-  expect(screen.getByText("Version 0.10.15")).toBeInTheDocument();
+  expect(screen.getByText("Version 0.10.16")).toBeInTheDocument();
 });
 it("renames, refreshes and removes only after the final confirmation", async () => {
   const user = userEvent.setup();
@@ -466,7 +468,9 @@ it("returns to All projects after removal and ignores an older read across later
         finishOldRead = resolve;
       }),
   );
-  await act(async () => notify());
+  await act(async () => {
+    void notify();
+  });
   await user.click(screen.getByRole("button", { name: "Remove project" }));
   const dialog = screen.getByRole("dialog", { name: "Remove project?" });
   const confirm = within(dialog).getByRole("button", {
@@ -493,9 +497,9 @@ it("returns to All projects after removal and ignores an older read across later
   expect(
     screen.getByText("Registered projects").parentElement,
   ).toHaveTextContent("1");
-  expect(
-    screen.getByText("Discovered documents").parentElement,
-  ).toHaveTextContent("1");
+  expect(screen.getByText("Discovered files").parentElement).toHaveTextContent(
+    "1",
+  );
   await user.click(screen.getByRole("button", { name: "Projects1" }));
   expect(
     screen.queryByRole("button", { name: /Removed project/ }),

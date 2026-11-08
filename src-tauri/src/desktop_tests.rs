@@ -13,6 +13,36 @@ struct Fixture {
     r: Registry,
     id: String,
 }
+#[test]
+fn battery_saver_pauses_only_uploads_and_respects_persisted_override_and_manual_pause() {
+    let f = Fixture::new();
+    assert!(!desktop::uploads_paused_for_power(&f.r.db, false));
+    assert!(desktop::uploads_paused_for_power(&f.r.db, true));
+    review::set_preference(&f.r.db, "desktop.pause_on_battery_saver", false).unwrap();
+    assert!(!desktop::uploads_paused_for_power(&f.r.db, true));
+    review::set_preference(&f.r.db, "desktop.uploads_paused", true).unwrap();
+    assert!(desktop::uploads_paused_for_power(&f.r.db, false));
+    assert!(desktop::uploads_paused_for_power(&f.r.db, true));
+    let flags = f.r.tracking_flags(&f.id).unwrap();
+    assert!(flags.0);
+    assert_eq!(cloud::jobs(&f.r.db, &f.id).unwrap().len(), 0);
+}
+#[test]
+fn unchanged_notification_probe_does_not_write_or_invalidate_idle_cloud_checks() {
+    let f = Fixture::new();
+    let other = cloud::connect(&f.r.store.join("test.db")).unwrap();
+    review::notice_due(&f.r.db, "test", "same", 100, 30).unwrap();
+    let version = || {
+        other
+            .query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0))
+            .unwrap()
+    };
+    let before = version();
+    assert!(review::notice_due(&f.r.db, "test", "same", 150, 30).unwrap());
+    assert_eq!(before, version());
+    review::notice_due(&f.r.db, "test", "changed", 160, 30).unwrap();
+    assert_ne!(before, version());
+}
 impl Fixture {
     fn new() -> Self {
         let t = tempdir().unwrap();

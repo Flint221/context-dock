@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { subscribeChanges } from "./refresh";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
@@ -29,8 +29,8 @@ export const registry = {
     invoke<void>("save_path_selection", { project, revision, exclusions }),
   compare: (earlier: string, later: string) =>
     invoke<Comparison>("compare_versions", { earlier, later }),
-  subscribe: (changed: () => void) =>
-    listen<string>("registry-changed", changed),
+  subscribe: (changed: () => void | Promise<void>) =>
+    subscribeChanges("registry-changed", changed),
   tracking: (project: string) =>
     invoke<TrackingView>("tracking_view", { project }),
   configureTracking: (

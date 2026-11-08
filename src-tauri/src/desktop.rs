@@ -39,7 +39,25 @@ impl Drop for Runtime {
     }
 }
 pub fn uploads_paused(db: &rusqlite::Connection) -> bool {
+    uploads_paused_for_power(db, battery_saver_active())
+}
+pub(crate) fn uploads_paused_for_power(db: &rusqlite::Connection, saver: bool) -> bool {
     review::preference(db, "desktop.uploads_paused", false)
+        || (saver && review::preference(db, "desktop.pause_on_battery_saver", true))
+}
+pub fn battery_saver_active() -> bool {
+    #[cfg(all(windows, not(test)))]
+    {
+        use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut status = SYSTEM_POWER_STATUS::default();
+        // The API fills this owned structure; a failed/unknown probe never
+        // invents a pause. Query the OS, without WMI or a helper process.
+        unsafe { GetSystemPowerStatus(&mut status) != 0 && status.SystemStatusFlag == 1 }
+    }
+    #[cfg(any(not(windows), test))]
+    {
+        false
+    }
 }
 pub fn parse_route(url: &str) -> Option<Value> {
     let route = url.strip_prefix("contextdock://")?;
@@ -138,12 +156,7 @@ pub fn start(app: &tauri::AppHandle, path: PathBuf) -> std::io::Result<Runtime> 
                         let _ = handle.emit("desktop-changed", ());
                     }
                 }
-                for _ in 0..20 {
-                    if worker_stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    thread::sleep(std::time::Duration::from_millis(100));
-                }
+                thread::park_timeout(std::time::Duration::from_secs(2));
             }
         })?;
     Ok(Runtime {
@@ -317,12 +330,13 @@ fn background_tick(
 ) -> Result<()> {
     let entries = review::pending(db)?;
     let total = entries.len();
-    let signature = serde_json::to_string(&entries).map_err(|e| e.to_string())?;
+    let paused = uploads_paused(db);
+    let signature = serde_json::to_string(&json!([entries, paused, battery_saver_active()]))
+        .map_err(|e| e.to_string())?;
     if signature != *old {
         *old = signature;
         let _ = app.emit("desktop-changed", ());
     }
-    let paused = uploads_paused(db);
     if let Some(items) = app.try_state::<TrayItems>() {
         let _ = items
             .pending
@@ -481,7 +495,7 @@ pub async fn desktop_read(state: tauri::State<'_, Store>, app: tauri::AppHandle)
         .ok()
         .and_then(|e| e.clone());
     let native_error = native_error.or(notification_error);
-    crate::work(state.inner().clone(),move|r|Ok(json!({"keepRunning":review::preference(&r.db,"desktop.keep_running",true),"approvalNotifications":review::preference(&r.db,"desktop.approval_notifications",true),"problemNotifications":review::preference(&r.db,"desktop.problem_notifications",true),"uploadsPaused":uploads_paused(&r.db),"startupRegistered":startup.registered,"startupEnabled":startup.enabled,"pending":review::pending(&r.db)?.len(),"error":native_error}))).await
+    crate::work(state.inner().clone(),move|r|Ok(json!({"keepRunning":review::preference(&r.db,"desktop.keep_running",true),"approvalNotifications":review::preference(&r.db,"desktop.approval_notifications",true),"problemNotifications":review::preference(&r.db,"desktop.problem_notifications",true),"uploadsPaused":uploads_paused(&r.db),"uploadsManuallyPaused":review::preference(&r.db,"desktop.uploads_paused",false),"pauseOnBatterySaver":review::preference(&r.db,"desktop.pause_on_battery_saver",true),"batterySaverActive":battery_saver_active(),"startupRegistered":startup.registered,"startupEnabled":startup.enabled,"pending":review::pending(&r.db)?.len(),"error":native_error}))).await
 }
 #[tauri::command]
 pub async fn desktop_setting(
@@ -498,6 +512,7 @@ pub async fn desktop_setting(
             "approvalNotifications" => "desktop.approval_notifications",
             "problemNotifications" => "desktop.problem_notifications",
             "uploadsPaused" => "desktop.uploads_paused",
+            "pauseOnBatterySaver" => "desktop.pause_on_battery_saver",
             _ => return Err("Unknown desktop setting.".into()),
         }
         .to_string();
@@ -562,6 +577,9 @@ pub async fn desktop_complete(
             .lock()
             .map_err(|_| "Desktop worker unavailable")?
             .take();
+        if let Some(worker) = &worker {
+            worker.thread().unpark();
+        }
         let _ = app.emit("desktop-stopping", ());
         // Wait off the event thread for the current journaled HTTP/local operation.
         // A stop guard prevents the worker from sending any subsequent request.

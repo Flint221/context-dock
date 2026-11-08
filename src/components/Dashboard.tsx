@@ -37,7 +37,7 @@ export function Dashboard({
         </section>
         <section className="panel">
           <FileText size={21} />
-          <span>Discovered documents</span>
+          <span>Discovered files</span>
           <strong>{data.documents.length}</strong>
           <small>
             {data.documents.filter((d) => d.status === "available").length}{" "}
@@ -89,7 +89,7 @@ export function Dashboard({
       <section className="panel recent">
         <div className="section-heading">
           <div>
-            <h2>Recent documents</h2>
+            <h2>Recent files</h2>
             <p>Recently modified or discovered across your workspace.</p>
           </div>
         </div>

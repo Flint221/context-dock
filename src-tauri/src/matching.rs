@@ -50,14 +50,8 @@ pub fn parent_key(relative: &str) -> String {
 }
 /// Explicit numeric export order; dates/ambiguous labels are not guessed.
 pub fn version_order(name: &str) -> Option<Vec<u64>> {
-    static VERSION: OnceLock<Regex> = OnceLock::new();
-    let pattern = VERSION.get_or_init(|| {
-        Regex::new(r"(?i)(?:^|[\s_-])v(?:ersion)?[\s_-]*(\d+(?:\.\d+)*)\)?$")
-            .expect("constant version pattern")
-    });
-    let raw = Path::new(name).file_stem()?.to_str()?;
-    let captures = pattern.captures(raw)?;
-    let mut order = captures[1]
+    let label = version_label(name)?;
+    let mut order = label[1..]
         .split('.')
         .map(str::parse)
         .collect::<std::result::Result<Vec<u64>, _>>()

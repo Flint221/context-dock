@@ -18,9 +18,12 @@ export function Documents({ documents }: { documents: Document[] }) {
       <div className="section-heading">
         <div>
           <h2>
-            Documents <span className="count">{documents.length}</span>
+            Source files <span className="count">{documents.length}</span>
           </h2>
-          <p>Read-only metadata · Markdown and Word</p>
+          <p>
+            Files in your folder · Filename versions are grouped in Document
+            tracking
+          </p>
         </div>
         <label className="search">
           <Search size={16} />

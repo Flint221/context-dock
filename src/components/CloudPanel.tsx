@@ -100,13 +100,13 @@ export function CloudPanel({
     alive.current = true;
     let unlisten: (() => void) | undefined;
     const refresh = () => {
-      void load().catch((e) => {
+      return load().catch((e) => {
         if (alive.current) setError(String(e));
       });
     };
     refresh();
     void cloud
-      .subscribe(refresh)
+      .subscribe(refresh, project)
       .then((fn) => {
         if (alive.current) unlisten = fn;
         else fn();
@@ -116,7 +116,7 @@ export function CloudPanel({
       alive.current = false;
       unlisten?.();
     };
-  }, [load]);
+  }, [load, project]);
   async function run(action: () => Promise<unknown>) {
     const release = beginOperation(`cloud:${project}`);
     if (!release) return;
@@ -393,9 +393,9 @@ export function CloudPanel({
             <p>
               The soft limit blocks individual uploads; it does not enforce a
               billing cap. Cloud uploads use the configured size limit above.
-              Safety limits remain: 4 MiB extracted text, 8 MiB DOCX body XML and
-              128 MiB expanded DOCX packages. Local comparisons support raw files
-              up to 16 MiB; OpenAI also enforces type and token limits.
+              Safety limits remain: 4 MiB extracted text, 8 MiB DOCX body XML
+              and 128 MiB expanded DOCX packages. Local comparisons support raw
+              files up to 16 MiB; OpenAI also enforces type and token limits.
             </p>
             <div className="cloud-family-list">
               <p>

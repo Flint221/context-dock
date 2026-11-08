@@ -10,6 +10,8 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
 };
+type FamilyKey = (String, String, String);
+type BatchOrders = Vec<Option<Vec<u64>>>;
 impl Registry {
     pub fn configure_tracking(
         &mut self,
@@ -212,7 +214,46 @@ impl Registry {
         let mut problems = self.finish_archival_intent(project)?;
         problems.extend(self.recover_operations(project, full)?);
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
-        let ids = self.source_ids(project)?;
+        self.reconcile_relocations(project, root, &path_rules)?;
+        path_rules = crate::path_selection::rules(&self.db, project)?;
+        let mut sources = self
+            .source_ids(project)?
+            .iter()
+            .map(|id| self.source(id))
+            .collect::<Result<Vec<_>>>()?;
+        // A batch must be processed in author-version order, not filesystem or
+        // lexical order (where v10 sorts before v2).
+        sources.sort_by_cached_key(|s| {
+            (
+                matching::parent_key(&s.relative),
+                matching::stem(&s.name).normalized,
+                s.kind.clone(),
+                matching::version_order(&s.name),
+                s.relative.clone(),
+            )
+        });
+        let ids: Vec<_> = sources.iter().map(|s| s.id.clone()).collect();
+        let mut batches: HashMap<FamilyKey, BatchOrders> = HashMap::new();
+        for s in sources.iter().filter(|s| s.disposition == "discovered") {
+            batches
+                .entry((
+                    matching::parent_key(&s.relative),
+                    matching::stem(&s.name).normalized,
+                    s.kind.clone(),
+                ))
+                .or_default()
+                .push(matching::version_order(&s.name));
+        }
+        let ordered_batches: HashSet<_> = batches
+            .into_iter()
+            .filter_map(|(key, orders)| {
+                let unique: HashSet<_> = orders.iter().collect();
+                (orders.len() > 1
+                    && orders.iter().all(Option::is_some)
+                    && unique.len() == orders.len())
+                .then_some(key)
+            })
+            .collect();
         let mut incoming: HashMap<(String, String, String), usize> = HashMap::new();
         let mut inherited = HashSet::new();
         let mut retry = false;
@@ -255,9 +296,8 @@ impl Registry {
             if !crate::path_selection::permits(&without_file, &path) {
                 continue;
             }
-            let same_batch = ids
+            let same_batch = sources
                 .iter()
-                .filter_map(|id| self.source(id).ok())
                 .filter(|s| {
                     s.id != source.id
                         && s.disposition == "discovered"
@@ -268,7 +308,13 @@ impl Registry {
                         && s.kind == source.kind
                 })
                 .count();
-            if same_batch != 0 {
+            if same_batch != 0
+                && !ordered_batches.contains(&(
+                    matching::parent_key(&source.relative),
+                    matching::stem(&source.name).normalized,
+                    source.kind.clone(),
+                ))
+            {
                 continue;
             }
             let staged = match storage::stage(root, &source.relative, &self.store) {
@@ -341,11 +387,14 @@ impl Registry {
             if source.disposition == "ignored" || source.disposition == "archived" {
                 continue;
             }
-            let changed = full
-                || dirty.contains(&models::key(&source.relative))
-                || source.hashed_size != Some(source.size)
-                || source.hashed_stamp != source.modified
-                || source.last_hash.is_none();
+            let changed =
+                full || dirty.iter().any(|path| {
+                    let relative = crate::path_selection::normalized(&source.relative);
+                    let path = crate::path_selection::normalized(path);
+                    path.is_empty() || relative == path || relative.starts_with(&format!("{path}/"))
+                }) || source.hashed_size != Some(source.size)
+                    || source.hashed_stamp != source.modified
+                    || source.last_hash.is_none();
             if !changed {
                 continue;
             }
@@ -389,7 +438,12 @@ impl Registry {
                     .copied()
                     .unwrap_or(0);
                 let (mut matches, explanation, high) = candidates;
-                if source.disposition == "review" || batch_count > 1 {
+                let ordered = ordered_batches.contains(&(
+                    matching::parent_key(&source.relative),
+                    matching::stem(&source.name).normalized,
+                    source.kind.clone(),
+                ));
+                if source.disposition == "review" || (batch_count > 1 && !ordered) {
                     self.queue_review(&source,&staged,matches,"Several existing or incoming files may belong to this family, or an earlier match is awaiting confirmation. Review is required; nothing was moved.")?;
                     return storage::discard_stage(&self.store, &staged.temporary);
                 }
@@ -468,6 +522,112 @@ impl Registry {
             .map_err(error)?;
         Ok(())
     }
+    /// Rebind only a unique missing, captured source to verified identical bytes.
+    /// Keep the source UUID and immutable history; a live copy is not a move.
+    fn reconcile_relocations(
+        &mut self,
+        project: &str,
+        root: &Path,
+        rules: &[crate::path_selection::Rule],
+    ) -> Result<()> {
+        let missing = crate::cloud::rows(&self.db,
+            "SELECT s.id FROM source_files s JOIN documents d ON d.id=s.document_id WHERE s.project_id=?1 AND s.status='missing' AND s.disposition IN ('tracked','superseded') AND s.last_hash IS NOT NULL AND d.tracking_state='tracked' AND d.merged_into IS NULL AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.state NOT IN ('done','cancelled','restored'))",
+            &[&project])?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let blocked = crate::path_selection::blocked_documents(&self.db, project)?;
+        for id in self.source_ids(project)? {
+            let source = self.source(&id)?;
+            if source.disposition != "discovered" || source.last_hash.is_some() {
+                continue;
+            }
+            let path = crate::path_selection::normalized(&source.relative);
+            let is_new: bool = self
+                .db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM new_paths WHERE project_id=?1 AND path=?2)",
+                    params![project, path],
+                    |r| r.get(0),
+                )
+                .map_err(error)?;
+            let permitted: Vec<_> = rules
+                .iter()
+                .filter(|r| !(is_new && r.kind == "file" && r.path == path))
+                .cloned()
+                .collect();
+            if !crate::path_selection::permits(&permitted, &path) {
+                continue;
+            }
+            let mut candidates = Vec::new();
+            for row in &missing {
+                let old = self.source(crate::cloud::s(row, "id"))?;
+                if old.status != "missing"
+                    || old.kind != source.kind
+                    || blocked.contains(&old.document_id)
+                    || !crate::path_selection::permits(rules, &old.relative)
+                {
+                    continue;
+                }
+                let same_version = if matching::version_label(&source.name).is_some() {
+                    crate::versioning::key(&source.name)
+                        == crate::versioning::effective(&self.db, &old.document_id, &old.name)?
+                } else {
+                    old.disposition == "tracked"
+                };
+                // A partial scan or inaccessible old path cannot prove absence.
+                if same_version
+                    && std::fs::symlink_metadata(root.join(&old.relative))
+                        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                {
+                    candidates.push(old);
+                }
+            }
+            if candidates.is_empty() {
+                continue;
+            }
+            let staged = match storage::stage(root, &source.relative, &self.store) {
+                Ok(staged) => staged,
+                Err(_) => continue,
+            };
+            candidates.retain(|old| old.last_hash.as_deref() == Some(&staged.hash));
+            let result = (|| {
+                if candidates.len() != 1 {
+                    return Ok(());
+                }
+                let old = &candidates[0];
+                let pristine: bool = self.db.query_row(
+                    "SELECT NOT EXISTS(SELECT 1 FROM document_versions WHERE document_id=?1) AND NOT EXISTS(SELECT 1 FROM operations WHERE document_id=?1) AND NOT EXISTS(SELECT 1 FROM pending_matches WHERE source_id=?2) AND (SELECT COUNT(*) FROM source_files WHERE document_id=?1)=1",
+                    params![source.document_id, source.id], |r| r.get(0)).map_err(error)?;
+                if !pristine {
+                    return Ok(());
+                }
+                let tx = self.db.transaction().map_err(error)?;
+                tx.execute("UPDATE documents SET active_source_id=NULL,tracking_state='merged',merged_into=?1 WHERE id=?2",params![old.document_id,source.document_id]).map_err(error)?;
+                tx.execute("DELETE FROM source_files WHERE id=?1", [&source.id])
+                    .map_err(error)?;
+                tx.execute("UPDATE source_files SET name=?1,relative_path=?2,path_key=?3,size=?4,modified_at=?5,last_observed=?6,status='available',hashed_stamp=?5,hashed_size=?4 WHERE id=?7",
+                    params![source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now(),old.id]).map_err(error)?;
+                tx.execute(
+                    "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
+                    params![project, path],
+                )
+                .map_err(error)?;
+                tx.execute(
+                    "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                    params![project, path],
+                )
+                .map_err(error)?;
+                tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
+                tx.execute("INSERT OR IGNORE INTO document_aliases(project_id,parent_key,stem,kind,document_id) VALUES(?1,?2,?3,?4,?5)",params![project,matching::parent_key(&source.relative),matching::stem(&source.name).normalized,source.kind,old.document_id]).map_err(error)?;
+                tx.commit().map_err(error)?;
+                self.activity(project,"source_relocated",&format!("{} -> {}. Verified identical content; source identity and history retained.",old.relative,source.relative))
+            })();
+            storage::discard_stage(&self.store, &staged.temporary)?;
+            result?;
+        }
+        Ok(())
+    }
     pub(crate) fn queue_review(
         &self,
         source: &Source,
@@ -530,21 +690,40 @@ impl Registry {
                 true,
             ));
         }
-        let mut q=self.db.prepare("SELECT DISTINCT d.id,s.status FROM document_versions v JOIN documents d ON d.id=v.document_id LEFT JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1 AND d.kind=?2 AND d.tracking_state='tracked' AND d.merged_into IS NULL AND v.sha256=?3 AND d.id!=?4").map_err(error)?;
+        let mut q=self.db.prepare("SELECT DISTINCT d.id,s.status,s.name,s.relative_path FROM document_versions v JOIN documents d ON d.id=v.document_id LEFT JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1 AND d.kind=?2 AND d.tracking_state='tracked' AND d.merged_into IS NULL AND v.sha256=?3 AND d.id!=?4").map_err(error)?;
         let duplicates = q
             .query_map(
                 params![source.project_id, source.kind, hash, source.document_id],
-                |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+                |r| {
+                    Ok((
+                        r.get::<_, String>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                        r.get::<_, Option<String>>(3)?,
+                    ))
+                },
             )
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?
             .into_iter()
-            .filter(|(id, _)| !blocked.contains(id))
+            .filter(|(id, ..)| !blocked.contains(id))
             .collect::<Vec<_>>();
         if !duplicates.is_empty() {
             let relocated = duplicates.len() == 1 && duplicates[0].1.as_deref() == Some("missing");
-            return Ok((duplicates.into_iter().map(|(id,_)|id).collect(),"Identical preserved content at another path: possible relocation or duplicate. No new content version is needed.".into(),relocated));
+            let numbered_export = duplicates.len() == 1
+                && duplicates[0]
+                    .2
+                    .as_ref()
+                    .zip(duplicates[0].3.as_ref())
+                    .is_some_and(|(name, relative)| {
+                        matching::parent_key(relative) == parent
+                            && matching::stem(name).normalized == stem.normalized
+                            && matching::version_order(name)
+                                .zip(matching::version_order(&source.name))
+                                .is_some_and(|(a, b)| a != b)
+                    });
+            return Ok((duplicates.into_iter().map(|(id, ..)|id).collect(),"Identical preserved content at another path: possible relocation, numbered export or duplicate.".into(),relocated || numbered_export));
         }
         let mut q=self.db.prepare("SELECT d.id,s.name,s.relative_path FROM documents d JOIN source_files s ON s.id=d.active_source_id WHERE d.project_id=?1 AND d.kind=?2 AND d.tracking_state='tracked' AND d.merged_into IS NULL AND d.id!=?3").map_err(error)?;
         let rows = q

@@ -102,6 +102,7 @@ export function TrackingPanel({
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewLimit, setReviewLimit] = useState(100);
   const reviewSequence = useRef(0);
+  const readSequence = useRef(0);
   async function reviewArchival(target: boolean) {
     const sequence = ++reviewSequence.current;
     setConfirmation({
@@ -135,16 +136,17 @@ export function TrackingPanel({
   }
   useEffect(() => {
     let active = true;
+    const sequence = ++readSequence.current;
     registry
       .tracking(project.id)
       .then((v) => {
-        if (active) {
+        if (active && sequence === readSequence.current) {
           setView(v);
           setStateKnown(true);
         }
       })
       .catch((e) => {
-        if (active) {
+        if (active && sequence === readSequence.current) {
           setError(String(e));
           setStateKnown(false);
         }
@@ -170,13 +172,15 @@ export function TrackingPanel({
     const release = beginOperation(`tracking:${project.id}`);
     if (!release) return;
     setBusy(true);
+    ++readSequence.current;
     setError("");
     setNotice("");
     if (expected) setStateKnown(false);
     try {
       await work();
+      const sequence = ++readSequence.current;
       const next = await registry.tracking(project.id);
-      if (alive.current) {
+      if (alive.current && sequence === readSequence.current) {
         setView(next);
         setStateKnown(true);
       }

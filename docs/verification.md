@@ -1,3 +1,13 @@
+# 0.10.16 - Sync, tracking and resource audit
+
+Local checks passed: **265 native tests**, **167 frontend tests across 19 files**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production compilation and Windows x64 NSIS packaging. Six entries were ignored in the normal native suite; the disposable Windows tray/hidden tracking/reopen/guarded-exit fixture passed separately. Production npm audit reported zero vulnerabilities. Source/packaging versions agree at 0.10.16; schema remains 013.
+
+Implementation and release commits through `3c8f6ec` are pushed to `codex/sync-tracking-resource-audit`. Numbered incoming batches use numeric order; unique verified moves preserve source identities; directory events cover children; watcher retries continue and hourly metadata checks recover missed events. Idle cloud checks, unchanged notification writes and timer wakeups are reduced. Windows battery saver pauses new uploads with a separate saved preference. Interface refreshes coalesce/filter events and reject stale reads; source-file labels distinguish physical files from tracked families. The real settings UI passed a synthetic browser toggle/banner check. See [audit, research and remaining acceptance](ContextDock_App_Audit_v1.md).
+
+Unsigned installer: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.16_x64-setup.exe`, **4,806,260 bytes**, SHA-256 `FA436A252376A0E4BC04346E810BE26A03D4FE31B8C76D5FB95AE684143BEDE6`. Executable product/file version is 0.10.16. The installer was built locally and was not executed against user data. Sources, installed databases, snapshots, credentials and cloud resources were unchanged. Authenticated cloud, actual drive/power transitions, before/after resource measurements and completed GitHub CI are not claimed.
+
+---
+
 # 0.10.6 - Grouped unavailable-folder notifications
 
 Local checks passed: **237 native tests**, **12 app tests**, TypeScript, ESLint, rustfmt, all-target Clippy with warnings denied, whitespace checks, production frontend compilation and Windows x64 NSIS packaging. The five standard ignored tests were not run for this release. Only the frontend version assertion changed; the app suite was run rather than repeating the unchanged component suites. Versions agree at 0.10.6; schema remains 013.
