@@ -1,3 +1,11 @@
+# ContextDock 0.10.16: tracking, sync and resource improvements
+
+Clear numbered exports arriving together now join one tracked family in numeric order. Verified moves inside the registered project preserve source identity and history instead of leaving duplicate missing rows. Source lists distinguish physical files from tracked document families. Ambiguous copies, excluded destinations and existing complex separate histories still require review.
+
+Idle cloud checks avoid repeatedly opening unchanged sources. Watcher retries continue after prolonged editor waits, and hourly metadata reconciliation recovers missed events. Interface refreshes are coalesced and stale tracking reads cannot replace verified action results. **Settings → Pause uploads during Windows battery saver** is on by default; manual pause remains separate. Local tracking, existing indexing checks and confirmed removals continue.
+
+Saved changes remain event-driven, with about a one-second settling window and a two-second cloud worker tick. Provider indexing takes additional time. See the [app audit, timing research, remaining work and acceptance checks](docs/ContextDock_App_Audit_v1.md). Local validation and packaging passed; installed/live-cloud acceptance and measured resource savings are separate checks. Schema remains 013. Earlier release sections below retain their historical context.
+
 # Filename versions and save revisions (0.9.1)
 
 Editing or saving `Document_v4.md` or `Document_v4.docx` updates that version's saved revision and cloud content without increasing **Versions**. A higher filename suffix such as `v5` creates the next visible version, including when its bytes match v4. History shows the latest saved revision of each filename version. Earlier snapshots remain intact for recovery and existing evidence links; no old history is deleted. Files without a version suffix remain one working version. A decreasing suffix requires review.
@@ -12,7 +20,7 @@ This installer also includes readable archive folders and exact original filenam
 
 # ContextDock
 
-ContextDock 0.9.1 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
+ContextDock 0.10.16 is a lightweight Windows 11 application for local document history and optional project questions. Register a folder, enable document tracking, then turn on **Cloud sync** to sync selected documents to OpenAI and ask questions about their current indexed versions. Cloud sync off keeps local history and saved chats available while blocking new project AI requests.
 
 ## Unified folder selection (0.8.1)
 
@@ -141,7 +149,7 @@ Windows notifications summarize approval counts and actionable problems while th
 
 1. Close any running ContextDock window before upgrading.
 2. Open [Windows installer workflow runs](https://github.com/Flint221/context-dock/actions/workflows/windows.yml). Choose a successful run for the intended branch/commit, then download **ContextDock-Windows-x64-setup** under **Artifacts**. Workflow artifacts require GitHub sign-in and expire after 30 days.
-3. Extract the ZIP and run `ContextDock_0.6.3_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 6; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
+3. Extract the ZIP and run the matching installer, such as `ContextDock_0.10.16_x64-setup.exe`. The installer retains the existing application identifier and per-user data location. Earlier databases migrate transactionally through schema 13; existing tracking/archival/cloud preferences and snapshots survive. AI requests remain off until explicitly approved. Do not delete app data or reinstall into a new application identity.
 4. Launch **ContextDock** from Start. Existing projects, history and theme remain. Tracking/archival initially remain off for schema-1 migrations; existing schema-2 tracking preferences are preserved.
 5. Follow the complete [14-test Milestone 4 cloud guide](docs/manual-testing-milestone-4.md) using disposable files and your own API account. The [Milestone 3 comparison guide](docs/manual-testing-milestone-3.md) and [Milestone 2 tracking guide](docs/manual-testing-milestone-2.md) remain available for offline/archival testing.
 
@@ -235,7 +243,7 @@ cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D w
 npm run tauri -- build --bundles nsis --ci
 ```
 
-Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.8.1_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
+Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.16_x64-setup.exe`. Both dependency lockfiles are committed. Tests use mocked cloud APIs and temporary roots/databases; no real keys or destructive tests run against registered user projects.
 
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
