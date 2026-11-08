@@ -9,12 +9,14 @@ use crate::{
 use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
     thread,
+    time::{Duration, Instant},
 };
 use tauri::Emitter;
 // A stale request guard has sent no request. Retry with a fresh guard after the
@@ -180,7 +182,7 @@ pub struct CloudRuntime {
 }
 impl Drop for CloudRuntime {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Relaxed);
+        self.request_stop();
         // Do not hold application shutdown on an in-flight HTTP request. Every mutation
         // has already recorded its recovery intent; process exit can interrupt it safely.
         self.worker.take();
@@ -325,9 +327,49 @@ pub(crate) fn runtime_database_path(path: PathBuf) -> std::io::Result<PathBuf> {
     // canonicalization adds the verbatim prefix even when the folder never moved.
     std::fs::canonicalize(path)
 }
+/// Idle projects need no source probes until another connection changes the
+/// registry, a retry/indexing deadline arrives, or the local safety probe is due.
+#[derive(Default)]
+pub(crate) struct IdleChecks(HashMap<String, (i64, Instant)>);
+impl IdleChecks {
+    pub(crate) fn due(&self, id: &str, revision: i64, now: Instant) -> bool {
+        self.0
+            .get(id)
+            .is_none_or(|(saved, next)| *saved != revision || now >= *next)
+    }
+    pub(crate) fn defer(
+        &mut self,
+        db: &Connection,
+        p: &Value,
+        revision: i64,
+        now: Instant,
+    ) -> Result<()> {
+        let timestamp = chrono::Utc::now().timestamp();
+        let mut delay = if s(p, "error").contains(cloud::SOURCE_BUSY) {
+            5
+        } else {
+            30
+        };
+        if n(p, "next_at") > timestamp {
+            delay = delay.min(n(p, "next_at").saturating_sub(timestamp));
+        }
+        let job_at: Option<i64> = db.query_row("SELECT MIN(next_at) FROM cloud_jobs WHERE project_id=?1 AND desired=1 AND state NOT IN ('indexed','failed','uncertain','removed','purged') AND next_at>?2",params![s(p,"project_id"),timestamp],|r|r.get(0)).map_err(error)?;
+        if let Some(next) = job_at {
+            delay = delay.min(next.saturating_sub(timestamp));
+        }
+        self.0.insert(
+            s(p, "project_id").into(),
+            (revision, now + Duration::from_secs(delay.max(1) as u64)),
+        );
+        Ok(())
+    }
+}
 impl CloudRuntime {
     pub(crate) fn request_stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
+        if let Some(worker) = &self.worker {
+            worker.thread().unpark();
+        }
     }
     pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
         let path = runtime_database_path(path)?;
@@ -343,12 +385,17 @@ impl CloudRuntime {
             let Ok(mut db)=cloud::connect(&worker_path) else{return;};
             let root=worker_path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
             let mut cursor=0usize;
+            let mut idle=IdleChecks::default();
             while !worker_stop.load(Ordering::Relaxed) {
                 if let Ok(_guard)=worker_gate.try_lock() {
+                    let revision: i64 = db.query_row("PRAGMA data_version",[],|r|r.get(0)).unwrap_or(-1);
                     if let Ok(projects)=cloud::rows(&db,"SELECT c.* FROM cloud_projects c JOIN projects p ON p.id=c.project_id WHERE p.removed_at IS NULL AND (c.enabled=1 OR EXISTS(SELECT 1 FROM cloud_jobs j WHERE j.project_id=c.project_id AND j.phase='path_remove' AND j.state NOT IN ('removed','purged')))",&[]) {
+                        idle.0.retain(|id,_| projects.iter().any(|p| s(p,"project_id")==id));
                         for offset in 0..projects.len() {
                             let index=(cursor+offset)%projects.len();let p=&projects[index];
+                            if revision != -1 && !idle.due(s(p,"project_id"),revision,Instant::now()) {continue;}
                             if needed(&db,p).unwrap_or(false) {
+                                idle.0.remove(s(p,"project_id"));
                                 if let Ok((api,scope))=current_api(&db) {
                                     if s(p,"scope")==scope {
                                         if let Ok(guarded)=ProjectApi::new(&api,&worker_path,s(p,"project_id"),&scope,worker_stop.clone()) {
@@ -358,11 +405,13 @@ impl CloudRuntime {
                                     }
                                 }
                                 cursor=index+1; break;
+                            } else {
+                                let _=idle.defer(&db,p,revision,Instant::now());
                             }
                         }
                     }
                 }
-                for _ in 0..20 {if worker_stop.load(Ordering::Relaxed){break;} thread::sleep(std::time::Duration::from_millis(100));}
+                thread::park_timeout(Duration::from_secs(2));
             }
         })?;
         Ok(Self {

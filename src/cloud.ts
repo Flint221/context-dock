@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { subscribeChanges } from "./services/refresh";
 export interface Draft {
   enabled: boolean;
   automatic: boolean;
@@ -100,7 +100,8 @@ export const cloud = {
     action: string,
     payload: unknown = {},
   ) => invoke<T>("cloud_action", { project, action, payload }),
-  subscribe: (changed: () => void) => listen("cloud-changed", changed),
+  subscribe: (changed: () => void | Promise<unknown>, project?: string) =>
+    subscribeChanges("cloud-changed", changed, project),
 };
 export function bytes(value: number | null) {
   return value === null ? "Not yet measured" : `${value.toLocaleString()} B`;

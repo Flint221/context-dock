@@ -54,7 +54,7 @@ it("preserves page controls during status updates and resets the scene and scrol
   await user.type(search, "5173");
   const scene = search.closest(".page-scene");
   const scrollCount = vi.mocked(window.scrollTo).mock.calls.length;
-  await act(async () => notify());
+  await act(async () => { void notify(); });
   expect(screen.getByRole("searchbox")).toHaveValue("5173");
   expect(search.closest(".page-scene")).toBe(scene);
   expect(window.scrollTo).toHaveBeenCalledTimes(scrollCount);
@@ -466,7 +466,7 @@ it("returns to All projects after removal and ignores an older read across later
         finishOldRead = resolve;
       }),
   );
-  await act(async () => notify());
+  await act(async () => { void notify(); });
   await user.click(screen.getByRole("button", { name: "Remove project" }));
   const dialog = screen.getByRole("dialog", { name: "Remove project?" });
   const confirm = within(dialog).getByRole("button", {

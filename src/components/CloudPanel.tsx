@@ -100,13 +100,13 @@ export function CloudPanel({
     alive.current = true;
     let unlisten: (() => void) | undefined;
     const refresh = () => {
-      void load().catch((e) => {
+      return load().catch((e) => {
         if (alive.current) setError(String(e));
       });
     };
     refresh();
     void cloud
-      .subscribe(refresh)
+      .subscribe(refresh, project)
       .then((fn) => {
         if (alive.current) unlisten = fn;
         else fn();
@@ -116,7 +116,7 @@ export function CloudPanel({
       alive.current = false;
       unlisten?.();
     };
-  }, [load]);
+  }, [load, project]);
   async function run(action: () => Promise<unknown>) {
     const release = beginOperation(`cloud:${project}`);
     if (!release) return;

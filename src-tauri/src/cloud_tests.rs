@@ -243,6 +243,37 @@ struct Fixture {
     id: String,
     doc: String,
 }
+#[test]
+fn idle_cloud_checks_wait_for_change_or_deadline_and_never_delay_due_indexing() {
+    use std::time::{Duration, Instant};
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let p = cloud::project(&f.r.db, &f.id).unwrap();
+    let mut idle = cloud_commands::IdleChecks::default();
+    let now = Instant::now();
+    assert!(idle.due(&f.id, 1, now));
+    idle.defer(&f.r.db, &p, 1, now).unwrap();
+    assert!(!idle.due(&f.id, 1, now + Duration::from_secs(2)));
+    assert!(idle.due(&f.id, 2, now + Duration::from_secs(2)));
+    assert!(idle.due(&f.id, 1, now + Duration::from_secs(30)));
+    f.r.db
+        .execute(
+            "UPDATE cloud_jobs SET state='indexing',next_at=?1",
+            [chrono::Utc::now().timestamp() + 4],
+        )
+        .unwrap();
+    idle.defer(&f.r.db, &p, 2, now).unwrap();
+    assert!(idle.due(&f.id, 2, now + Duration::from_secs(4)));
+    let mut busy = p;
+    busy["error"] = json!(cloud::SOURCE_BUSY);
+    f.r.db
+        .execute("UPDATE cloud_jobs SET state='indexed'", [])
+        .unwrap();
+    idle.defer(&f.r.db, &busy, 3, now).unwrap();
+    assert!(idle.due(&f.id, 3, now + Duration::from_secs(5)));
+}
 
 fn word_package(media_size: usize) -> Vec<u8> {
     use std::io::{Cursor, Write};
@@ -434,6 +465,37 @@ fn missing_selected_source_blocks_queued_uploads_and_recovers_without_losing_clo
         store
     );
     assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+}
+#[test]
+fn verified_file_move_keeps_indexed_file_and_snapshot_identity_without_reupload() {
+    let mut f = Fixture::new();
+    f.enable();
+    let api = Mock::default();
+    f.sync(&api);
+    let before = f.jobs();
+    let source = f.r.source_ids(&f.id).unwrap()[0].clone();
+    fs::create_dir(f.root.join("Moved")).unwrap();
+    fs::rename(
+        f.root.join("Master_Context.md"),
+        f.root.join("Moved/Master_Context.md"),
+    )
+    .unwrap();
+    f.r.reconcile(&f.id, "watcher", &HashSet::new(), true)
+        .unwrap();
+    assert_eq!(f.r.source_ids(&f.id).unwrap(), vec![source]);
+    api.0.borrow_mut().calls.clear();
+    f.sync(&api);
+    let after = f.jobs();
+    assert_eq!(before[0]["version_id"], after[0]["version_id"]);
+    assert_eq!(before[0]["file_id"], after[0]["file_id"]);
+    assert_eq!(cloud::view(&f.r.db, &f.id).unwrap()["localReady"], true);
+    assert_eq!(f.r.versions(&f.doc).unwrap().len(), 1);
+    assert!(!api
+        .0
+        .borrow()
+        .calls
+        .iter()
+        .any(|c| c == "UPLOAD" || c.starts_with("DELETE ")));
 }
 
 #[test]

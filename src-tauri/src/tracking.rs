@@ -10,6 +10,8 @@ use std::{
     collections::{HashMap, HashSet},
     path::Path,
 };
+type FamilyKey = (String, String, String);
+type BatchOrders = Vec<Option<Vec<u64>>>;
 impl Registry {
     pub fn configure_tracking(
         &mut self,
@@ -231,7 +233,7 @@ impl Registry {
             )
         });
         let ids: Vec<_> = sources.iter().map(|s| s.id.clone()).collect();
-        let mut batches: HashMap<(String, String, String), Vec<Option<Vec<u64>>>> = HashMap::new();
+        let mut batches: HashMap<FamilyKey, BatchOrders> = HashMap::new();
         for s in sources.iter().filter(|s| s.disposition == "discovered") {
             batches
                 .entry((

@@ -175,7 +175,7 @@ pub fn notice_due(
     now: i64,
     delay: i64,
 ) -> Result<bool> {
-    db.execute("INSERT INTO desktop_notices(key,signature,changed_at) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET signature=excluded.signature,changed_at=CASE WHEN desktop_notices.signature=desktop_notices.last_signature AND desktop_notices.signature!=excluded.signature THEN excluded.changed_at ELSE desktop_notices.changed_at END",params![key,signature,now]).map_err(error)?;
+    db.execute("INSERT INTO desktop_notices(key,signature,changed_at) VALUES(?1,?2,?3) ON CONFLICT(key) DO UPDATE SET signature=excluded.signature,changed_at=CASE WHEN desktop_notices.signature=desktop_notices.last_signature AND desktop_notices.signature!=excluded.signature THEN excluded.changed_at ELSE desktop_notices.changed_at END WHERE desktop_notices.signature!=excluded.signature",params![key,signature,now]).map_err(error)?;
     db.query_row("SELECT signature!=last_signature AND ?2-changed_at>=?3 AND (last_sent=0 OR ?2-last_sent>=300) FROM desktop_notices WHERE key=?1",params![key,now,delay],|r|r.get(0)).map_err(error)
 }
 pub fn notice_sent(db: &Connection, key: &str, now: i64) -> Result<()> {

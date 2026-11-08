@@ -133,6 +133,7 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
     let mut next_sync = Instant::now();
     let mut next_health = Instant::now();
     let mut folder_revisions: HashMap<String, i64> = HashMap::new();
+    let mut safety_scans: HashMap<String, Instant> = HashMap::new();
     while !stop.load(Ordering::Acquire) {
         if Instant::now() >= next_sync {
             if let Ok(mut r) = registry.try_lock() {
@@ -164,6 +165,7 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                     roots.retain(|id, _| enabled.contains(id));
                     pending.retain(|id, _| enabled.contains(id));
                     retry_watch.retain(|id, _| enabled.contains(id));
+                    safety_scans.retain(|id, _| enabled.contains(id));
                     for (id, path) in configs {
                         let root = PathBuf::from(path);
                         if roots.get(&id).is_some_and(|old| old != &root) {
@@ -182,6 +184,10 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                         {
                             match watcher(id.clone(), root, tx.clone(), overflow.clone()) {
                                 Ok(w) => {
+                                    safety_scans.insert(
+                                        id.clone(),
+                                        Instant::now() + Duration::from_secs(3600),
+                                    );
                                     watches.insert(id.clone(), w);
                                     retry_watch.remove(&id);
                                     let _=r.watch_status(&id,"watching",Some("Native monitoring active while ContextDock is running."));
@@ -209,10 +215,20 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                             }
                             changed(&id);
                         }
+                        if safety_scans
+                            .get(&id)
+                            .is_some_and(|next| Instant::now() >= *next)
+                        {
+                            // Recover missed native events without rehashing unchanged files.
+                            pending
+                                .entry(id.clone())
+                                .or_insert_with(|| Pending::new(false));
+                            safety_scans.insert(id, Instant::now() + Duration::from_secs(3600));
+                        }
                     }
                 }
             }
-            next_sync = Instant::now() + Duration::from_millis(500);
+            next_sync = Instant::now() + Duration::from_secs(1);
         }
         if overflow.swap(false, Ordering::AcqRel) {
             for id in roots.keys() {
@@ -220,7 +236,12 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
             }
         }
         let mut messages = vec![];
-        if let Ok(m) = rx.recv_timeout(Duration::from_millis(200)) {
+        let wait = if pending.is_empty() {
+            Duration::from_secs(1)
+        } else {
+            Duration::from_millis(200)
+        };
+        if let Ok(m) = rx.recv_timeout(wait) {
             messages.push(m);
         }
         messages.extend(rx.try_iter().take(511));
@@ -289,10 +310,10 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
             };
             drop(r);
             changed(&id);
-            if retry && p.attempt < 3 {
-                p.attempt += 1;
+            if retry {
+                p.attempt = (p.attempt + 1).min(4);
                 p.not_before =
-                    Instant::now() + Duration::from_secs([0, 2, 5, 15][p.attempt as usize]);
+                    Instant::now() + Duration::from_secs([0, 2, 5, 15, 30][p.attempt as usize]);
                 pending.insert(id, p);
             }
         }

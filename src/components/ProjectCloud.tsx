@@ -52,13 +52,13 @@ export function ProjectCloud({
   useEffect(() => {
     alive.current = true;
     const refresh = () =>
-      void load().catch((e) => {
+      load().catch((e) => {
         if (alive.current) setError(String(e));
       });
     refresh();
     let unsubscribe: (() => void) | undefined;
     void cloud
-      .subscribe(refresh)
+      .subscribe(refresh, project)
       .then((fn) => {
         if (alive.current) unsubscribe = fn;
         else fn();
@@ -68,7 +68,7 @@ export function ProjectCloud({
       alive.current = false;
       unsubscribe?.();
     };
-  }, [load]);
+  }, [load, project]);
   useEffect(() => {
     onStatus?.(stateKnown ? view : null);
   }, [view, stateKnown, onStatus]);

@@ -103,6 +103,21 @@ it("tests delivery without changing preferences or approvals and surfaces Window
   expect(screen.queryByRole("status")).not.toBeInTheDocument();
   expect(button).not.toBeDisabled();
 });
+it("shows battery saver separately from manual pause and saves the power preference", async () => {
+  const user = userEvent.setup();
+  status.batterySaverActive = true;
+  status.pauseOnBatterySaver = true;
+  status.uploadsManuallyPaused = false;
+  status.uploadsPaused = true;
+  render(<DesktopSettings />);
+  const toggle = await screen.findByRole("checkbox", { name: "Pause uploads during Windows battery saver" });
+  expect(toggle).toBeChecked();
+  expect(screen.getByText(/Windows battery saver is currently on/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Pause background uploads" })).toBeInTheDocument();
+  await user.click(toggle);
+  expect(desktop.setting).toHaveBeenCalledWith("pauseOnBatterySaver", false);
+  expect(desktop.setting).not.toHaveBeenCalledWith("uploadsPaused", false);
+});
 it("reads persisted desktop controls and supports reversing each preference", async () => {
   const user = userEvent.setup();
   render(<DesktopSettings />);
