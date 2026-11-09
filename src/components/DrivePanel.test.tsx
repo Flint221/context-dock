@@ -3,6 +3,9 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { drive, type DriveProject } from "../drive";
 import { DrivePanel } from "./DrivePanel";
+import { registry } from "../services/registry";
+
+vi.mock("../services/registry", () => ({ registry: { subscribe: vi.fn() } }));
 
 vi.mock("../drive", () => ({
   drive: {
@@ -34,6 +37,37 @@ beforeEach(() => {
     structuredClone(state),
   );
   vi.mocked(drive.subscribe).mockResolvedValue(() => {});
+  vi.mocked(registry.subscribe).mockResolvedValue(() => {});
+});
+it("refreshes queued status on local changes while publication is paused", async () => {
+  state.documents = [
+    {
+      documentId: "doc",
+      fileId: "same-file",
+      verifiedName: "ContextDock_Context_v1.md",
+      verifiedHash: "old",
+      verifiedSize: 3,
+      verifiedAt: null,
+      pendingName: null,
+      state: "synced",
+      error: null,
+    },
+  ];
+  const stopDrive = vi.fn();
+  const stopRegistry = vi.fn();
+  vi.mocked(drive.subscribe).mockResolvedValue(stopDrive);
+  vi.mocked(registry.subscribe).mockResolvedValue(stopRegistry);
+  const { unmount } = render(<DrivePanel project="sample" />);
+  expect(await screen.findByText(/· synced/)).toBeInTheDocument();
+  state.documents[0].state = "queued";
+  await act(async () => {
+    await vi.mocked(registry.subscribe).mock.calls[0][0]();
+  });
+  expect(screen.getByText(/· queued/)).toBeInTheDocument();
+  expect(drive.publish).not.toHaveBeenCalled();
+  unmount();
+  expect(stopDrive).toHaveBeenCalledOnce();
+  expect(stopRegistry).toHaveBeenCalledOnce();
 });
 it("keeps recovery visible while disconnected and retries without publishing", async () => {
   state.connected = false;
@@ -226,6 +260,44 @@ it("keeps the previous receipt visible after a failed replacement", async () => 
     expect(
       screen.getByRole("button", { name: "Publish latest" }),
     ).toBeEnabled(),
+  );
+});
+it("retires a persisted publication error when the worker verifies its retry", async () => {
+  state.enabled = true;
+  const problem =
+    "The cloud file changed during verification. It remains queued.";
+  vi.mocked(drive.publish).mockImplementation(async () => {
+    state.error = problem;
+    throw problem;
+  });
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Publish latest" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(problem);
+  state.error = null;
+  await act(async () => {
+    await vi.mocked(drive.subscribe).mock.calls[0][1]();
+  });
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+it("retains an unsaved operation error across unrelated worker updates", async () => {
+  state.enabled = true;
+  vi.mocked(drive.publish).mockRejectedValue("Another publication is running.");
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Publish latest" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Another publication is running.",
+  );
+  await act(async () => {
+    await vi.mocked(drive.subscribe).mock.calls[0][1]();
+  });
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Another publication is running.",
   );
 });
 it("permits pausing a disconnected project while blocking new publication", async () => {

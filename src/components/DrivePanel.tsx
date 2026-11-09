@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { drive, type DriveProject } from "../drive";
 import { beginOperation } from "../operations";
 import { date } from "../format";
+import { registry } from "../services/registry";
 
 export function DrivePanel({ project }: { project: string }) {
   const [view, setView] = useState<DriveProject | null>(null);
@@ -21,7 +22,11 @@ export function DrivePanel({ project }: { project: string }) {
   useEffect(() => {
     alive.current = true;
     let disposed = false;
-    let stop: (() => void) | undefined;
+    const stops: (() => void)[] = [];
+    const keep = (stop: () => void) => {
+      if (!disposed) stops.push(stop);
+      else stop();
+    };
     void refresh().catch((e) => {
       if (alive.current) setError(String(e));
     });
@@ -29,17 +34,22 @@ export function DrivePanel({ project }: { project: string }) {
       .subscribe(project, async () => {
         await refresh();
       })
-      .then((release) => {
-        if (!disposed) stop = release;
-        else release();
+      .then(keep)
+      .catch((e) => {
+        if (alive.current) setError(String(e));
+      });
+    void registry
+      .subscribe(async () => {
+        await refresh();
       })
+      .then(keep)
       .catch((e) => {
         if (alive.current) setError(String(e));
       });
     return () => {
       alive.current = false;
       disposed = true;
-      stop?.();
+      stops.forEach((stop) => stop());
     };
   }, [project, refresh]);
   async function run(
@@ -61,9 +71,21 @@ export function DrivePanel({ project }: { project: string }) {
         );
       if (alive.current) setMessage(success);
     } catch (e) {
-      if (alive.current) setError(String(e));
+      const reason = e instanceof Error ? e.message : String(e);
+      if (alive.current) setError(reason);
       try {
-        await refresh();
+        const next = await refresh();
+        const persisted = [
+          next.error,
+          ...next.documents.map((d) => d.error),
+        ].filter((value): value is string => !!value);
+        // Render journaled failures from live state so a successful background
+        // retry can retire them. Keep unsaved operation failures actionable.
+        if (
+          alive.current &&
+          (persisted.includes(reason) || persisted.join(" ") === reason)
+        )
+          setError("");
       } catch {
         /* Preserve the actionable failure. */
       }
