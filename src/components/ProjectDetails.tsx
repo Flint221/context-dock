@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { TrackingPanel } from "./TrackingPanel";
-import { ProjectCloud } from "./ProjectCloud";
+import { LatestDocuments } from "./LatestDocuments";
+import { DrivePanel } from "./DrivePanel";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -10,18 +10,10 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import type {
-  Project,
-  Document,
-  PathSelectionView,
-  TrackingView,
-} from "../types";
+import type { Project, Document, PathSelectionView } from "../types";
 import { date, displayPath } from "../format";
-import { Documents } from "./Documents";
 import { ProjectFolder } from "./ProjectFolder";
 import { FolderTree } from "./FolderTree";
-import type { CloudView } from "../cloud";
-import { ProjectSummary } from "./ProjectSummary";
 import type { ProjectTab } from "./ProjectTabs";
 export function ProjectDetails({
   changed,
@@ -49,8 +41,6 @@ export function ProjectDetails({
   refresh: () => void;
 }) {
   const [selection, setSelection] = useState<PathSelectionView | null>(null);
-  const [tracking, setTracking] = useState<TrackingView | null>(null);
-  const [cloud, setCloud] = useState<CloudView | null>(null);
   const folderLost =
     project.folderState === "needs_reassignment" ||
     project.status === "unavailable";
@@ -58,12 +48,6 @@ export function ProjectDetails({
   const inaccessible = documents.filter((d) => d.status === "unavailable");
   return (
     <>
-      <ProjectSummary
-        selection={selection}
-        tracking={tracking}
-        cloud={folderLost ? null : cloud}
-        unavailable={folderLost}
-      />
       <div className="project-utilities">
         <button className="back" disabled={busy} onClick={back}>
           <ArrowLeft size={16} /> All projects
@@ -117,7 +101,7 @@ export function ProjectDetails({
             <span>
               {missing.length} files missing · {inaccessible.length} files
               inaccessible. Check the document statuses below, restore the files
-              or fix access, then refresh documents. Saved history is retained.
+              or fix access, then refresh documents.
             </span>
           </div>
         )}
@@ -138,37 +122,39 @@ export function ProjectDetails({
             </button>
           </div>
         </div>
-        <FolderTree
-          key={`paths:${project.id}`}
-          project={project.id}
-          changed={changed}
-          unavailable={folderLost}
-          onSelection={setSelection}
-          refreshKey={`${project.path}:${project.lastScan}:${project.trackingRevision}`}
-        />
+        <details className="panel" open={!project.trackingEnabled}>
+          <summary>Choose files and folders</summary>
+          <FolderTree
+            key={`paths:${project.id}`}
+            project={project.id}
+            changed={changed}
+            unavailable={folderLost}
+            onSelection={setSelection}
+            refreshKey={`${project.path}:${project.lastScan}:${project.trackingRevision}`}
+          />
+        </details>
         {!folderLost && (
-          <TrackingPanel
+          <LatestDocuments
             key={`tracking:${project.id}`}
             project={project}
             changed={changed}
-            onStatus={setTracking}
+            selection={selection}
           />
         )}
-        <Documents key={`documents:${project.id}`} documents={documents} />
       </div>
-      {!folderLost && (
-        <ProjectCloud
-          key={`cloud:${project.id}:${project.path}`}
-          project={project.id}
-          tab={tab}
-          onStatus={setCloud}
-        />
+      {!folderLost && tab === "cloud" && (
+        <div
+          role="tabpanel"
+          id="project-panel-cloud"
+          aria-labelledby="project-tab-cloud"
+        >
+          <DrivePanel key={`drive:${project.id}`} project={project.id} />
+        </div>
       )}
       {folderLost && tab !== "files" && (
         <p className="banner warning">
-          Reassign the project folder above to access{" "}
-          {tab === "cloud" ? "Cloud sync" : "Ask AI"}. Saved history is
-          retained.
+          Reassign the project folder above to access Drive publishing. Your
+          files are kept.
         </p>
       )}
     </>

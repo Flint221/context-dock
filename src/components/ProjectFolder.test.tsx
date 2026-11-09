@@ -15,11 +15,11 @@ vi.mock("../services/registry", () => ({
     refresh: vi.fn(),
   },
 }));
-vi.mock("./ProjectCloud", () => ({
-  ProjectCloud: () => <div>Project cloud work</div>,
+vi.mock("./DrivePanel", () => ({
+  DrivePanel: () => <div>Project cloud work</div>,
 }));
-vi.mock("./TrackingPanel", () => ({
-  TrackingPanel: () => <div>Project tracking work</div>,
+vi.mock("./LatestDocuments", () => ({
+  LatestDocuments: () => <div>Project tracking work</div>,
 }));
 vi.mock("./FolderTree", () => ({
   FolderTree: () => <div>Folder selection</div>,
@@ -143,7 +143,7 @@ it("reports missing and inaccessible documents after folder recovery", () => {
   expect(
     screen.getByText(/1 files missing · 1 files inaccessible/),
   ).toBeInTheDocument();
-  expect(screen.getByText("Project cloud work")).toBeInTheDocument();
+  expect(screen.queryByText("Project cloud work")).not.toBeInTheDocument();
   expect(screen.getByText("Project tracking work")).toBeInTheDocument();
 });
 

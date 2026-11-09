@@ -48,11 +48,7 @@ pub(crate) fn uploads_paused_for_power(db: &rusqlite::Connection, saver: bool) -
 pub fn battery_saver_active() -> bool {
     #[cfg(all(windows, not(test)))]
     {
-        use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
-        let mut status = SYSTEM_POWER_STATUS::default();
-        // The API fills this owned structure; a failed/unknown probe never
-        // invents a pause. Query the OS, without WMI or a helper process.
-        unsafe { GetSystemPowerStatus(&mut status) != 0 && status.SystemStatusFlag == 1 }
+        crate::power::saving_energy()
     }
     #[cfg(any(not(windows), test))]
     {
@@ -81,10 +77,35 @@ pub fn parse_route(url: &str) -> Option<Value> {
 }
 pub fn show(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        webview_memory(&w, false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+pub fn webview_memory(window: &tauri::WebviewWindow, low: bool) {
+    #[cfg(windows)]
+    let _ = window.with_webview(move |view| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
+        };
+        use windows::core::Interface;
+        // Best effort on older WebView2 runtimes. Native monitoring and Drive
+        // publication continue while the hidden renderer conserves memory.
+        unsafe {
+            if let Ok(core) = view
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.cast::<ICoreWebView2_19>())
+            {
+                let _ = core.SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(
+                    i32::from(low),
+                ));
+            }
+        }
+    });
+    #[cfg(not(windows))]
+    let _ = (window, low);
 }
 pub fn navigate(app: &tauri::AppHandle, route: Value) {
     if let Some(r) = app.try_state::<Runtime>() {
@@ -102,6 +123,29 @@ pub fn launch(app: &tauri::AppHandle, args: &[String]) {
         navigate(app, route);
     } else if !args.iter().any(|a| a == "--background") {
         show(app);
+    } else if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            webview_memory(&window, true);
+        }
+    }
+}
+pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        request_close(window.app_handle(), "close");
+    }
+    if matches!(
+        event,
+        tauri::WindowEvent::Focused(true) | tauri::WindowEvent::Resized(_)
+    ) {
+        if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+            let low =
+                window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true);
+            webview_memory(&webview, low);
+        }
+    }
+    if matches!(event, tauri::WindowEvent::Focused(true)) {
+        let _ = window.app_handle().emit("desktop-changed", ());
     }
 }
 pub fn request_close(app: &tauri::AppHandle, action: &str) {
@@ -322,6 +366,35 @@ pub(crate) fn problem_signature(project: &Value) -> Option<String> {
     );
     (signature != "|||0").then_some(signature)
 }
+pub(crate) fn project_problems(db: &rusqlite::Connection) -> Result<Vec<Value>> {
+    if !crate::latest_tracking::enabled(db) {
+        return cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain') AND (j.error IS NULL OR instr(j.error,?1)=0)) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[&cloud::SOURCE_BUSY]);
+    }
+    let mut projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,dp.enabled drive_enabled,dp.error drive_error,ds.blocked drive_blocked,COALESCE((SELECT error FROM drive_cleanup WHERE project_id=p.id),(SELECT COALESCE(error,'An older-file safety move has not finished.') FROM drive_recycle WHERE project_id=p.id AND state IN ('prepared','quarantined','bin_pending','attention') LIMIT 1)) cleanup_error FROM projects p LEFT JOIN drive_projects dp ON dp.project_id=p.id LEFT JOIN drive_schedule ds ON ds.project_id=p.id WHERE p.removed_at IS NULL",&[])?;
+    for project in &mut projects {
+        let id = cloud::s(project, "id");
+        let enabled = cloud::n(project, "drive_enabled") == 1;
+        let failed = if enabled {
+            let blocked = crate::path_selection::blocked_documents(db, id)?;
+            cloud::rows(db,"SELECT dd.document_id FROM drive_documents dd JOIN documents d ON d.id=dd.document_id WHERE dd.project_id=?1 AND dd.state IN ('offline','needs_attention') AND d.tracking_state='tracked' AND d.merged_into IS NULL",&[&id])?.into_iter().filter(|d|!blocked.contains(cloud::s(d,"document_id"))).count()
+        } else {
+            0
+        };
+        let remote = if enabled && (failed > 0 || !cloud::s(project, "drive_blocked").is_empty()) {
+            cloud::s(project, "drive_error")
+        } else {
+            ""
+        };
+        let errors = [remote, cloud::s(project, "cleanup_error")]
+            .into_iter()
+            .filter(|e| !e.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        project["cloud_error"] = json!(errors);
+        project["failed"] = json!(failed);
+    }
+    Ok(projects)
+}
 fn background_tick(
     db: &rusqlite::Connection,
     app: &tauri::AppHandle,
@@ -347,7 +420,7 @@ fn background_tick(
             "Pause uploads"
         });
     }
-    let projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain') AND (j.error IS NULL OR instr(j.error,?1)=0)) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[&cloud::SOURCE_BUSY])?;
+    let projects = project_problems(db)?;
     let problems = projects
         .iter()
         .filter(|p| problem_signature(p).is_some())
@@ -560,12 +633,16 @@ pub async fn desktop_complete(
         .unwrap_or(true)
     };
     if action == "close" && keep && app.state::<Runtime>().tray_ready.load(Ordering::Relaxed) {
-        app.get_webview_window("main")
-            .ok_or("Window unavailable")?
-            .hide()
-            .map_err(|e| e.to_string())?;
+        let window = app.get_webview_window("main").ok_or("Window unavailable")?;
+        window.hide().map_err(|e| e.to_string())?;
+        webview_memory(&window, true);
     } else {
         app.state::<crate::monitor::Monitor>().request_stop();
+        app.state::<crate::drive_commands::DriveRuntime>()
+            .cancel_pending();
+        let drive = app.state::<crate::drive_publication_commands::Publisher>();
+        drive.request_stop();
+        let drive_gate = drive.gate.clone();
         let runtime = app.state::<crate::cloud_commands::CloudRuntime>();
         runtime.request_stop();
         let gate = runtime.gate.clone();
@@ -585,6 +662,7 @@ pub async fn desktop_complete(
         // A stop guard prevents the worker from sending any subsequent request.
         tauri::async_runtime::spawn_blocking(move || {
             let _gate = gate.lock().unwrap_or_else(|e| e.into_inner());
+            let _drive_gate = drive_gate.lock().unwrap_or_else(|e| e.into_inner());
             let _registry = store.0.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(worker) = worker {
                 let _ = worker.join();

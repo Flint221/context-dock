@@ -165,7 +165,7 @@ function TreeRow({
           <button
             className="danger"
             aria-label={`Forget missing ${node.path}`}
-            title="Review removal of this missing file and its saved local revisions"
+            title="Stop tracking this missing path while keeping its saved material"
             disabled={disabled || forgetDisabled}
             onClick={() => forget(node.path)}
           >
@@ -324,7 +324,7 @@ export function FolderTree({
         setDraft(current.exclusions);
       }
       setNotice(
-        "Folder selection saved. Local history retained; cloud index changes run in the background. Excluded folders also cover future files.",
+        "Folder selection saved. Selected files are monitored and published when enabled. Excluded folders also cover future files.",
       );
       try {
         await changed();
@@ -369,7 +369,7 @@ export function FolderTree({
   };
   async function previewForget(path: string) {
     setBusy(true);
-    setOperationMessage("Checking the missing file and its local history…");
+    setOperationMessage("Checking the missing file…");
     setError("");
     setNotice("");
     try {
@@ -390,7 +390,7 @@ export function FolderTree({
       return;
     }
     setBusy(true);
-    setOperationMessage("Removing the missing file and its local history…");
+    setOperationMessage("Stopping tracking for the missing file…");
     setError("");
     try {
       const warnings = await registry.forgetMissing(
@@ -400,7 +400,7 @@ export function FolderTree({
       );
       setForgetPlan(null);
       setNotice(
-        "Missing file and its local history removed from ContextDock. Source files, archives, backups and other documents were not changed.",
+        "Missing path excluded from tracking. Existing files, archives and cloud copies are kept.",
       );
       if (warnings.length) setError(warnings.join(" "));
       try {
@@ -426,27 +426,24 @@ export function FolderTree({
             <Folder size={18} /> Folder structure and selection
           </h2>
           <p>
-            Checkboxes control tracking and this project's cloud index. Changes
-            take effect only after Save changes.
+            Checkboxes control monitoring and Drive publication. Changes take
+            effect only after Save changes.
           </p>
         </div>
         {dirty && <span className="badge warning">Unsaved changes</span>}
       </div>
       <p>
         Unchecking a folder excludes everything inside it, including future
-        files. Local files, snapshots and saved history remain. Discovery still
-        lists supported documents; uploaded cloud Files may remain available for
-        reuse after their index entries are removed.
+        files. Local files and existing cloud copies stay in place.
       </p>
       <p>
         New documents are excluded until selected and saved. Checked paths
-        follow your Tracking and Cloud sync settings.
+        follow your monitoring and Drive publication settings.
       </p>
       <p>
         Deleted a file intentionally? Use Forget beside its Missing badge to
-        review permanent removal of its discovery record and saved local
-        revisions. Ignore only excludes it. Save or discard checkbox changes
-        before forgetting a file.
+        stop tracking that missing path. Its saved material and cloud copy are
+        kept. Save or discard checkbox changes first.
       </p>
       {error && <p role="alert">{error}</p>}
       {unavailable && (
@@ -468,12 +465,6 @@ export function FolderTree({
           {warning}
         </p>
       ))}
-      {!!view?.cloudPending && (
-        <p className="warning">
-          {view.cloudPending} cloud index removals are still pending. Check
-          Cloud sync for failures or retries; local exclusion is already saved.
-        </p>
-      )}
       {root && (
         <ul className="folder-tree" aria-label="Project folder structure">
           <TreeRow
@@ -523,19 +514,9 @@ export function FolderTree({
             <strong>{forgetPlan.path}</strong>
           </p>
           <p>
-            Remove this missing file from discovery, pending approvals and local
-            history? This permanently deletes {forgetPlan.revisionCount}{" "}
-            captured local revisions for this exact path. Other versions in its
-            document family stay saved. This cannot be undone in ContextDock.
-          </p>
-          {forgetPlan.revisionCount === 0 && (
-            <p>This file has no captured local history to delete.</p>
-          )}
-          <p>
-            Source files, archive folders, backups, saved chats and reports are
-            not deleted. Cloud data is not deleted by this action. If the file
-            appears again, it will be discovered again under the saved approval
-            rules.
+            Stop tracking this missing path? Its existing files, archives, saved
+            chats and cloud copies are kept. If it reappears, include it in the
+            folder selection to resume with the same document identity.
           </p>
           {forgetPlan.blockers.map((message) => (
             <p role="alert" className="error-text" key={message}>
@@ -560,7 +541,7 @@ export function FolderTree({
               disabled={busy || dirty || forgetPlan.blockers.length > 0}
               onClick={() => void forgetMissing()}
             >
-              {busy ? "Removing…" : "Forget file and local history"}
+              {busy ? "Removing…" : "Stop tracking missing file"}
             </button>
           </div>
         </Modal>

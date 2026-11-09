@@ -8,12 +8,10 @@ import {
 } from "react";
 import {
   AlertTriangle,
-  Activity,
   Inbox,
   Check,
   Folder,
   FolderOpen,
-  LayoutDashboard,
   Plus,
   RefreshCw,
   Settings,
@@ -24,7 +22,6 @@ import type { Project, Snapshot } from "./types";
 
 import { AddProject } from "./components/AddProject";
 import { Projects } from "./components/Projects";
-import { Dashboard } from "./components/Dashboard";
 import { SettingsView } from "./components/Settings";
 import { ProjectTabs, type ProjectTab } from "./components/ProjectTabs";
 import { ProjectDetails } from "./components/ProjectDetails";
@@ -47,7 +44,7 @@ export default function App() {
 }
 function Workspace() {
   const guard = useUnsavedChanges();
-  const [page, setPage] = useState<Page>("dashboard");
+  const [page, setPage] = useState<Page>("projects");
   const [data, setData] = useState<Snapshot>({
     projects: [],
     documents: [],
@@ -210,10 +207,8 @@ function Workspace() {
           <nav aria-label="Main navigation">
             {(
               [
-                { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
                 { id: "projects", label: "Projects", Icon: Folder },
                 { id: "review", label: "Pending approvals", Icon: Inbox },
-                { id: "processes", label: "Current processes", Icon: Activity },
                 { id: "settings", label: "Settings", Icon: Settings },
               ] as const
             ).map(({ id, label, Icon }) => (
@@ -244,7 +239,8 @@ function Workspace() {
           <div className="sidebar-footer">
             <ShieldCheck size={17} />
             <span>
-              Local by design<small>Local history, optional cloud AI.</small>
+              Local by design
+              <small>Latest files, optional Drive publishing.</small>
             </span>
           </div>
         </aside>
@@ -302,7 +298,7 @@ function Workspace() {
                 desktopStatus.pauseOnBatterySaver !== false &&
                 !desktopStatus.uploadsManuallyPaused
                   ? "Windows battery saver has paused new uploads. They resume automatically when battery saver turns off."
-                  : "Background uploads are paused. Tracking, indexing checks and confirmed removals continue."}
+                  : "Uploads are paused. Local file monitoring continues."}
                 <button
                   onClick={() =>
                     desktopStatus.batterySaverActive &&
@@ -369,11 +365,11 @@ function Workspace() {
                         : page === "settings"
                           ? "Make ContextDock feel at home."
                           : page === "review"
-                            ? "Review new files before they join tracking and cloud indexing."
+                            ? "Review new files before they join tracking and Drive publication."
                             : page === "processes"
                               ? "See what’s running locally. Preview it, identify it, and stop it when you’re done."
                               : project
-                                ? "Track document history and ask about your synced files."
+                                ? "Track the latest documents and their verified Drive copies."
                                 : "Existing folders. Independent documents. One place to find them."}
                     </p>
                   </div>
@@ -430,6 +426,7 @@ function Workspace() {
                 />
               ) : page === "settings" ? (
                 <SettingsView
+                  openTools={() => guard.request(() => setPage("processes"))}
                   theme={data.theme}
                   busy={busy}
                   changeTheme={(theme) => void run(() => registry.theme(theme))}
@@ -494,21 +491,17 @@ function Workspace() {
                   showProject={showProject}
                 />
               ) : (
-                <Dashboard
-                  data={data}
+                <Projects
+                  projects={data.projects}
                   busy={busy}
                   showProject={showProject}
-                  viewAll={() => {
-                    setPage("projects");
-                    setSelected(null);
-                  }}
                 />
               )}
             </div>
           </div>
           <footer>
             <span>ContextDock {version}</span>
-            <span>Local snapshots · Source archival only when enabled</span>
+            <span>Latest files · Optional verified Drive publication</span>
           </footer>
         </main>
         {adding && (

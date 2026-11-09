@@ -1,0 +1,15 @@
+# ContextDock latest-file workflow
+
+Step 4 replaces the active history/indexing workflow with projects, saved folder selection, latest document families and optional Drive publication. Projects is the initial page. A project has Files & tracking and Drive publishing tabs. Monitoring, review of ambiguous families, missing-folder recovery and explicit exclusions remain available. Current processes is an optional tool in Settings.
+
+The latest list presents one row per selected document family, its current filename and publication state. A saved upload receipt is shown as queued when its hash or filename no longer matches the tracked local generation. Deselected, ignored and merged families do not appear as current publication work. Cloud status failure does not prevent local tracking from loading.
+
+Ask AI, OpenAI connection controls, vector-store publication, comparisons, snapshot browsing and archive controls are removed from the active interface and native command registration. Legacy implementations remain for historical regression fixtures and data compatibility, but their background workers do not start. The old CloudRuntime is only a passive mutation gate.
+
+Schema 16 disables legacy indexing and archival intents and pauses unfinished legacy capture/archive/restore operations without deleting their payloads. Existing snapshots, source archives, chats and cloud resources are retained. Current monitoring hashes stable source files in bounded buffers and records metadata without creating new immutable copies or moving source files. Repeated saves of the same filename version update its metadata row. New numbered versions retain their source identities and group under the existing family rules.
+
+Stopping tracking of a confirmed missing path now preserves its source/document IDs and recorded versions, saves an exclusion, and hides that path from current lists. A returning file can reuse its identity. Removing a project pauses publication and unregisters it; it does not remove local or remote content. Registering the same folder again starts with monitoring and publication off.
+
+Validation: 186 frontend tests and 308 Rust tests passed; six native/provider integrations are opt-in and excluded from the default Rust run. ESLint, TypeScript/production frontend build, Rust formatting and Clippy with warnings denied passed. Added checks exercise metadata-only repeated saves, simultaneous numbered versions, actual schema-15 upgrade preservation, missing-path identity preservation, latest-list states, explicit family decisions and safe project removal. Historical fixtures explicitly select the legacy policy to continue testing retained recovery code; production migration selects the latest-file policy.
+
+The production frontend bundle is 313.89 kB (97.07 kB gzip). Native pilot, resource measurements, app-owned live OAuth/Drive acceptance and optional recycling remain subsequent work. These checks used disposable data; the installed application and its database were not upgraded.

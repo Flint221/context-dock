@@ -160,6 +160,9 @@ impl Registry {
         })
     }
     pub fn preview_forget(&mut self, project: &str, path: &str) -> Result<Plan> {
+        if crate::latest_tracking::enabled(&self.db) {
+            return self.latest_forget_plan(project, path);
+        }
         Ok(self.forget_review(project, path)?.plan)
     }
     pub fn forget_missing(
@@ -168,6 +171,9 @@ impl Registry {
         path: &str,
         token: &str,
     ) -> Result<Vec<String>> {
+        if crate::latest_tracking::enabled(&self.db) {
+            return self.latest_forget(project, path, token);
+        }
         let review = self.forget_review(project, path)?;
         if review.plan.token != token {
             return Err("This file or its history changed. Review Forget missing file again. Nothing was removed.".into());

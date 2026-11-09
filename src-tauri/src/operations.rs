@@ -221,7 +221,7 @@ fn enqueue_archive(
     db.execute("INSERT OR IGNORE INTO operations(id,project_id,document_id,dedupe_key,kind,payload,created_at,updated_at) VALUES(?1,?2,?3,?4,'archive',?5,?6,?6)",params![id,project,document,key,encode(&plan)?,models::now()]).map_err(error)?;
     Ok(())
 }
-fn activate(
+pub(crate) fn activate(
     db: &Connection,
     source: &Source,
     version: &str,
@@ -266,6 +266,9 @@ impl Registry {
             return storage::discard_stage(&self.store, &staged.temporary);
         }
         let group = crate::versioning::effective(&self.db, &source.document_id, &source.name)?;
+        if crate::latest_tracking::enabled(&self.db) {
+            return self.capture_metadata(source, staged, reason);
+        }
         let existing = crate::versioning::content_match(
             &self.db,
             &source.document_id,
@@ -613,6 +616,11 @@ impl Registry {
         drop(q);
         let mut errors = vec![];
         for (id, kind, payload, state) in ops {
+            if crate::latest_tracking::enabled(&self.db)
+                && ["archive", "restore"].contains(&kind.as_str())
+            {
+                continue;
+            }
             if !tracking && kind != "restore" {
                 continue;
             }

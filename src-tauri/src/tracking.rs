@@ -20,6 +20,7 @@ impl Registry {
         archive: bool,
         _selected: Vec<String>,
     ) -> Result<()> {
+        let archive = archive && !crate::latest_tracking::enabled(&self.db);
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
         let (was_enabled, was_archive, initialized) = self.tracking_flags(project)?;
@@ -110,7 +111,8 @@ impl Registry {
                         params![matching::stem(&source.name).display, source.document_id],
                     )
                     .map_err(error)?;
-                let result = storage::stage(root, &source.relative, &self.store)
+                let result = self
+                    .stage_tracking(root, &source.relative)
                     .and_then(|stage| self.capture(&source, stage, "initial_tracking", false));
                 if let Err(e) = result {
                     self.activity(
@@ -131,7 +133,7 @@ impl Registry {
             let errors = self.recover_operations(project, true)?;
             self.set_tracking_error(project, &errors)?;
         }
-        let errors = self.finish_archival_intent(project)?;
+        let errors = self.finish_tracking_archival(project)?;
         if !errors.is_empty() {
             self.set_tracking_error(project, &errors)?;
         }
@@ -211,10 +213,11 @@ impl Registry {
                 )
                 .map_err(error)?;
         }
-        let mut problems = self.finish_archival_intent(project)?;
+        let mut problems = self.finish_tracking_archival(project)?;
         problems.extend(self.recover_operations(project, full)?);
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         self.reconcile_relocations(project, root, &path_rules)?;
+        self.retire_version_rename_paths(project, root, &path_rules)?;
         path_rules = crate::path_selection::rules(&self.db, project)?;
         let mut sources = self
             .source_ids(project)?
@@ -317,7 +320,7 @@ impl Registry {
             {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
@@ -384,7 +387,10 @@ impl Registry {
             if !crate::path_selection::permits(&path_rules, &source.relative) {
                 continue;
             }
-            if source.disposition == "ignored" || source.disposition == "archived" {
+            if matches!(
+                source.disposition.as_str(),
+                "ignored" | "archived" | "renamed"
+            ) {
                 continue;
             }
             let changed =
@@ -398,7 +404,7 @@ impl Registry {
             if !changed {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(s) => s,
                 Err(e) => {
                     self.activity(
@@ -505,7 +511,7 @@ impl Registry {
             }
         }
         problems.extend(self.recover_operations(project, false)?);
-        problems.extend(self.finish_archival_intent(project)?);
+        problems.extend(self.finish_tracking_archival(project)?);
         let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state NOT IN ('done','cancelled','restored')",[project],|r|r.get(0)).map_err(error)?;
         if blocked > 0 && problems.is_empty() {
             problems.push("A journal operation needs review or an explicit retry below.".into());
@@ -537,8 +543,12 @@ impl Registry {
             return Ok(());
         }
         let blocked = crate::path_selection::blocked_documents(&self.db, project)?;
-        for id in self.source_ids(project)? {
-            let source = self.source(&id)?;
+        let observed = self
+            .source_ids(project)?
+            .iter()
+            .map(|id| self.source(id))
+            .collect::<Result<Vec<_>>>()?;
+        for source in &observed {
             if source.disposition != "discovered" || source.last_hash.is_some() {
                 continue;
             }
@@ -575,8 +585,19 @@ impl Registry {
                 } else {
                     old.disposition == "tracked"
                 };
+                let numeric_rename = crate::latest_tracking::enabled(&self.db)
+                    && old.disposition == "tracked"
+                    && crate::latest_tracking::newer_same_path_family(&old, source)
+                    && observed
+                        .iter()
+                        .filter(|s| {
+                            s.disposition == "discovered"
+                                && crate::latest_tracking::newer_same_path_family(&old, s)
+                        })
+                        .count()
+                        == 1;
                 // A partial scan or inaccessible old path cannot prove absence.
-                if same_version
+                if (same_version || numeric_rename)
                     && std::fs::symlink_metadata(root.join(&old.relative))
                         .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
                 {
@@ -586,7 +607,7 @@ impl Registry {
             if candidates.is_empty() {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(staged) => staged,
                 Err(_) => continue,
             };
@@ -606,8 +627,8 @@ impl Registry {
                 tx.execute("UPDATE documents SET active_source_id=NULL,tracking_state='merged',merged_into=?1 WHERE id=?2",params![old.document_id,source.document_id]).map_err(error)?;
                 tx.execute("DELETE FROM source_files WHERE id=?1", [&source.id])
                     .map_err(error)?;
-                tx.execute("UPDATE source_files SET name=?1,relative_path=?2,path_key=?3,size=?4,modified_at=?5,last_observed=?6,status='available',hashed_stamp=?5,hashed_size=?4 WHERE id=?7",
-                    params![source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now(),old.id]).map_err(error)?;
+                tx.execute("UPDATE source_files SET name=?1,relative_path=?2,path_key=?3,size=?4,modified_at=?5,last_observed=?6,status='available',hashed_stamp=CASE WHEN ?8 THEN NULL ELSE ?5 END,hashed_size=?4 WHERE id=?7",
+                    params![source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now(),old.id,crate::versioning::key(&old.name)!=crate::versioning::key(&source.name)]).map_err(error)?;
                 tx.execute(
                     "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
                     params![project, path],
@@ -822,7 +843,7 @@ impl Registry {
             return Err("Enable tracking before assigning or capturing a document.".into());
         }
         let root = self.path(project)?;
-        let stage = storage::stage(Path::new(&root), &source.relative, &self.store)?;
+        let stage = self.stage_tracking(Path::new(&root), &source.relative)?;
         let target = match action {
             "assign" => {
                 let target = target.ok_or("Choose a document family.")?;

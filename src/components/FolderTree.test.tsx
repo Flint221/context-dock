@@ -433,7 +433,9 @@ it("forgets a missing test file only after confirmation and removes its row", as
   let dialog = await screen.findByRole("dialog", {
     name: "Forget missing file?",
   });
-  expect(dialog).toHaveTextContent("no captured local history");
+  expect(dialog).toHaveTextContent(
+    "Its existing files, archives, saved chats and cloud copies are kept",
+  );
   expect(registry.forgetMissing).not.toHaveBeenCalled();
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(screen.getByText("Test_v1.md")).toBeInTheDocument();
@@ -443,7 +445,7 @@ it("forgets a missing test file only after confirmation and removes its row", as
   dialog = await screen.findByRole("dialog", { name: "Forget missing file?" });
   await user.click(
     within(dialog).getByRole("button", {
-      name: "Forget file and local history",
+      name: "Stop tracking missing file",
     }),
   );
   await waitFor(() =>
@@ -489,10 +491,12 @@ it("shows retained-history blockers and prevents permanent removal", async () =>
     name: "Forget missing file?",
   });
   expect(within(dialog).getByRole("alert")).toHaveClass("error-text");
-  expect(dialog).toHaveTextContent("3 captured local revisions");
+  expect(dialog).toHaveTextContent(
+    "Cloud references require verified cleanup first.",
+  );
   expect(
     within(dialog).getByRole("button", {
-      name: "Forget file and local history",
+      name: "Stop tracking missing file",
     }),
   ).toBeDisabled();
   expect(registry.forgetMissing).not.toHaveBeenCalled();
@@ -511,7 +515,7 @@ it("keeps the confirmation and missing row when the backend rejects a stale revi
   });
   await user.click(
     within(dialog).getByRole("button", {
-      name: "Forget file and local history",
+      name: "Stop tracking missing file",
     }),
   );
   expect(await within(dialog).findByRole("alert")).toHaveTextContent(

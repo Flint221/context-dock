@@ -10,3 +10,5 @@ src-tauri/target/
 .DS_Store
 *.tsbuildinfo
 src-tauri/gen/
+client_secret*.json
+ContextDock_OAuth_Client_v*.json

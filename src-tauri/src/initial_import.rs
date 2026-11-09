@@ -107,10 +107,12 @@ impl Registry {
                     break;
                 }
                 let expected_hash = if let Some((hash, snapshot, _)) = versions.first() {
-                    let snapshot = storage::checked(&self.store, snapshot, false)?;
-                    storage::verify(&snapshot.path, hash)?;
+                    if !snapshot.starts_with("metadata/") {
+                        let snapshot = storage::checked(&self.store, snapshot, false)?;
+                        storage::verify(&snapshot.path, hash)?;
+                    }
                     let root = self.path(project)?;
-                    let staged = storage::stage(Path::new(&root), &s.relative, &self.store)?;
+                    let staged = self.stage_tracking(Path::new(&root), &s.relative)?;
                     let same = staged.hash == *hash;
                     storage::discard_stage(&self.store, &staged.temporary)?;
                     if !same {
@@ -208,7 +210,8 @@ impl Registry {
                 return Err(format!("Import paused by folder selection: {}. Include it and Save changes to continue.",source.relative));
             }
             let root = self.path(&source.project_id)?;
-            let staged = storage::stage(Path::new(&root), &source.relative, &self.store)
+            let staged = self
+                .stage_tracking(Path::new(&root), &source.relative)
                 .map_err(|e| format!("{}: {e}", source.relative))?;
             if item
                 .expected_hash

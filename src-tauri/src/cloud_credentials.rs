@@ -11,13 +11,13 @@ pub fn validate(key: String) -> Result<Zeroizing<String>, String> {
 mod windows {
     use super::*;
     use windows_sys::Win32::Security::Credentials::*;
-    fn target() -> Vec<u16> {
-        "ContextDock.OpenAI\0".encode_utf16().collect()
+    fn target(name: &str) -> Vec<u16> {
+        name.encode_utf16().chain(Some(0)).collect()
     }
-    pub fn read() -> Result<Option<Zeroizing<String>>, String> {
+    pub fn read_named(name: &str) -> Result<Option<Zeroizing<String>>, String> {
         let mut credential = std::ptr::null_mut();
         unsafe {
-            if CredReadW(target().as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) == 0 {
+            if CredReadW(target(name).as_ptr(), CRED_TYPE_GENERIC, 0, &mut credential) == 0 {
                 if windows_sys::Win32::Foundation::GetLastError() == 1168 {
                     return Ok(None);
                 }
@@ -34,8 +34,11 @@ mod windows {
             result.map(Some)
         }
     }
-    pub fn save(key: &str) -> Result<(), String> {
-        let mut name = target();
+    pub fn save_named(target_name: &str, key: &str) -> Result<(), String> {
+        if key.len() > CRED_MAX_CREDENTIAL_BLOB_SIZE as usize {
+            return Err("The credential exceeds the Windows vault size limit.".into());
+        }
+        let mut name = target(target_name);
         let c = CREDENTIALW {
             Type: CRED_TYPE_GENERIC,
             TargetName: name.as_mut_ptr(),
@@ -49,8 +52,8 @@ mod windows {
         }
         Ok(())
     }
-    pub fn delete() -> Result<(), String> {
-        if unsafe { CredDeleteW(target().as_ptr(), CRED_TYPE_GENERIC, 0) } == 0
+    pub fn delete_named(name: &str) -> Result<(), String> {
+        if unsafe { CredDeleteW(target(name).as_ptr(), CRED_TYPE_GENERIC, 0) } == 0
             && unsafe { windows_sys::Win32::Foundation::GetLastError() } != 1168
         {
             return Err("Windows Credential Manager could not remove the key.".into());
@@ -61,14 +64,23 @@ mod windows {
 #[cfg(windows)]
 pub use windows::*;
 #[cfg(not(windows))]
-pub fn read() -> Result<Option<Zeroizing<String>>, String> {
+pub fn read_named(_: &str) -> Result<Option<Zeroizing<String>>, String> {
     Ok(None)
 }
 #[cfg(not(windows))]
-pub fn save(_: &str) -> Result<(), String> {
+pub fn save_named(_: &str, _: &str) -> Result<(), String> {
     Err("Windows Credential Manager is required.".into())
 }
 #[cfg(not(windows))]
-pub fn delete() -> Result<(), String> {
+pub fn delete_named(_: &str) -> Result<(), String> {
     Ok(())
+}
+pub fn read() -> Result<Option<Zeroizing<String>>, String> {
+    read_named("ContextDock.OpenAI")
+}
+pub fn save(key: &str) -> Result<(), String> {
+    save_named("ContextDock.OpenAI", key)
+}
+pub fn delete() -> Result<(), String> {
+    delete_named("ContextDock.OpenAI")
 }

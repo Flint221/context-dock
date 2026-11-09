@@ -186,7 +186,7 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                                 Ok(w) => {
                                     safety_scans.insert(
                                         id.clone(),
-                                        Instant::now() + Duration::from_secs(3600),
+                                        Instant::now() + Duration::from_secs(300),
                                     );
                                     watches.insert(id.clone(), w);
                                     retry_watch.remove(&id);
@@ -223,7 +223,7 @@ fn run(registry: Shared, stop: Arc<AtomicBool>, changed: Arc<dyn Fn(&str) + Send
                             pending
                                 .entry(id.clone())
                                 .or_insert_with(|| Pending::new(false));
-                            safety_scans.insert(id, Instant::now() + Duration::from_secs(3600));
+                            safety_scans.insert(id, Instant::now() + Duration::from_secs(300));
                         }
                     }
                 }

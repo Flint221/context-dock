@@ -547,7 +547,7 @@ impl Fixture {
             "# Master Context\nProject goal: local indexing.\n",
         )
         .unwrap();
-        let mut r = Registry::open(&store.join("test.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&store.join("test.db")).unwrap();
         let id = r.add("Disposable", root.to_str().unwrap()).unwrap();
         let sources = r.source_ids(&id).unwrap();
         r.configure_tracking(&id, true, false, sources).unwrap();
@@ -894,7 +894,7 @@ fn unified_selection_upgrade_preserves_choices_and_syncs_missing_selected_captur
         .unwrap();
     let db = f.r.store.join("test.db");
     drop(f.r);
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     assert_eq!(n(&cloud::project(&f.r.db, &f.id).unwrap(), "auto_sync"), 1);
     assert!(crate::path_selection::allowed(&f.r.db, &f.id, "Selected.md").unwrap());
     assert!(!crate::path_selection::allowed(&f.r.db, &f.id, "Excluded.md").unwrap());
@@ -936,7 +936,7 @@ fn schema_two_database_migrates_without_cloud_opt_in() {
         db.execute("INSERT INTO projects(id,name,path,path_key,created_at,tracking_enabled,archive_enabled) VALUES('old','Old','C:/old','old','now',1,1)",[]).unwrap();
         db.pragma_update(None, "user_version", 2).unwrap();
     }
-    let r = Registry::open(&path).unwrap();
+    let r = Registry::open_legacy_fixture(&path).unwrap();
     assert_eq!(n(&cloud::project(&r.db, "old").unwrap(), "enabled"), 0);
     let flags: (i64, i64) =
         r.db.query_row(
@@ -945,7 +945,7 @@ fn schema_two_database_migrates_without_cloud_opt_in() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!(flags, (1, 1));
+    assert_eq!(flags, (1, 0));
 }
 #[test]
 fn credentials_are_validated_without_echoing_input() {
@@ -1194,7 +1194,7 @@ fn selection_removal_verifies_acknowledgement_and_absence_and_survives_restart_f
             }
         );
         let db = f.r.store.join("test.db");
-        f.r = Registry::open(&db).unwrap();
+        f.r = Registry::open_legacy_fixture(&db).unwrap();
         assert!(
             !cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap()
         );
@@ -1512,7 +1512,7 @@ fn global_upload_pause_survives_restart_and_resume_preserves_project_settings() 
     let before = cloud::project(&f.r.db, &f.id).unwrap();
     f.sync(&api);
     assert!(api.0.borrow().calls.is_empty());
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert!(crate::desktop::uploads_paused(&f.r.db));
     assert!(!cloud_commands::needed(&f.r.db, &cloud::project(&f.r.db, &f.id).unwrap()).unwrap());
     crate::review::set_preference(&f.r.db, "desktop.uploads_paused", false).unwrap();
@@ -3029,7 +3029,7 @@ fn project_removal_handles_missing_resources_without_downloading_assistants_file
         assert!(api.0.borrow().store.is_none());
         assert!(api.0.borrow().files.is_empty());
         assert!(f.r.snapshot().unwrap().projects.is_empty());
-        assert!(Registry::open(&f.r.store.join("test.db"))
+        assert!(Registry::open_legacy_fixture(&f.r.store.join("test.db"))
             .unwrap()
             .snapshot()
             .unwrap()
@@ -3324,7 +3324,7 @@ fn removal_requires_explicit_retention_or_verified_cloud_cleanup_and_keeps_local
     cloud_cleanup::run(&mut f.r.db, &f.id, &api, "bound").unwrap();
     f.r.remove_with_cloud_choice(&f.id, false).unwrap();
     assert_local_preserved(&f.r);
-    assert_local_preserved(&Registry::open(&f.r.store.join("test.db")).unwrap());
+    assert_local_preserved(&Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap());
     assert!(api.0.borrow().store.is_none());
     assert!(f.root.join("Master_Context.md").exists());
     assert_eq!(
@@ -3465,7 +3465,7 @@ fn schema_ten_upgrade_preserves_snapshot_and_cloud_references_and_allows_identic
     let installation = cloud::install(&f.r.db).unwrap();
     let bytes = fs::read(&f.r.versions(&f.doc).unwrap()[0].snapshot_path).unwrap();
     f.r.db.execute_batch("ALTER TABLE document_versions DROP COLUMN version_key; DROP INDEX version_content_lookup; CREATE UNIQUE INDEX legacy_content_unique ON document_versions(document_id,sha256); PRAGMA user_version=10;").unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert_eq!(
         cloud::rows(&f.r.db, "SELECT id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,archive_relative,reason FROM document_versions", &[]).unwrap(),
         before
@@ -3510,7 +3510,7 @@ fn revision_migration_rolls_back_when_old_history_references_are_invalid() {
             [&f.id],
         )
         .unwrap();
-    assert!(Registry::open(&db)
+    assert!(Registry::open_legacy_fixture(&db)
         .err()
         .unwrap()
         .contains("No migration changes were committed"));
@@ -3552,7 +3552,7 @@ fn delayed_old_version_removal_retries_after_restart_and_preserves_uploads_and_h
     assert_eq!(n(&view, "indexed"), 1);
     assert_eq!(api.0.borrow().files.len(), 2);
     let db = f.r.store.join("test.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     api.0.borrow_mut().ignore_association_delete = false;
     f.r.db
         .execute("UPDATE cloud_projects SET next_at=0", [])
@@ -3582,7 +3582,7 @@ fn acknowledged_removal_keeps_polling_beyond_failure_budget_and_recovers() {
         assert_eq!(api.0.borrow().calls.iter().filter(|c|c.starts_with("DELETE /vector_stores/vs_test/files/")).count(),1);
         assert_eq!(n(&cloud::view(&f.r.db,&f.id).unwrap(),"indexed"),1);
         assert!(crate::chat::authorize(&f.r.db,&f.id,"bound").unwrap_err().contains("still being removed"));
-        let path=f.r.store.join("test.db"); f.r=Registry::open(&path).unwrap();
+        let path=f.r.store.join("test.db"); f.r=Registry::open_legacy_fixture(&path).unwrap();
         api.0.borrow_mut().ignore_association_delete=false;
         f.r.db.execute("UPDATE cloud_projects SET next_at=0",[]).unwrap(); f.sync(&api);
         assert_eq!(s(&cloud::project(&f.r.db,&f.id).unwrap(),"status"),"up_to_date");
@@ -3644,7 +3644,7 @@ fn automatic_new_version_during_cloud_request_retries_with_fresh_selection() {
         let path = f.r.store.join("test.db");
         let racing = CaptureDuringRequest {
             api: &api,
-            registry: RefCell::new(Registry::open(&path).unwrap()),
+            registry: RefCell::new(Registry::open_legacy_fixture(&path).unwrap()),
             project: &f.id,
             root: &f.root,
             captured: std::cell::Cell::new(false),

@@ -10,7 +10,7 @@ fn migrations_persistence_rename_duplicate_and_safe_removal() {
     let db = temp.path().join("registry.db");
     let id;
     {
-        let mut r = Registry::open(&db).unwrap();
+        let mut r = Registry::open_legacy_fixture(&db).unwrap();
         id = r.add(" Custom name ", folder.to_str().unwrap()).unwrap();
         assert!(r
             .add("Duplicate", folder.join(".").to_str().unwrap())
@@ -19,7 +19,7 @@ fn migrations_persistence_rename_duplicate_and_safe_removal() {
         r.theme("dark").unwrap();
         assert!(r.rename(&id, " ").is_err());
     }
-    let r = Registry::open(&db).unwrap();
+    let r = Registry::open_legacy_fixture(&db).unwrap();
     let s = r.snapshot().unwrap();
     assert_eq!(s.projects[0].name, "Renamed");
     assert_eq!(s.theme, "dark");
@@ -28,7 +28,7 @@ fn migrations_persistence_rename_duplicate_and_safe_removal() {
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        13
+        18
     );
     r.remove(&id).unwrap();
     assert!(r.snapshot().unwrap().documents.is_empty());
@@ -65,7 +65,7 @@ fn recursive_discovery_identity_exclusions_and_read_only() {
         .modified()
         .unwrap();
     fs::create_dir(temp.path().join("app")).unwrap();
-    let mut r = Registry::open(&temp.path().join("app/r.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&temp.path().join("app/r.db")).unwrap();
     let id = r.add("Project", root.to_str().unwrap()).unwrap();
     let first = r.snapshot().unwrap();
     assert_eq!(first.documents.len(), 5);
@@ -122,7 +122,7 @@ fn recursive_discovery_identity_exclusions_and_read_only() {
 #[test]
 fn invalid_paths_and_names_are_rejected() {
     let t = tempdir().unwrap();
-    let mut r = Registry::open(&t.path().join("r.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&t.path().join("r.db")).unwrap();
     assert!(r.add("Test", "relative").is_err());
     assert!(r
         .add("Test", t.path().join("missing").to_str().unwrap())
@@ -140,7 +140,7 @@ fn windows_case_and_junction_safety() {
     let t = tempdir().unwrap();
     let root = t.path().join("Project");
     fs::create_dir(&root).unwrap();
-    let mut r = Registry::open(&t.path().join("r.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&t.path().join("r.db")).unwrap();
     r.add("Project", root.to_str().unwrap()).unwrap();
     assert!(r
         .add("Duplicate", &root.to_str().unwrap().to_uppercase())
@@ -180,7 +180,7 @@ fn inaccessible_subfolder_preserves_observations() {
     fs::create_dir_all(&blocked).unwrap();
     fs::write(blocked.join("private.md"), "unchanged").unwrap();
     fs::write(root.join("public.md"), "unchanged").unwrap();
-    let mut r = Registry::open(&t.path().join("r.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&t.path().join("r.db")).unwrap();
     let id = r.add("Test", root.to_str().unwrap()).unwrap();
     let output = Command::new("whoami").output().unwrap();
     assert!(output.status.success());
@@ -230,14 +230,14 @@ fn future_database_version_is_rejected_without_downgrading() {
     let t = tempdir().unwrap();
     let path = t.path().join("r.db");
     {
-        let r = Registry::open(&path).unwrap();
-        r.db.pragma_update(None, "user_version", 14).unwrap();
+        let r = Registry::open_legacy_fixture(&path).unwrap();
+        r.db.pragma_update(None, "user_version", 19).unwrap();
     }
-    assert!(Registry::open(&path).is_err());
+    assert!(Registry::open_legacy_fixture(&path).is_err());
     let c = rusqlite::Connection::open(path).unwrap();
     assert_eq!(
         c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        14
+        19
     );
 }

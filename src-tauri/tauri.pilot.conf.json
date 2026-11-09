@@ -1,0 +1,9 @@
+{
+  "productName": "ContextDock Pilot",
+  "identifier": "com.contextdock.pilot",
+  "app": {
+    "windows": [{ "title": "ContextDock Pilot", "visible": false, "width": 1180, "height": 780, "minWidth": 780, "minHeight": 560 }]
+  },
+  "bundle": { "active": false },
+  "plugins": { "deep-link": { "desktop": { "schemes": ["contextdock-pilot"] } } }
+}

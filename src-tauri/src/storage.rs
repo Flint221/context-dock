@@ -151,6 +151,48 @@ pub struct Staged {
     pub size: i64,
     pub modified: Option<String>,
 }
+struct UncommittedStage {
+    path: PathBuf,
+    retained: bool,
+}
+impl Drop for UncommittedStage {
+    fn drop(&mut self) {
+        if !self.retained {
+            // This is only the newly generated private temporary copy. It has
+            // not been returned or referenced by any operation journal yet.
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+pub fn stage_metadata(root: &Path, relative: &str) -> Result<Staged> {
+    let source = checked(root, relative, false)?;
+    let first = fs::metadata(&source.path).map_err(io)?;
+    let quiet = Duration::from_millis(if cfg!(test) { 5 } else { 650 });
+    if first
+        .modified()
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_none_or(|age| age < quiet)
+    {
+        std::thread::sleep(quiet);
+    }
+    let mut file = locked_read(&source.path, false)?;
+    let before = file.metadata().map_err(io)?;
+    if first.len() != before.len() || stamp(&first) != stamp(&before) {
+        return Err("Document is still being written; capture will be retried.".into());
+    }
+    let hash = hash(&mut file)?;
+    let after = file.metadata().map_err(io)?;
+    if before.len() != after.len() || stamp(&before) != stamp(&after) {
+        return Err("Document changed while being captured. Source was left intact.".into());
+    }
+    Ok(Staged {
+        temporary: String::new(),
+        hash,
+        size: i64::try_from(after.len()).map_err(|_| "Document is too large.")?,
+        modified: stamp(&after),
+    })
+}
 pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     let source = checked(root, relative, false)?;
     let first = fs::metadata(&source.path).map_err(io)?;
@@ -170,6 +212,10 @@ pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     }
     let temporary = format!("staging/{}.tmp", uuid::Uuid::new_v4());
     let target = checked(store, &temporary, true)?;
+    let mut cleanup = UncommittedStage {
+        path: target.path.clone(),
+        retained: false,
+    };
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -195,12 +241,14 @@ pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     }
     let hash = format!("{:x}", hasher.finalize());
     verify(&target.path, &hash)?;
-    Ok(Staged {
+    let staged = Staged {
         temporary,
         hash,
         size: i64::try_from(size).map_err(|_| "Document is too large.")?,
         modified: stamp(&after),
-    })
+    };
+    cleanup.retained = true;
+    Ok(staged)
 }
 pub fn snapshot_finalize(
     store: &Path,
@@ -262,6 +310,9 @@ pub fn snapshot_seal(store: &Path, temp: &str, final_relative: &str) -> Result<(
     Ok(())
 }
 pub fn discard_stage(store: &Path, temp: &str) -> Result<()> {
+    if temp.is_empty() {
+        return Ok(());
+    }
     let p = checked(store, temp, false)?;
     fs::remove_file(&p.path).map_err(io)
 }

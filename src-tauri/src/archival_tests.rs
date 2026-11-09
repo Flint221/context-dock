@@ -23,7 +23,7 @@ impl Fixture {
         ] {
             fs::write(root.join(name), bytes).unwrap();
         }
-        let mut r = Registry::open(&app.join("registry.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&app.join("registry.db")).unwrap();
         let project = r.add("Test", root.to_str().unwrap()).unwrap();
         let ids = r.source_ids(&project).unwrap();
         r.configure_tracking(&project, true, false, ids).unwrap();
@@ -153,7 +153,7 @@ fn restore_conflicts_keep_both_files_and_retry_after_restart_without_reenabling_
     )
     .unwrap();
     let db = f.r.store.join("registry.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     f.scan();
     assert_eq!(
         fs::read_to_string(f.root.join("RAP_Master_Context_v4.md")).unwrap(),
@@ -208,7 +208,7 @@ fn restore_recovers_a_crash_after_rename_before_metadata_commit() {
     assert!(f.r.tracking_view(&f.project).unwrap().error.is_some());
     f.r.db.execute_batch("DROP TRIGGER fail_restore;").unwrap();
     let db = f.r.store.join("registry.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     f.scan();
     assert!(f.r.tracking_view(&f.project).unwrap().operations.is_empty());
     assert_eq!(f.r.versions(&f.document).unwrap().len(), 3);

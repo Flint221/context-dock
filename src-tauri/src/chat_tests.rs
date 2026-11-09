@@ -26,7 +26,7 @@ impl Fixture {
             "# Project\nLOCAL-ONLY-COMPLETE-SNAPSHOT\nReact and SQLite.\n",
         )
         .unwrap();
-        let mut r = Registry::open(&app.join("test.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&app.join("test.db")).unwrap();
         let p = r.add("Test project", source.to_str().unwrap()).unwrap();
         let ids = r.source_ids(&p).unwrap();
         r.configure_tracking(&p, true, false, ids).unwrap();
@@ -254,7 +254,7 @@ fn timeout_and_restart_keep_history_without_automatic_replay() {
         chat::get(&f.r, &f.p, &f.chat).unwrap()["turns"][0]["state"],
         "uncertain"
     );
-    let reopened = Registry::open(&f.r.store.join("test.db")).unwrap();
+    let reopened = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert_eq!(
         chat::list(&reopened, &f.p)
             .unwrap()
@@ -293,7 +293,7 @@ fn chat_migration_preserves_cloud_mapping_snapshots_and_approved_baselines() {
             "DROP TABLE project_chat_turns; DROP TABLE project_chats; ALTER TABLE projects DROP COLUMN folder_state; ALTER TABLE projects DROP COLUMN folder_identity; ALTER TABLE projects DROP COLUMN folder_revision; PRAGMA user_version=4;",
         )
         .unwrap();
-    let r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    let r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert_eq!(
         s(&cloud::project(&r.db, &f.p).unwrap(), "store_id"),
         "vs_chat"

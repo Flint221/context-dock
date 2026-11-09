@@ -224,7 +224,7 @@ impl Fixture {
             fs::create_dir_all(p.parent().unwrap()).unwrap();
             fs::write(p, bytes).unwrap();
         }
-        let mut r = Registry::open(&store.join("registry.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&store.join("registry.db")).unwrap();
         let project = r.add("Test", root.to_str().unwrap()).unwrap();
         Self {
             _temp: temp,
@@ -328,7 +328,7 @@ fn v1_migration_preserves_ids_preferences_and_does_not_capture_or_move() {
         c.execute("INSERT INTO projects(id,name,path,path_key,created_at) VALUES('project-id','Custom',?1,?1,'2026-01-01T00:00:00Z')",[crate::scanner::canonical(root.to_str().unwrap()).unwrap()]).unwrap();
         c.execute_batch("INSERT INTO documents(id,project_id,name,relative_path,path_key,kind,size,modified_at,last_observed,status) VALUES('document-id','project-id','Master_v1.md','Master_v1.md','master_v1.md','markdown',8,NULL,'2026-01-01T00:00:00Z','available'); INSERT INTO preferences VALUES('theme','dark'); PRAGMA user_version=1;").unwrap();
     }
-    let r = Registry::open(&db).unwrap();
+    let r = Registry::open_legacy_fixture(&db).unwrap();
     let s = r.snapshot().unwrap();
     assert_eq!(s.projects[0].id, "project-id");
     assert_eq!(s.documents[0].id, "document-id");
@@ -343,7 +343,7 @@ fn v1_migration_preserves_ids_preferences_and_does_not_capture_or_move() {
         "original"
     );
     drop(r);
-    Registry::open(&db).unwrap();
+    Registry::open_legacy_fixture(&db).unwrap();
 }
 #[test]
 fn matching_only_normalizes_explicit_trailing_versions_and_dates() {
@@ -626,7 +626,7 @@ fn interrupted_numbered_import_recovers_order_after_restart_without_duplicate_ca
     );
     f.r.db.execute_batch("DROP TRIGGER fail_import;").unwrap();
     let db = f.r.store.join("registry.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     f.scan();
     f.scan();
     let versions = f.r.versions(&id).unwrap();
@@ -678,7 +678,7 @@ fn restart_between_tracking_consent_and_import_planning_still_groups_in_order() 
         .unwrap();
     f.r.db.execute("UPDATE source_files SET disposition=CASE WHEN name='Other.md' THEN 'ignored' ELSE 'tracked' END",[]).unwrap();
     let db = f.r.store.join("registry.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     f.scan();
     let id = f.document("Report_v1.md");
     assert_eq!(f.document("Report_v2.md"), id);
@@ -991,7 +991,7 @@ fn capture_recovers_before_and_after_finalization_without_duplicate_versions() {
         }
         let db = f.r.store.join("registry.db");
         drop(f.r);
-        let mut r = Registry::open(&db).unwrap();
+        let mut r = Registry::open_legacy_fixture(&db).unwrap();
         let errors = r.recover_operations(&f.project, true).unwrap();
         assert!(errors.is_empty(), "{errors:?}");
         assert!(r.recover_operations(&f.project, true).unwrap().is_empty());
@@ -1143,7 +1143,7 @@ fn native_watcher_captures_changes_stops_when_disabled_and_reconciles_after_rest
     watcher.shutdown();
     drop(shared);
     fs::write(root.join("Master.md"), "four while closed").unwrap();
-    let shared = Arc::new(Mutex::new(Registry::open(&db).unwrap()));
+    let shared = Arc::new(Mutex::new(Registry::open_legacy_fixture(&db).unwrap()));
     let watcher = crate::monitor::Monitor::start(shared.clone(), |_| {}).unwrap();
     wait_until(|| shared.lock().unwrap().versions(&document).unwrap().len() == 4);
     watcher.shutdown();
@@ -1416,7 +1416,7 @@ fn repeated_markdown_and_word_saves_are_revisions_until_filename_version_increas
     f.scan();
     assert_eq!(f.r.versions(&ids[0]).unwrap().len(), count);
     let db = f.r.store.join("registry.db");
-    f.r = Registry::open(&db).unwrap();
+    f.r = Registry::open_legacy_fixture(&db).unwrap();
     f.scan();
     for id in &ids {
         assert_eq!(f.r.published_versions(id).unwrap().len(), 1);

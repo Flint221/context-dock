@@ -17,7 +17,7 @@ fn newly_discovered_unrelated_file_is_excluded_until_selected() {
     fs::create_dir(&root).unwrap();
     fs::write(root.join("existing.md"), "existing").unwrap();
     fs::create_dir(t.path().join("app")).unwrap();
-    let mut r = Registry::open(&t.path().join("app/registry.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&t.path().join("app/registry.db")).unwrap();
     let id = r.add("Project", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())
         .unwrap();
@@ -59,7 +59,7 @@ fn new_version_inherits_selected_family_but_not_excluded_parent() {
     fs::write(root.join("Report_v1.md"), "first").unwrap();
     fs::write(root.join("private/Notes_v1.md"), "private first").unwrap();
     let db = t.path().join("app/registry.db");
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     let id = r.add("Project", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, vec![]).unwrap();
     let revision = path_selection::revision(&r.db, &id).unwrap();
@@ -79,7 +79,7 @@ fn new_version_inherits_selected_family_but_not_excluded_parent() {
         .unwrap();
     assert_eq!(r.versions(&report.document_id).unwrap().len(), 2);
     drop(r);
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
     assert!(path_selection::allowed(&r.db, &id, "Report_v2.md").unwrap());
     let view = r.path_selection(&id).unwrap();
@@ -100,7 +100,7 @@ fn exclusions_cover_nested_future_files_persist_and_reinclude_without_losing_his
     fs::write(root.join("Drafts-copy/keep.md"), "keep").unwrap();
     fs::create_dir(t.path().join("app")).unwrap();
     let db = t.path().join("app/registry.db");
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     let id = r.add("Project", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())
         .unwrap();
@@ -121,7 +121,7 @@ fn exclusions_cover_nested_future_files_persist_and_reinclude_without_losing_his
     fs::write(root.join("Drafts/Nested/future.md"), "new excluded").unwrap();
     fs::write(root.join("Drafts-copy/keep.md"), "included edit").unwrap();
     drop(r);
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     r.reconcile(&id, "test", &HashSet::new(), true).unwrap();
     let count: i64 =
         r.db.query_row("SELECT COUNT(*) FROM document_versions", [], |row| {
@@ -149,7 +149,7 @@ fn exclusions_cover_nested_future_files_persist_and_reinclude_without_losing_his
 fn invalid_stale_and_unverified_rule_writes_roll_back() {
     let t = tempdir().unwrap();
     fs::create_dir(t.path().join("p")).unwrap();
-    let mut r = Registry::open(&t.path().join("registry.db")).unwrap();
+    let mut r = Registry::open_legacy_fixture(&t.path().join("registry.db")).unwrap();
     let id = r.add("P", t.path().join("p").to_str().unwrap()).unwrap();
     for path in [
         "../escape",
@@ -184,7 +184,7 @@ fn schema_six_migration_retains_legacy_ignored_files_and_saved_history() {
     fs::write(root.join("one.md"), "one").unwrap();
     fs::create_dir(t.path().join("app")).unwrap();
     let db = t.path().join("app/registry.db");
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     let id = r.add("P", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, vec![]).unwrap();
     // Simulate a file ignored by the pre-folder-selection implementation.
@@ -198,7 +198,7 @@ fn schema_six_migration_retains_legacy_ignored_files_and_saved_history() {
     )
     .unwrap();
     drop(r);
-    let r = Registry::open(&db).unwrap();
+    let r = Registry::open_legacy_fixture(&db).unwrap();
     assert!(!path_selection::allowed(&r.db, &id, "one.md").unwrap());
     assert_eq!(r.snapshot().unwrap().projects[0].id, id);
 }
@@ -209,7 +209,7 @@ fn excluded_pending_capture_stays_paused_until_reincluded_with_snapshot_bytes_re
     fs::create_dir(&root).unwrap();
     fs::create_dir(t.path().join("app")).unwrap();
     let db = t.path().join("app/registry.db");
-    let mut r = Registry::open(&db).unwrap();
+    let mut r = Registry::open_legacy_fixture(&db).unwrap();
     fs::write(root.join("one.md"), "initial").unwrap();
     let id = r.add("P", root.to_str().unwrap()).unwrap();
     r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())

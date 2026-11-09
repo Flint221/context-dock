@@ -82,6 +82,9 @@ pub fn status() -> Result<Status> {
 }
 #[cfg(windows)]
 pub fn set(value: bool) -> Result<()> {
+    if cfg!(feature = "pilot") {
+        return Err("Startup registration is unavailable in the isolated pilot.".into());
+    }
     set_for("ContextDock", &command()?, value)
 }
 #[cfg(not(windows))]

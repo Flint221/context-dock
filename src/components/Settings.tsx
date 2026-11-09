@@ -1,21 +1,29 @@
 import { Moon, ShieldCheck } from "lucide-react";
 import type { Theme } from "../types";
 import { version } from "../../package.json";
-import { OpenAIConnection } from "./OpenAIConnection";
 import { DesktopSettings } from "./DesktopSettings";
+import { GoogleDriveConnection } from "./GoogleDriveConnection";
 export function SettingsView({
   theme,
   busy,
   changeTheme,
+  openTools,
 }: {
   theme: Theme;
   busy: boolean;
   changeTheme: (theme: Theme) => void;
+  openTools?: () => void;
 }) {
   return (
     <>
       <DesktopSettings />
-      <OpenAIConnection />
+      <GoogleDriveConnection />
+      {openTools && (
+        <details className="panel">
+          <summary>Optional tools</summary>
+          <button onClick={openTools}>Current processes</button>
+        </details>
+      )}
       <section className="panel settings">
         <Moon size={23} />
         <div>
@@ -45,19 +53,15 @@ export function SettingsView({
           <h2>About ContextDock</h2>
           <p>Version {version}</p>
           <p>
-            Discovery reads file metadata. Opt-in tracking captures immutable
-            local snapshots. Separately enabled archival preserves older sources
-            in Old Context Files.
+            Monitor selected project files, group filename versions and publish
+            verified latest copies to your Google Drive when enabled.
           </p>
           <p>
-            Registrations, history and preferences use per-user SQLite storage.
-            Snapshot bytes remain in application data across upgrades and
-            project removal. Monitoring operates only while ContextDock is
-            running, including in the system tray. Use Exit in the tray menu to
-            fully quit. Chats are also saved locally in the app database. Cloud
-            sync enables OpenAI uploads and project questions; turning it off
-            blocks new AI requests and keeps local history available. No
-            telemetry.
+            Registrations, file identities and preferences stay on this
+            computer. Monitoring operates only while ContextDock is running,
+            including in the system tray. Use Exit in the tray menu to fully
+            quit. Existing archives and saved chats are preserved. New tracking
+            does not create permanent historical copies. No telemetry.
           </p>
         </div>
       </section>

@@ -14,6 +14,105 @@ struct Fixture {
     id: String,
 }
 #[test]
+fn latest_approval_uses_drive_policy_and_rejects_changed_publication_settings() {
+    let mut f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
+    f.add("ContextDock_New_v1.md");
+    let req = f.request("ContextDock_New_v1.md", "approve");
+    let disabled = review::preview(&f.r, &req).unwrap();
+    assert_eq!(cloud::n(&disabled, "cloudEnabled"), 0);
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, true).unwrap();
+    assert!(review::apply(&mut f.r, &req, cloud::s(&disabled, "token")).is_err());
+    assert!(!path_selection::allowed(&f.r.db, &f.id, "ContextDock_New_v1.md").unwrap());
+    let enabled = review::preview(&f.r, &req).unwrap();
+    assert_eq!(cloud::n(&enabled, "cloudEnabled"), 1);
+    assert_eq!(cloud::n(&enabled, "automatic"), 1);
+    assert_eq!(
+        cloud::n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"),
+        0
+    );
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, false).unwrap();
+    assert!(review::apply(&mut f.r, &req, cloud::s(&enabled, "token")).is_err());
+    let manual = review::preview(&f.r, &req).unwrap();
+    review::apply(&mut f.r, &req, cloud::s(&manual, "token")).unwrap();
+    assert!(path_selection::allowed(&f.r.db, &f.id, "ContextDock_New_v1.md").unwrap());
+    let saved: (bool, bool, bool) =
+        f.r.db
+            .query_row(
+                "SELECT enabled,automatic,recycle FROM drive_projects WHERE project_id=?1",
+                [&f.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+    assert_eq!(saved, (true, false, false));
+}
+
+#[test]
+fn latest_desktop_problems_ignore_retired_index_errors_and_show_drive_and_cleanup_failures() {
+    let f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
+    let retired =
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET error='Retired OpenAI failure' WHERE project_id=?1",
+                [&f.id],
+            )
+            .unwrap();
+    assert_eq!(retired, 1);
+    assert!(desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0]).is_none());
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, true).unwrap();
+    let doc: String =
+        f.r.db
+            .query_row(
+                "SELECT id FROM documents WHERE project_id=?1 AND merged_into IS NULL",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    f.r.db.execute("INSERT INTO drive_documents(document_id,project_id,file_id,state,error) VALUES(?1,?2,'fixture-cloud-file','offline','Drive is offline')",rusqlite::params![doc,f.id]).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE drive_projects SET error='Drive is offline' WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    let problems = desktop::project_problems(&f.r.db).unwrap();
+    assert_eq!(cloud::n(&problems[0], "failed"), 1);
+    assert!(desktop::problem_signature(&problems[0])
+        .unwrap()
+        .contains("Drive is offline"));
+    f.r.db
+        .execute(
+            "UPDATE source_files SET disposition='ignored' WHERE document_id=?1",
+            [&doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE documents SET tracking_state='ignored' WHERE id=?1",
+            [&doc],
+        )
+        .unwrap();
+    assert!(desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0]).is_none());
+    f.r.db
+        .execute(
+            "UPDATE drive_projects SET enabled=0 WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "INSERT INTO drive_cleanup(project_id,error) VALUES(?1,'A safety file needs recovery')",
+            [&f.id],
+        )
+        .unwrap();
+    assert!(
+        desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0])
+            .unwrap()
+            .contains("safety file needs recovery")
+    );
+}
+#[test]
 fn battery_saver_pauses_only_uploads_and_respects_persisted_override_and_manual_pause() {
     let f = Fixture::new();
     assert!(!desktop::uploads_paused_for_power(&f.r.db, false));
@@ -50,7 +149,7 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         fs::create_dir(t.path().join("app")).unwrap();
         fs::write(root.join("Existing_v1.md"), "original").unwrap();
-        let mut r = Registry::open(&t.path().join("app/test.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&t.path().join("app/test.db")).unwrap();
         let id = r.add("Disposable", root.to_str().unwrap()).unwrap();
         r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())
             .unwrap();
@@ -122,7 +221,7 @@ fn ignored_files_and_desktop_choices_survive_restart_without_losing_history() {
     review::apply(&mut f.r, &req, p["token"].as_str().unwrap()).unwrap();
     review::set_preference(&f.r.db, "desktop.uploads_paused", true).unwrap();
     review::set_preference(&f.r.db, "desktop.keep_running", false).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert!(review::pending(&f.r.db).unwrap().is_empty());
     assert!(!path_selection::allowed(&f.r.db, &f.id, "Unwanted.md").unwrap());
     assert!(desktop::uploads_paused(&f.r.db));
@@ -193,7 +292,7 @@ fn notification_batching_watermarks_survive_restart_and_throttle_new_bursts() {
     assert!(!review::notice_due(&f.r.db, key, "one,two", 1020, 30).unwrap());
     assert!(review::notice_due(&f.r.db, key, "one,two", 1030, 30).unwrap());
     review::notice_sent(&f.r.db, key, 1030).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert!(!review::notice_due(&f.r.db, key, "one,two", 1400, 30).unwrap());
     assert!(!review::notice_due(&f.r.db, key, "three", 1040, 30).unwrap());
     assert!(!review::notice_due(&f.r.db, key, "three", 1100, 30).unwrap());
@@ -210,7 +309,7 @@ fn schema_eleven_upgrade_preserves_registry_snapshots_and_pending_files() {
             "DROP TABLE review_decisions; DROP TABLE desktop_notices; PRAGMA user_version=11;",
         )
         .unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert_eq!(
         before,
         cloud::rows(&f.r.db, "SELECT * FROM document_versions", &[]).unwrap()
@@ -291,7 +390,35 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
         Arc, Mutex,
     };
     use tauri::{Listener, Manager};
+    fn memory_level(window: &tauri::WebviewWindow) -> i32 {
+        let (send, receive) = std::sync::mpsc::channel();
+        window
+            .with_webview(move |view| {
+                use webview2_com::Microsoft::Web::WebView2::Win32::{
+                    ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
+                };
+                use windows::core::Interface;
+                let value = (|| -> windows::core::Result<i32> {
+                    unsafe {
+                        let core = view
+                            .controller()
+                            .CoreWebView2()?
+                            .cast::<ICoreWebView2_19>()?;
+                        let mut level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(0);
+                        core.MemoryUsageTargetLevel(&mut level)?;
+                        Ok(level.0)
+                    }
+                })();
+                let _ = send.send(value.map_err(|error| error.to_string()));
+            })
+            .unwrap();
+        receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap()
+    }
     let f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
     let root = f.root.clone();
     let db = f.r.store.join("test.db");
     let shared = Arc::new(Mutex::new(f.r));
@@ -308,18 +435,15 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
         tauri::WebviewUrl::External("about:blank".parse().unwrap());
     let app = tauri::Builder::default()
         .any_thread()
-        .on_window_event(|w, e| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
-                api.prevent_close();
-                desktop::request_close(w.app_handle(), "close");
-            }
-        })
+        .on_window_event(desktop::window_event)
         .setup(move |app| {
             app.manage(crate::Store(for_setup.clone()));
-            app.manage(crate::cloud_commands::CloudRuntime::start(
+            app.manage(crate::drive_commands::DriveRuntime::default());
+            app.manage(crate::drive_publication_commands::Publisher::start(
                 db.clone(),
                 app.handle().clone(),
             )?);
+            app.manage(crate::cloud_commands::CloudRuntime::dormant(db.clone())?);
             app.manage(crate::monitor::Monitor::start(for_setup.clone(), |_| {})?);
             app.manage(desktop::start(app.handle(), db.clone())?);
             desktop::tray(app.handle())?;
@@ -342,8 +466,20 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
             assert!(!w.is_visible().unwrap());
             desktop::launch(&handle, &["verification".into(), "--background".into()]);
             assert!(!w.is_visible().unwrap());
+            assert_eq!(
+                memory_level(&w),
+                1,
+                "Hidden startup must request low WebView2 memory use."
+            );
             desktop::launch(&handle, &["verification".into()]);
             assert!(w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 0);
+            desktop::launch(&handle, &["verification".into(), "--background".into()]);
+            assert_eq!(
+                memory_level(&w),
+                0,
+                "A duplicate background launch must leave a visible app's normal policy intact."
+            );
             desktop::desktop_ready(handle.clone()).unwrap();
             let closes = Arc::new(AtomicUsize::new(0));
             let counter = closes.clone();
@@ -367,6 +503,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
             ))
             .unwrap();
             assert!(!w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 1);
             fs::write(root.join("Existing_v1.md"), "edited while hidden").unwrap();
             fs::write(root.join("Brand_New.md"), "requires review").unwrap();
             let mut observed = false;
@@ -395,6 +532,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
                 .clone();
             desktop::navigate(&handle, serde_json::json!({"page":"review","project":id}));
             assert!(w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 0);
             assert_eq!(
                 desktop::desktop_route(handle.clone()).unwrap()["page"],
                 "review"
@@ -442,7 +580,7 @@ fn shared_drive_folder_alert_is_one_durable_batch_and_rearms_after_recovery() {
     }
     assert!(desktop::parse_route(&route).is_some());
     review::notice_sent(&f.r.db, "problem:unavailable-folders", 1030).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     let mut reversed = projects.clone();
     reversed.reverse();
     assert!(
