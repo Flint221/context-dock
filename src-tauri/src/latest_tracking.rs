@@ -18,6 +18,109 @@ pub(crate) fn newer_same_path_family(old: &Source, next: &Source) -> bool {
         && matches!((crate::matching::version_order(&old.name),crate::matching::version_order(&next.name)),(Some(a),Some(b)) if b>a)
 }
 impl Registry {
+    /// Recognize a move without granting permission to monitor its destination.
+    pub(crate) fn reconcile_excluded_relocations(
+        &mut self,
+        project: &str,
+        root: &Path,
+        rules: &[crate::path_selection::Rule],
+    ) -> Result<()> {
+        if !enabled(&self.db) {
+            return Ok(());
+        }
+        let complete: bool = self.db.query_row("SELECT status='available' AND scan_error IS NULL AND folder_state='ready' FROM projects WHERE id=?1", [project], |r| r.get(0)).map_err(error)?;
+        if !complete {
+            return Ok(());
+        }
+        let missing = crate::cloud::rows(&self.db,"SELECT s.id FROM source_files s JOIN documents d ON d.id=s.document_id WHERE s.project_id=?1 AND s.status='missing' AND s.disposition IN ('tracked','superseded','ignored') AND s.last_hash IS NOT NULL AND d.tracking_state IN ('tracked','ignored') AND d.merged_into IS NULL AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.state NOT IN ('done','cancelled','restored')) AND NOT EXISTS(SELECT 1 FROM drive_documents p WHERE p.document_id=d.id AND p.pending_hash IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM drive_recycle r WHERE r.source_id=s.id) AND NOT EXISTS(SELECT 1 FROM pending_matches m WHERE m.source_id=s.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))", &[&project])?
+            .iter().map(|r| self.source(crate::cloud::s(r,"id"))).collect::<Result<Vec<_>>>()?;
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let observed = self
+            .source_ids(project)?
+            .iter()
+            .map(|id| self.source(id))
+            .collect::<Result<Vec<_>>>()?;
+        for source in &observed {
+            if source.disposition != "discovered" || source.last_hash.is_some() {
+                continue;
+            }
+            let path = crate::path_selection::normalized(&source.relative);
+            let is_new: bool = self
+                .db
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM new_paths WHERE project_id=?1 AND path=?2)",
+                    params![project, path],
+                    |r| r.get(0),
+                )
+                .map_err(error)?;
+            let explicit_rules = rules
+                .iter()
+                .filter(|r| !(is_new && r.kind == "file" && r.path == path))
+                .cloned()
+                .collect::<Vec<_>>();
+            if crate::path_selection::permits(&explicit_rules, &path) {
+                continue;
+            }
+            // A live copy, competing destination or renamed/changed document
+            // cannot establish this conservative excluded-folder move.
+            let same_name = |s: &&Source| {
+                s.kind == source.kind
+                    && s.name.eq_ignore_ascii_case(&source.name)
+                    && s.size == source.size
+            };
+            if observed.iter().filter(same_name).count() != 1 {
+                continue;
+            }
+            let mut candidates = missing
+                .iter()
+                .filter(same_name)
+                .filter(|old| {
+                    std::fs::symlink_metadata(root.join(&old.relative))
+                        .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+                })
+                .collect::<Vec<_>>();
+            if candidates.is_empty() {
+                continue;
+            }
+            let Ok(staged) = storage::stage_metadata(root, &source.relative) else {
+                continue;
+            };
+            candidates.retain(|old| old.last_hash.as_deref() == Some(&staged.hash));
+            if candidates.len() != 1 {
+                continue;
+            }
+            let old = candidates[0];
+            let pristine: bool = self.db.query_row("SELECT NOT EXISTS(SELECT 1 FROM document_versions WHERE document_id=?1) AND NOT EXISTS(SELECT 1 FROM operations WHERE document_id=?1) AND NOT EXISTS(SELECT 1 FROM pending_matches WHERE source_id=?2) AND NOT EXISTS(SELECT 1 FROM drive_documents WHERE document_id=?1) AND (SELECT COUNT(*) FROM source_files WHERE document_id=?1)=1", params![source.document_id,source.id], |r| r.get(0)).map_err(error)?;
+            if !pristine
+                || !std::fs::symlink_metadata(root.join(&old.relative))
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+            let tx = self.db.transaction().map_err(error)?;
+            tx.execute("UPDATE documents SET active_source_id=NULL,tracking_state='merged',merged_into=?1 WHERE id=?2", params![old.document_id,source.document_id]).map_err(error)?;
+            tx.execute("DELETE FROM source_files WHERE id=?1", [&source.id])
+                .map_err(error)?;
+            tx.execute("UPDATE source_files SET name=?2,relative_path=?3,path_key=?4,size=?5,modified_at=?6,last_observed=?7,status='available',disposition='ignored',hashed_stamp=?6,hashed_size=?5 WHERE id=?1", params![old.id,source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now()]).map_err(error)?;
+            tx.execute(
+                "UPDATE documents SET tracking_state='ignored' WHERE id=?1 AND active_source_id=?2",
+                params![old.document_id, old.id],
+            )
+            .map_err(error)?;
+            tx.execute(
+                "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+                params![project, path],
+            )
+            .map_err(error)?;
+            tx.execute("INSERT INTO path_selection VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1", [project]).map_err(error)?;
+            tx.execute("INSERT OR IGNORE INTO document_aliases(project_id,parent_key,stem,kind,document_id) VALUES(?1,?2,?3,?4,?5)", params![project,crate::matching::parent_key(&source.relative),crate::matching::stem(&source.name).normalized,source.kind,old.document_id]).map_err(error)?;
+            tx.commit().map_err(error)?;
+            self.activity(project,"source_relocated",&format!("{} -> {}. Verified identical-content move; source and Drive identities retained. Destination remains excluded from monitoring and publication.",old.relative,source.relative))?;
+        }
+        Ok(())
+    }
     /// Repair already-captured rename ghosts without deleting version metadata,
     /// source IDs or publication receipts. Never infer this from names alone.
     pub(crate) fn retire_version_rename_paths(

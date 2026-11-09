@@ -67,9 +67,6 @@ beforeEach(() => {
         ...saved,
         revision: saved.revision + 1,
         entries: saved.entries.filter((e) => e.path !== path),
-        exclusions: saved.exclusions.filter(
-          (e) => e.path !== path.toLowerCase(),
-        ),
       };
       return [];
     },
@@ -458,6 +455,36 @@ it("forgets a missing test file only after confirmation and removes its row", as
     "Test_v1.md",
     "forget-token",
   );
+  expect(saved.exclusions).toContainEqual({
+    path: "test_v1.md",
+    kind: "file",
+  });
+  const reads = vi.mocked(registry.paths).mock.calls.length;
+  await user.click(screen.getByRole("button", { name: "Reload folder tree" }));
+  await waitFor(() =>
+    expect(vi.mocked(registry.paths).mock.calls.length).toBeGreaterThan(reads),
+  );
+  expect(
+    screen.queryByRole("button", { name: /Forget missing Test_v1.md/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.queryByRole("checkbox", { name: /Include Test_v1.md/i }),
+  ).not.toBeInTheDocument();
+});
+it("uses backend entries for missing files without resurrecting exclusion-only paths", async () => {
+  saved.exclusions.push({ path: "forgotten_v1.md", kind: "file" });
+  saved.entries.push({
+    path: "Still_Missing_v1.md",
+    kind: "file",
+    status: "missing",
+  });
+  await ready();
+  expect(
+    screen.queryByRole("checkbox", { name: /Include forgotten_v1.md/i }),
+  ).not.toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: "Forget missing Still_Missing_v1.md" }),
+  ).toBeEnabled();
 });
 it("requires saving or discarding checkbox drafts before forgetting a file", async () => {
   saved.entries.push({ path: "Test_v1.md", kind: "file", status: "missing" });

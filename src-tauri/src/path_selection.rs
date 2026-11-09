@@ -181,13 +181,10 @@ impl Registry {
                 },
             );
         }
-        let forgotten: HashSet<String> = if latest {
-            cloud::rows(&self.db,"SELECT relative_path FROM source_files WHERE project_id=?1 AND status='missing' AND disposition IN ('ignored','renamed')",&[&project])?.iter().map(|s|normalized(cloud::s(s,"relative_path"))).collect()
-        } else {
-            HashSet::new()
-        };
         for rule in &exclusions {
-            if rule.kind == "file" && forgotten.contains(&rule.path) {
+            // File rows above are authoritative. Retained exclusions can outlive
+            // a forgotten or relocated path without making it a missing file.
+            if latest && rule.kind == "file" {
                 continue;
             }
             entries.entry(rule.path.clone()).or_insert_with(|| Entry {

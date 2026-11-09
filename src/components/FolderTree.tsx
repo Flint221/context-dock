@@ -83,7 +83,6 @@ function nodes(view: PathSelectionView): Node {
     return node;
   };
   view.entries.forEach((e) => add(e.path, e.kind, e.status, e.new));
-  view.exclusions.forEach((e) => add(e.path, e.kind, "missing"));
   for (const node of map.values())
     node.children.sort(
       (a, b) =>

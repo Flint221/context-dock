@@ -216,6 +216,7 @@ impl Registry {
         let mut problems = self.finish_tracking_archival(project)?;
         problems.extend(self.recover_operations(project, full)?);
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
+        self.reconcile_excluded_relocations(project, root, &path_rules)?;
         self.reconcile_relocations(project, root, &path_rules)?;
         self.retire_version_rename_paths(project, root, &path_rules)?;
         path_rules = crate::path_selection::rules(&self.db, project)?;
