@@ -10,20 +10,56 @@ use rusqlite::{params, OptionalExtension};
 use serde::Serialize;
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    thread,
 };
 use tauri::Emitter;
 
 pub struct Publisher {
     pub path: PathBuf,
     pub gate: Arc<Mutex<()>>,
+    pub stop: Arc<AtomicBool>,
+    dirty: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
 }
 impl Publisher {
-    pub fn new(path: PathBuf) -> Self {
-        Self {
+    pub fn start(path: PathBuf, app: tauri::AppHandle) -> std::io::Result<Self> {
+        let gate = Arc::new(Mutex::new(()));
+        let stop = Arc::new(AtomicBool::new(false));
+        let dirty = Arc::new(AtomicBool::new(true));
+        let (worker_path, worker_gate, worker_stop, worker_dirty) =
+            (path.clone(), gate.clone(), stop.clone(), dirty.clone());
+        let worker = thread::Builder::new()
+            .name("contextdock-drive".into())
+            .spawn(move || {
+                crate::drive_worker::run(worker_path, worker_gate, worker_stop, worker_dirty, app)
+            })?;
+        Ok(Self {
             path,
-            gate: Arc::default(),
+            gate,
+            stop,
+            dirty,
+            worker: Some(worker),
+        })
+    }
+    pub fn wake(&self) {
+        self.dirty.store(true, Ordering::Release);
+        if let Some(worker) = &self.worker {
+            worker.thread().unpark();
         }
+    }
+    pub fn request_stop(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.wake();
+    }
+}
+impl Drop for Publisher {
+    fn drop(&mut self) {
+        self.request_stop();
+        self.worker.take();
     }
 }
 #[derive(Serialize)]
@@ -69,9 +105,17 @@ pub fn api(
     account: String,
     document: Option<(String, String)>,
     access: zeroize::Zeroizing<String>,
+    stop: Arc<AtomicBool>,
 ) -> Result<GoogleDrive, ApiError> {
     let db = crate::cloud::connect(&path)?;
     GoogleDrive::new(access, move |write| {
+        if stop.load(Ordering::Acquire) {
+            return Err(ApiError {
+                retry: true,
+                waiting: true,
+                ..ApiError::local("ContextDock is stopping. Publication remains queued.")
+            });
+        }
         let connected = NativeVault
             .load()?
             .and_then(|s| s.session.as_ref().map(|s| s.account.id.clone()));
@@ -81,11 +125,16 @@ pub fn api(
                 ..ApiError::local("The Google Drive account disconnected or changed.")
             });
         }
-        drive_publish::require_enabled(&db, &project, &account)?;
+        drive_publish::require_enabled(&db, &project, &account).map_err(|e| ApiError {
+            retry: true,
+            waiting: true,
+            ..e
+        })?;
         if write {
             if crate::desktop::uploads_paused(&db) {
                 return Err(ApiError {
                     retry: true,
+                    waiting: true,
                     delay: 30,
                     ..ApiError::local(
                         "Uploads are paused to save resources. Publication remains queued.",
@@ -96,7 +145,7 @@ pub fn api(
                 if drive_publish::generation(&drive_publish::current(&db, &project, document)?)
                     != *generation
                 {
-                    return Err(ApiError {retry:true,..ApiError::local("The local document changed before upload. The latest generation remains queued.")});
+                    return Err(ApiError {retry:true,waiting:true,..ApiError::local("The local document changed before upload. The latest generation remains queued.")});
                 }
             }
         }
@@ -109,36 +158,13 @@ pub fn record_error(
     document: Option<&str>,
     failure: &ApiError,
 ) -> Result<(), String> {
-    let attempts: i64 = if let Some(document) = document {
-        registry
-            .db
-            .query_row(
-                "SELECT attempts FROM drive_documents WHERE document_id=?1",
-                [document],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(error)?
-            .unwrap_or(0)
-    } else {
-        registry
-            .db
-            .query_row(
-                "SELECT attempts FROM drive_projects WHERE project_id=?1",
-                [project],
-                |r| r.get(0),
-            )
-            .map_err(error)?
-    };
-    let delay = (5u64.saturating_mul(1u64 << attempts.min(8) as u32))
-        .max(failure.delay)
-        .min(3600);
-    let next = chrono::Utc::now().timestamp() + delay as i64;
-    registry.db.execute("UPDATE drive_projects SET requested=1,attempts=attempts+1,next_at=?2,error=?3 WHERE project_id=?1",params![project,next,failure.message]).map_err(error)?;
-    if let Some(document) = document {
-        registry.db.execute("UPDATE drive_documents SET state=?2,attempts=attempts+1,next_at=?3,error=?4 WHERE document_id=?1",params![document,if failure.retry && !failure.auth {"offline"}else{"needs_attention"},next,failure.message]).map_err(error)?;
-    }
-    Ok(())
+    crate::drive_scheduler::retry_error(
+        registry,
+        project,
+        document,
+        failure,
+        chrono::Utc::now().timestamp(),
+    )
 }
 #[tauri::command]
 pub async fn drive_project_action(
@@ -154,6 +180,7 @@ pub async fn drive_project_action(
     let gate = state.gate.clone();
     let auth_gate = auth.gate.clone();
     let id = project.clone();
+    let stop = state.stop.clone();
     let result=tauri::async_runtime::spawn_blocking(move || {
         let registry=open(&path)?;
         if action=="configure" {
@@ -162,7 +189,9 @@ pub async fn drive_project_action(
             let account=if enabled {current.ok_or("Connect Google Drive in Settings first.")?} else {
                 registry.db.query_row("SELECT account_id FROM drive_projects WHERE project_id=?1",[&id],|r|r.get::<_,String>(0)).optional().map_err(error)?.or(current).ok_or("This project has no Drive publication settings.")?
             };
-            return drive_publish::configure(&registry.db,&id,&account,enabled,automatic.unwrap_or(false)).map_err(|e|e.message);
+            drive_publish::configure(&registry.db,&id,&account,enabled,automatic.unwrap_or(false)).map_err(|e|e.message)?;
+            if enabled {crate::drive_scheduler::reset(&registry,&id)?;}
+            return Ok(());
         }
         if action!="publish" && action!="create_root" {return Err("Unknown Drive publication action.".into());}
         let _gate=gate.try_lock().map_err(|_|"Another Drive publication is running. Its latest state will appear here.")?;
@@ -174,7 +203,7 @@ pub async fn drive_project_action(
             (account,access)
         };
         drive_publish::require_enabled(&registry.db,&id,&account).map_err(|e|e.message)?;
-        registry.db.execute("UPDATE drive_projects SET requested=1,error=NULL,next_at=0 WHERE project_id=?1",[&id]).map_err(error)?;
+        crate::drive_scheduler::reset(&registry,&id)?;
         let documents=drive_publish::eligible_documents(&registry.db,&id).map_err(|e|e.message)?;
         if documents.is_empty() && action=="publish" {return Err("No stable selected documents are ready. Check file tracking and folder selection.".into());}
         if action=="create_root" {
@@ -182,7 +211,7 @@ pub async fn drive_project_action(
             let allowed:bool=registry.db.query_row("SELECT create_root FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).map_err(error)?;
             if !allowed {return Err("The Drive folder creation choice did not save. No folders were created.".into());}
         }
-        let folders=api(path.clone(),id.clone(),account.clone(),None,zeroize::Zeroizing::new(access.to_string())).map_err(|e|e.message)?;
+        let folders=api(path.clone(),id.clone(),account.clone(),None,zeroize::Zeroizing::new(access.to_string()),stop.clone()).map_err(|e|e.message)?;
         let destination=match drive_publish::ensure_destination(&registry.db,&id,&account,&folders) {
             Ok(parent)=>parent,
             Err(e)=>{record_error(&registry,&id,None,&e)?;return Err(e.message);}
@@ -191,7 +220,7 @@ pub async fn drive_project_action(
         let mut problems=vec![];
         for document in documents {
             let current=match drive_publish::current(&registry.db,&id,&document) {Ok(c)=>c,Err(e)=>{problems.push(e.message);continue;}};
-            let client=api(path.clone(),id.clone(),account.clone(),Some((document.clone(),drive_publish::generation(&current))),zeroize::Zeroizing::new(access.to_string())).map_err(|e|e.message)?;
+            let client=api(path.clone(),id.clone(),account.clone(),Some((document.clone(),drive_publish::generation(&current))),zeroize::Zeroizing::new(access.to_string()),stop.clone()).map_err(|e|e.message)?;
             if let Err(e)=drive_publish::publish(&registry,&id,&account,&document,&destination,&client) {
                 record_error(&registry,&id,Some(&document),&e)?;problems.push(e.message);
             }
@@ -201,6 +230,7 @@ pub async fn drive_project_action(
         registry.db.execute("UPDATE drive_projects SET requested=?2,attempts=0,next_at=0,error=NULL WHERE project_id=?1",params![id,pending]).map_err(error)?;
         Ok(())
     }).await.map_err(|_|"Drive publication task could not finish.".to_string())?;
+    state.wake();
     let _ = app.emit("drive-changed", &project);
     result
 }

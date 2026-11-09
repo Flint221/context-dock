@@ -24,6 +24,15 @@ impl Drop for DriveRuntime {
         }
     }
 }
+impl DriveRuntime {
+    pub fn cancel_pending(&self) {
+        if let Ok(pending) = self.pending.lock() {
+            if let Some(cancel) = pending.as_ref() {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        }
+    }
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
@@ -102,7 +111,21 @@ pub async fn drive_action(
         if let Ok(mut slot) = error.lock() {
             *slot = None;
         }
-        let result = action_inner(&action, path.as_deref(), pending, &database);
+        let mut result = action_inner(&action, path.as_deref(), pending, &database);
+        if result.is_ok() && ["connect", "test", "pick_root"].contains(&action.as_str()) {
+            let resumed = (|| -> Result<(), String> {
+                if let Some(saved) = NativeVault.load()? {
+                    if let Some(session) = saved.session {
+                        let registry = crate::drive_publication_commands::open(&database)?;
+                        crate::drive_scheduler::resume_auth(&registry, &session.account.id)?;
+                    }
+                }
+                Ok(())
+            })();
+            if let Err(error) = resumed {
+                result = Err(error);
+            }
+        }
         if let Ok(mut slot) = error.lock() {
             *slot = result.as_ref().err().cloned();
         }
@@ -111,6 +134,7 @@ pub async fn drive_action(
     .await
     .map_err(|_| "The Google Drive operation could not finish.".to_string())?;
     let _ = app.emit("drive-changed", ());
+    publisher.wake();
     result
 }
 fn action_inner(

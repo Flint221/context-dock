@@ -316,6 +316,11 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
         })
         .setup(move |app| {
             app.manage(crate::Store(for_setup.clone()));
+            app.manage(crate::drive_commands::DriveRuntime::default());
+            app.manage(crate::drive_publication_commands::Publisher::start(
+                db.clone(),
+                app.handle().clone(),
+            )?);
             app.manage(crate::cloud_commands::CloudRuntime::start(
                 db.clone(),
                 app.handle().clone(),

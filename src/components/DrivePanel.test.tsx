@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import { drive, type DriveProject } from "../drive";
@@ -32,7 +32,7 @@ beforeEach(() => {
   );
   vi.mocked(drive.subscribe).mockResolvedValue(() => {});
 });
-it("enables manual publication without starting an upload", async () => {
+it("enables automatic publication without a duplicate immediate manual request", async () => {
   vi.mocked(drive.configure).mockImplementation(
     async (_id, enabled, automatic) => {
       state.enabled = enabled;
@@ -46,7 +46,7 @@ it("enables manual publication without starting an upload", async () => {
       name: "Publish this project to Google Drive",
     }),
   );
-  expect(drive.configure).toHaveBeenCalledWith("sample", true, false);
+  expect(drive.configure).toHaveBeenCalledWith("sample", true, true);
   expect(drive.publish).not.toHaveBeenCalled();
   expect(
     await screen.findByText(/Drive publication enabled/),
@@ -144,4 +144,65 @@ it("requires an explicit root setup before publication and never uploads on fold
   ).toBeInTheDocument();
   expect(drive.publish).not.toHaveBeenCalled();
   expect(screen.getByRole("button", { name: "Publish latest" })).toBeEnabled();
+});
+
+it("can pause while a manual publication is in flight", async () => {
+  state.enabled = true;
+  let stop: (reason: Error) => void = () => {};
+  vi.mocked(drive.publish).mockReturnValue(
+    new Promise((_resolve, reject) => {
+      stop = reject;
+    }),
+  );
+  vi.mocked(drive.configure).mockImplementation(async (_project, enabled) => {
+    state.enabled = enabled;
+  });
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(
+    await screen.findByRole("button", { name: "Publish latest" }),
+  );
+  expect(
+    screen.getByRole("button", { name: "Pause publication" }),
+  ).toBeEnabled();
+  await user.click(screen.getByRole("button", { name: "Pause publication" }));
+  await waitFor(() =>
+    expect(
+      screen.getByRole("checkbox", {
+        name: "Publish this project to Google Drive",
+      }),
+    ).not.toBeChecked(),
+  );
+  await act(async () =>
+    stop(new Error("Publication paused; the pending item was retained.")),
+  );
+  expect(
+    screen.queryByText("Latest files published and verified."),
+  ).not.toBeInTheDocument();
+});
+
+it("makes a migrated manual setting visible and enables automation only when requested", async () => {
+  state.enabled = true;
+  state.automatic = false;
+  vi.mocked(drive.configure).mockImplementation(
+    async (_project, enabled, automatic) => {
+      state.enabled = enabled;
+      state.automatic = automatic;
+    },
+  );
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  expect(
+    await screen.findByRole("button", { name: "Enable automatic publication" }),
+  ).toBeInTheDocument();
+  expect(drive.configure).not.toHaveBeenCalled();
+  await user.click(
+    screen.getByRole("button", { name: "Enable automatic publication" }),
+  );
+  expect(
+    await screen.findByText(/Automatic publication enabled/),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByRole("button", { name: "Enable automatic publication" }),
+  ).not.toBeInTheDocument();
 });

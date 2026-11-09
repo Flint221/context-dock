@@ -565,7 +565,7 @@ fn drive_publication_schema_thirteen_migration_keeps_ids_snapshots_and_cloud_off
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        14
+        15
     );
 }
 
@@ -601,4 +601,271 @@ fn drive_publication_unseen_root_requires_explicit_creation_or_picker_adoption()
         .create_folder("other-root", "root", "ContextDock", &BTreeMap::new())
         .unwrap();
     assert!(publish::adopt_root(&f.registry.db, "account-A", "other-root", &f.api).is_err());
+}
+
+#[test]
+fn drive_scheduler_debounces_changes_without_hashing_or_sending_requests() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    assert!(crate::drive_scheduler::due(&f.registry, 1_000_000)
+        .unwrap()
+        .is_empty());
+    assert!(crate::drive_scheduler::due(&f.registry, 1_002_999)
+        .unwrap()
+        .is_empty());
+    let due = crate::drive_scheduler::due(&f.registry, 1_003_000).unwrap();
+    assert_eq!(due.len(), 1);
+    assert_eq!(due[0].documents, [f.current()]);
+    assert!(f.api.files.borrow().is_empty());
+    assert_eq!(f.api.uploads.get(), 0);
+}
+
+#[test]
+fn drive_scheduler_unchanged_verified_files_stay_idle_across_repeated_checks() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.run().unwrap();
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    for n in 0..100 {
+        assert!(
+            crate::drive_scheduler::due(&f.registry, 1_000_000 + n * 5_000)
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert_eq!(f.api.uploads.get(), 1);
+    assert_eq!(
+        fs::read_dir(f.registry.store.join("staging"))
+            .unwrap()
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn drive_scheduler_offline_backoff_and_pending_identity_survive_restart() {
+    let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    crate::drive_scheduler::due(&f.registry, 1_000_000).unwrap();
+    f.api.fail_before.set(true);
+    let failure = f.run().unwrap_err();
+    let pending = f.saved();
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&pending.document_id),
+        &failure,
+        1003,
+    )
+    .unwrap();
+    f.registry = Registry::open(&f.db).unwrap();
+    assert!(crate::drive_scheduler::due(&f.registry, 1_007_999)
+        .unwrap()
+        .is_empty());
+    assert_eq!(
+        crate::drive_scheduler::due(&f.registry, 1_008_000).unwrap()[0].documents,
+        std::slice::from_ref(&pending.document_id)
+    );
+    assert_eq!(f.saved().file_id, pending.file_id);
+    f.run().unwrap();
+    assert_eq!(f.cloud_documents(), 1);
+}
+
+#[test]
+fn drive_scheduler_manual_projects_only_retry_requested_work_and_pause_survives_restart() {
+    let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    assert!(crate::drive_scheduler::due(&f.registry, 1_000_000)
+        .unwrap()
+        .is_empty());
+    f.api.fail_before.set(true);
+    let failure = f.run().unwrap_err();
+    let pending = f.saved();
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&pending.document_id),
+        &failure,
+        1000,
+    )
+    .unwrap();
+    crate::drive_scheduler::due(&f.registry, 1_005_000).unwrap();
+    assert_eq!(
+        crate::drive_scheduler::due(&f.registry, 1_008_000)
+            .unwrap()
+            .len(),
+        1
+    );
+    publish::configure(&f.registry.db, &f.project, "account-A", false, false).unwrap();
+    f.registry = Registry::open(&f.db).unwrap();
+    assert!(crate::drive_scheduler::due(&f.registry, 9_000_000)
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn drive_scheduler_auth_failure_waits_for_explicit_recovery() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    f.api.fail_before.set(true);
+    assert!(f.run().is_err());
+    let pending = f.saved();
+    let failure = ApiError {
+        auth: true,
+        ..ApiError::local("grant revoked")
+    };
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&pending.document_id),
+        &failure,
+        1000,
+    )
+    .unwrap();
+    assert!(crate::drive_scheduler::due(&f.registry, 9_000_000)
+        .unwrap()
+        .is_empty());
+    crate::drive_scheduler::reset(&f.registry, &f.project).unwrap();
+    crate::drive_scheduler::due(&f.registry, 9_000_000).unwrap();
+    assert_eq!(
+        crate::drive_scheduler::due(&f.registry, 9_003_000)
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn drive_scheduler_a_conflicted_document_does_not_block_an_unrelated_family() {
+    let f = Fixture::new(&[
+        ("ContextDock_A_v1.md", b"one"),
+        ("ContextDock_B_v1.md", b"two"),
+    ]);
+    f.run().unwrap();
+    let first = f.saved();
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&first.document_id),
+        &ApiError::local("cloud conflict"),
+        1000,
+    )
+    .unwrap();
+    crate::drive_scheduler::due(&f.registry, 1_000_000).unwrap();
+    let ready = crate::drive_scheduler::due(&f.registry, 1_003_000).unwrap();
+    assert_eq!(ready.len(), 1);
+    assert_eq!(ready[0].documents.len(), 1);
+    assert_ne!(ready[0].documents[0], first.document_id);
+}
+
+#[test]
+fn drive_scheduler_schema_fourteen_upgrade_preserves_the_pending_operation() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.api.fail_before.set(true);
+    assert!(f.run().is_err());
+    let before = f.saved();
+    f.registry
+        .db
+        .execute_batch("DROP TABLE drive_schedule; PRAGMA user_version=14;")
+        .unwrap();
+    let registry = Registry::open(&f.db).unwrap();
+    let after = publish::publications(&registry.db, &f.project)
+        .unwrap()
+        .remove(0);
+    assert_eq!(before.file_id, after.file_id);
+    assert_eq!(before.pending_hash, after.pending_hash);
+    assert_eq!(before.pending_generation, after.pending_generation);
+    assert_eq!(
+        registry
+            .db
+            .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+            .unwrap(),
+        15
+    );
+}
+
+#[test]
+fn drive_scheduler_honors_provider_backoff_and_distinguishes_editor_waits_from_offline() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.api.fail_before.set(true);
+    assert!(f.run().is_err());
+    let before = f.saved();
+    let failure = ApiError {
+        retry: true,
+        delay: 120,
+        ..ApiError::local("rate limited")
+    };
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&before.document_id),
+        &failure,
+        1000,
+    )
+    .unwrap();
+    assert_eq!(f.saved().next_at, 1120);
+    assert_eq!(f.saved().state, "offline");
+    let waiting = ApiError::from(
+        "Filesystem operation could not complete: access denied (os error 32)".to_string(),
+    );
+    assert!(waiting.retry && waiting.waiting);
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&before.document_id),
+        &waiting,
+        1000,
+    )
+    .unwrap();
+    assert_eq!(f.saved().state, "waiting_file");
+}
+
+#[test]
+fn drive_scheduler_reconnecting_the_bound_account_resumes_auth_blocked_documents() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.api.fail_before.set(true);
+    assert!(f.run().is_err());
+    let pending = f.saved();
+    f.registry
+        .db
+        .execute("UPDATE drive_projects SET automatic=1", [])
+        .unwrap();
+    crate::drive_scheduler::retry_error(
+        &f.registry,
+        &f.project,
+        Some(&pending.document_id),
+        &ApiError {
+            auth: true,
+            ..ApiError::local("expired grant")
+        },
+        1000,
+    )
+    .unwrap();
+    crate::drive_scheduler::resume_auth(&f.registry, "different-account").unwrap();
+    assert!(crate::drive_scheduler::due(&f.registry, 9_000_000)
+        .unwrap()
+        .is_empty());
+    crate::drive_scheduler::resume_auth(&f.registry, "account-A").unwrap();
+    assert_eq!(f.saved().state, "queued");
+    crate::drive_scheduler::due(&f.registry, 9_000_000).unwrap();
+    assert_eq!(
+        crate::drive_scheduler::due(&f.registry, 9_003_000)
+            .unwrap()
+            .len(),
+        1
+    );
 }

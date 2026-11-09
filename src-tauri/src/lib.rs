@@ -35,8 +35,10 @@ mod drive_publication_commands;
 mod drive_publish;
 #[cfg(test)]
 mod drive_publish_tests;
+mod drive_scheduler;
 #[cfg(test)]
 mod drive_tests;
+mod drive_worker;
 mod extraction;
 mod folder_recovery;
 #[cfg(test)]
@@ -476,9 +478,10 @@ pub fn run() {
             ));
             app.manage(Store(registry.clone()));
             app.manage(drive_commands::DriveRuntime::default());
-            app.manage(drive_publication_commands::Publisher::new(
+            app.manage(drive_publication_commands::Publisher::start(
                 dir.join("contextdock.db"),
-            ));
+                app.handle().clone(),
+            )?);
             app.manage(
                 ai_commands::Runtime::new(dir.join("contextdock.db"))
                     .map_err(std::io::Error::other)?,
@@ -489,6 +492,9 @@ pub fn run() {
             )?);
             let handle = app.handle().clone();
             let monitor = monitor::Monitor::start(registry, move |project| {
+                handle
+                    .state::<drive_publication_commands::Publisher>()
+                    .wake();
                 let _ = handle.emit("registry-changed", project);
             })?;
             app.manage(monitor);

@@ -8,6 +8,7 @@ export function DrivePanel({ project }: { project: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [pausing, setPausing] = useState(false);
   const alive = useRef(true);
   const refresh = useCallback(async () => {
     const next = await drive.project(project);
@@ -66,6 +67,28 @@ export function DrivePanel({ project }: { project: string }) {
       if (alive.current) setBusy(false);
     }
   }
+  async function pause() {
+    const release = beginOperation(`drive-pause:${project}`);
+    if (!release) return;
+    setPausing(true);
+    setError("");
+    setMessage("");
+    try {
+      await drive.configure(project, false, view?.automatic ?? true);
+      const next = await refresh();
+      if (next.enabled)
+        throw new Error("The publication pause did not save. Retry pausing.");
+      if (alive.current)
+        setMessage(
+          "Drive publication paused. Any in-flight request will finish safely; no new upload will start.",
+        );
+    } catch (e) {
+      if (alive.current) setError(String(e));
+    } finally {
+      release();
+      if (alive.current) setPausing(false);
+    }
+  }
   return (
     <section
       className="panel cloud-panel"
@@ -112,9 +135,9 @@ export function DrivePanel({ project }: { project: string }) {
               onChange={(e) => {
                 const enabled = e.target.checked;
                 void run(
-                  () => drive.configure(project, enabled, false),
+                  () => drive.configure(project, enabled, true),
                   enabled
-                    ? "Drive publication enabled. Use Publish latest to upload the current documents."
+                    ? "Drive publication enabled. Stable saves will publish automatically once the Drive folders are ready."
                     : "Drive publication paused. Cloud files are kept.",
                   (next) => next.enabled === enabled,
                 );
@@ -123,6 +146,25 @@ export function DrivePanel({ project }: { project: string }) {
             Publish this project to Google Drive
           </label>
           <div className="cloud-actions">
+            {view.enabled && !view.automatic && (
+              <button
+                disabled={busy || !view.connected}
+                onClick={() =>
+                  void run(
+                    () => drive.configure(project, true, true),
+                    "Automatic publication enabled. Stable saves will publish after settling.",
+                    (next) => next.enabled && next.automatic,
+                  )
+                }
+              >
+                Enable automatic publication
+              </button>
+            )}
+            {view.enabled && (
+              <button disabled={pausing} onClick={() => void pause()}>
+                Pause publication
+              </button>
+            )}
             <button
               className="primary"
               disabled={

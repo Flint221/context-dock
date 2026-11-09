@@ -566,6 +566,11 @@ pub async fn desktop_complete(
             .map_err(|e| e.to_string())?;
     } else {
         app.state::<crate::monitor::Monitor>().request_stop();
+        app.state::<crate::drive_commands::DriveRuntime>()
+            .cancel_pending();
+        let drive = app.state::<crate::drive_publication_commands::Publisher>();
+        drive.request_stop();
+        let drive_gate = drive.gate.clone();
         let runtime = app.state::<crate::cloud_commands::CloudRuntime>();
         runtime.request_stop();
         let gate = runtime.gate.clone();
@@ -585,6 +590,7 @@ pub async fn desktop_complete(
         // A stop guard prevents the worker from sending any subsequent request.
         tauri::async_runtime::spawn_blocking(move || {
             let _gate = gate.lock().unwrap_or_else(|e| e.into_inner());
+            let _drive_gate = drive_gate.lock().unwrap_or_else(|e| e.into_inner());
             let _registry = store.0.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(worker) = worker {
                 let _ = worker.join();

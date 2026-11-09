@@ -20,6 +20,7 @@ pub struct ApiError {
     pub auth: bool,
     pub missing: bool,
     pub delay: u64,
+    pub waiting: bool,
 }
 impl ApiError {
     pub fn local(message: impl Into<String>) -> Self {
@@ -29,6 +30,7 @@ impl ApiError {
             auth: false,
             missing: false,
             delay: 0,
+            waiting: false,
         }
     }
     fn offline() -> Self {
@@ -40,7 +42,17 @@ impl ApiError {
 }
 impl From<String> for ApiError {
     fn from(value: String) -> Self {
-        Self::local(value)
+        if crate::storage::temporary_editor_read(&value)
+            || value.contains("changed while being captured")
+        {
+            Self {
+                retry: true,
+                waiting: true,
+                ..Self::local(value)
+            }
+        } else {
+            Self::local(value)
+        }
     }
 }
 pub type Result<T> = std::result::Result<T, ApiError>;
@@ -163,6 +175,7 @@ impl GoogleDrive {
             auth: status == 401,
             missing: status == 404,
             delay,
+            waiting: false,
         })
     }
     fn remote(response: Response) -> Result<Remote> {
