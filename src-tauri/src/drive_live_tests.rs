@@ -322,7 +322,10 @@ fn live_google_revoked_pilot_grant_requires_reconnection() {
     // separate vault. No installed-profile credential target is compiled here.
     let data = crate::profile::pilot_data_dir().unwrap();
     assert!(data.join("contextdock.db").is_file());
-    let mut saved = NativeVault.load().unwrap().expect("Connect the pilot first.");
+    let mut saved = NativeVault
+        .load()
+        .unwrap()
+        .expect("Connect the pilot first.");
     let session = saved.session.as_mut().expect("Sign in to the pilot first.");
     let http = drive_auth::GoogleHttp::new().unwrap();
     http.revoke(&session.refresh_token).unwrap();
