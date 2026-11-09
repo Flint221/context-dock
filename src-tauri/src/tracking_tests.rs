@@ -20,10 +20,11 @@ fn tracking_toggle_verifies_saved_flags_before_reporting_success() {
     assert_eq!(f.count(&f.document("Master.md")), 1);
 }
 struct Fixture {
-    _temp: TempDir,
     root: PathBuf,
     r: Registry,
     project: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 #[test]
 fn numbered_batches_join_existing_family_in_numeric_order_and_sync_latest_head() {

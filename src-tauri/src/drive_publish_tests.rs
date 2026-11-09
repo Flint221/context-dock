@@ -668,12 +668,13 @@ fn drive_folder_choice_prevents_duplicates_when_scope_hides_an_existing_project_
     );
 }
 struct Fixture {
-    _temp: TempDir,
     root: PathBuf,
     db: PathBuf,
     registry: Registry,
     project: String,
     api: FakeDrive,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 impl Fixture {
     fn new(names: &[(&str, &[u8])]) -> Self {
@@ -751,6 +752,18 @@ impl Fixture {
             .count()
     }
 }
+#[test]
+fn drive_fixture_drop_removes_database_and_temporary_directory() {
+    let fixture = Fixture::new(&[("ContextDock_Context_v1.md", b"cleanup marker")]);
+    let directory = fixture._temp.path().to_path_buf();
+    assert!(fixture.db.is_file());
+    drop(fixture);
+    assert!(
+        !directory.exists(),
+        "fixture must close its SQLite handles before removing its temporary directory"
+    );
+}
+
 #[test]
 fn drive_pending_publication_defers_old_version_path_retirement() {
     let mut f = Fixture::new(&[

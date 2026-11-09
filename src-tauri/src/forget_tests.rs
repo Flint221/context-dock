@@ -2,11 +2,12 @@ use crate::{path_selection, registry::Registry};
 use std::{collections::HashSet, fs};
 use tempfile::{tempdir, TempDir};
 struct Fixture {
-    _temp: TempDir,
     root: std::path::PathBuf,
     db: std::path::PathBuf,
     r: Registry,
     id: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 impl Fixture {
     fn new(files: &[(&str, &str)]) -> Self {

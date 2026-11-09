@@ -9,10 +9,11 @@ use crate::{
 use serde_json::{json, Value};
 use std::{cell::RefCell, fs};
 struct Fixture {
-    _temp: tempfile::TempDir,
     r: Registry,
     p: String,
     chat: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: tempfile::TempDir,
 }
 impl Fixture {
     fn new() -> Self {

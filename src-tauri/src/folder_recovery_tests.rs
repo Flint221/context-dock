@@ -8,11 +8,12 @@ use serde_json::json;
 use std::{collections::HashSet, fs, path::PathBuf};
 
 struct Fixture {
-    _temp: tempfile::TempDir,
     root: PathBuf,
     db: PathBuf,
     r: Registry,
     id: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: tempfile::TempDir,
 }
 impl Fixture {
     fn new(tracking: bool) -> Self {

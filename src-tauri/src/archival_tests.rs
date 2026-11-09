@@ -3,11 +3,12 @@ use std::{collections::HashSet, fs, path::PathBuf};
 use tempfile::{tempdir, TempDir};
 
 struct Fixture {
-    _temp: TempDir,
     root: PathBuf,
     r: Registry,
     project: String,
     document: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 impl Fixture {
     fn new() -> Self {

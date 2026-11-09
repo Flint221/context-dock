@@ -146,11 +146,12 @@ fn docx_corruption_xml_and_decompression_guards() {
         .contains("document.xml"));
 }
 struct Fixture {
-    _temp: TempDir,
     root: PathBuf,
     r: Registry,
     project: String,
     doc: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 impl Fixture {
     fn new() -> Self {

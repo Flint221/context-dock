@@ -8,10 +8,11 @@ use crate::{
 use std::{collections::HashSet, fs};
 use tempfile::{tempdir, TempDir};
 struct Fixture {
-    _temp: TempDir,
     root: std::path::PathBuf,
     r: Registry,
     id: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 #[test]
 fn latest_approval_uses_drive_policy_and_rejects_changed_publication_settings() {

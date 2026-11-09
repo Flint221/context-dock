@@ -237,11 +237,12 @@ fn missing() -> ApiError {
     }
 }
 struct Fixture {
-    _temp: TempDir,
     root: PathBuf,
     r: Registry,
     id: String,
     doc: String,
+    // SQLite handles must close before Windows removes the temporary directory.
+    _temp: TempDir,
 }
 #[test]
 fn idle_cloud_checks_wait_for_change_or_deadline_and_never_delay_due_indexing() {
