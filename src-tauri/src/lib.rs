@@ -46,6 +46,8 @@ mod desktop_tests;
 mod drive_api;
 mod drive_auth;
 mod drive_commands;
+#[cfg(all(test, windows, feature = "pilot"))]
+mod drive_live_tests;
 mod drive_publication_commands;
 mod drive_publish;
 #[cfg(test)]
