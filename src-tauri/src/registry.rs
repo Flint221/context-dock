@@ -24,10 +24,10 @@ impl Registry {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 15 {
+        if version > 16 {
             return Err("This database requires a newer ContextDock version.".into());
         }
-        if version < 15 {
+        if version < 16 {
             db.pragma_update(None, "foreign_keys", false)
                 .map_err(error)?;
         }
@@ -37,7 +37,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 15 {
+        if version > 16 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -105,6 +105,10 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/015_drive_scheduler.sql"))
                 .map_err(error)?;
         }
+        if version < 16 {
+            tx.execute_batch(include_str!("../migrations/016_latest_workflow.sql"))
+                .map_err(error)?;
+        }
         let invalid: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
@@ -115,7 +119,7 @@ impl Registry {
         if invalid {
             return Err("Registry migration found invalid history references. No migration changes were committed.".into());
         }
-        tx.pragma_update(None, "user_version", 15).map_err(error)?;
+        tx.pragma_update(None, "user_version", 16).map_err(error)?;
         tx.commit().map_err(error)?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(error)?;
@@ -181,6 +185,11 @@ impl Registry {
     pub fn remove_with_cloud_choice(&self, id: &str, retain_cloud: bool) -> Result<()> {
         // Tombstone the registration: captured history and bytes can be recovered by registering the same root again.
         let tx = self.db.unchecked_transaction().map_err(error)?;
+        tx.execute(
+            "UPDATE drive_projects SET enabled=0,requested=0 WHERE project_id=?1",
+            [id],
+        )
+        .map_err(error)?;
         let p = crate::cloud::project(&tx, id)?;
         if !retain_cloud && crate::cloud_cleanup::has_remote(&tx, &p)? {
             return Err("Delete and verify this project's cloud data first, or explicitly choose to retain it.".into());
@@ -288,9 +297,10 @@ impl Registry {
     }
     pub fn snapshot(&self) -> Result<Snapshot> {
         self.check_folders()?;
-        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived'),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id),p.folder_state FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
+        let latest = crate::latest_tracking::enabled(&self.db);
+        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition='ignored')),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id),p.folder_state FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
         let projects = q
-            .query_map([], |r| {
+            .query_map([latest], |r| {
                 Ok(Project {
                     id: r.get(0)?,
                     name: r.get(1)?,
@@ -310,9 +320,9 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
-        let mut q=self.db.prepare("SELECT s.id,s.project_id,s.name,s.relative_path,p.path,s.kind,s.size,s.modified_at,s.last_observed,s.status,s.document_id FROM source_files s JOIN projects p ON p.id=s.project_id WHERE p.removed_at IS NULL AND s.status!='archived' ORDER BY s.relative_path COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT s.id,s.project_id,s.name,s.relative_path,p.path,s.kind,s.size,s.modified_at,s.last_observed,s.status,s.document_id FROM source_files s JOIN projects p ON p.id=s.project_id WHERE p.removed_at IS NULL AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition='ignored') ORDER BY s.relative_path COLLATE NOCASE").map_err(error)?;
         let documents = q
-            .query_map([], |r| {
+            .query_map([latest], |r| {
                 let root: String = r.get(4)?;
                 let relative: String = r.get(3)?;
                 Ok(Document {

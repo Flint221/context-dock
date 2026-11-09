@@ -20,6 +20,7 @@ impl Registry {
         archive: bool,
         _selected: Vec<String>,
     ) -> Result<()> {
+        let archive = archive && !crate::latest_tracking::enabled(&self.db);
         let root_string = self.path(project)?;
         let root = Path::new(&root_string);
         let (was_enabled, was_archive, initialized) = self.tracking_flags(project)?;
@@ -110,7 +111,8 @@ impl Registry {
                         params![matching::stem(&source.name).display, source.document_id],
                     )
                     .map_err(error)?;
-                let result = storage::stage(root, &source.relative, &self.store)
+                let result = self
+                    .stage_tracking(root, &source.relative)
                     .and_then(|stage| self.capture(&source, stage, "initial_tracking", false));
                 if let Err(e) = result {
                     self.activity(
@@ -131,7 +133,7 @@ impl Registry {
             let errors = self.recover_operations(project, true)?;
             self.set_tracking_error(project, &errors)?;
         }
-        let errors = self.finish_archival_intent(project)?;
+        let errors = self.finish_tracking_archival(project)?;
         if !errors.is_empty() {
             self.set_tracking_error(project, &errors)?;
         }
@@ -211,7 +213,7 @@ impl Registry {
                 )
                 .map_err(error)?;
         }
-        let mut problems = self.finish_archival_intent(project)?;
+        let mut problems = self.finish_tracking_archival(project)?;
         problems.extend(self.recover_operations(project, full)?);
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         self.reconcile_relocations(project, root, &path_rules)?;
@@ -317,7 +319,7 @@ impl Registry {
             {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(s) => s,
                 Err(_) => continue,
             };
@@ -398,7 +400,7 @@ impl Registry {
             if !changed {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(s) => s,
                 Err(e) => {
                     self.activity(
@@ -505,7 +507,7 @@ impl Registry {
             }
         }
         problems.extend(self.recover_operations(project, false)?);
-        problems.extend(self.finish_archival_intent(project)?);
+        problems.extend(self.finish_tracking_archival(project)?);
         let blocked:i64=self.db.query_row("SELECT COUNT(*) FROM operations WHERE project_id=?1 AND error IS NOT NULL AND state NOT IN ('done','cancelled','restored')",[project],|r|r.get(0)).map_err(error)?;
         if blocked > 0 && problems.is_empty() {
             problems.push("A journal operation needs review or an explicit retry below.".into());
@@ -586,7 +588,7 @@ impl Registry {
             if candidates.is_empty() {
                 continue;
             }
-            let staged = match storage::stage(root, &source.relative, &self.store) {
+            let staged = match self.stage_tracking(root, &source.relative) {
                 Ok(staged) => staged,
                 Err(_) => continue,
             };
@@ -822,7 +824,7 @@ impl Registry {
             return Err("Enable tracking before assigning or capturing a document.".into());
         }
         let root = self.path(project)?;
-        let stage = storage::stage(Path::new(&root), &source.relative, &self.store)?;
+        let stage = self.stage_tracking(Path::new(&root), &source.relative)?;
         let target = match action {
             "assign" => {
                 let target = target.ok_or("Choose a document family.")?;

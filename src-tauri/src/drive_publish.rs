@@ -331,7 +331,7 @@ pub struct Current {
     pub root: String,
 }
 pub fn current(db: &Connection, project: &str, document: &str) -> Result<Current> {
-    let current = db.query_row("SELECT d.id,d.current_version_id,s.id,s.name,s.relative_path,v.sha256,v.size,p.path FROM documents d JOIN projects p ON p.id=d.project_id JOIN source_files s ON s.id=d.active_source_id AND s.document_id=d.id JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=?1 AND d.project_id=?2 AND d.merged_into IS NULL AND d.tracking_state='tracked' AND s.status='available' AND d.kind IN ('markdown','word') AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.state!='done') AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files sf ON sf.id=m.source_id WHERE sf.document_id=d.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))",params![document,project],|r|Ok(Current{document:r.get(0)?,version:r.get(1)?,source:r.get(2)?,name:r.get(3)?,relative:r.get(4)?,hash:r.get(5)?,size:r.get(6)?,root:r.get(7)?})).map_err(|_|ApiError {retry:true,waiting:true,..ApiError::local("Waiting for a stable, selected document without unresolved duplicates or moves.")})?;
+    let current = db.query_row("SELECT d.id,d.current_version_id,s.id,s.name,s.relative_path,v.sha256,v.size,p.path FROM documents d JOIN projects p ON p.id=d.project_id JOIN source_files s ON s.id=d.active_source_id AND s.document_id=d.id JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=?1 AND d.project_id=?2 AND d.merged_into IS NULL AND d.tracking_state='tracked' AND s.status='available' AND s.size=v.size AND s.hashed_stamp IS s.modified_at AND s.last_hash=v.sha256 AND d.kind IN ('markdown','word') AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.kind IN ('capture','initial_import') AND o.state IN ('pending','finalized','blocked')) AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files sf ON sf.id=m.source_id WHERE sf.document_id=d.id OR EXISTS(SELECT 1 FROM json_each(m.candidate_ids) j WHERE j.value=d.id))",params![document,project],|r|Ok(Current{document:r.get(0)?,version:r.get(1)?,source:r.get(2)?,name:r.get(3)?,relative:r.get(4)?,hash:r.get(5)?,size:r.get(6)?,root:r.get(7)?})).map_err(|_|ApiError {retry:true,waiting:true,..ApiError::local("Waiting for a stable, selected document without unresolved duplicates or moves.")})?;
     if !crate::path_selection::allowed(db, project, &current.relative)? {
         return Err(ApiError::local(
             "This document is excluded from the saved folder selection.",
@@ -353,13 +353,14 @@ pub fn eligible_documents(db: &Connection, project: &str) -> Result<Vec<String>>
 }
 pub fn generation(current: &Current) -> String {
     crate::cloud::scope(&format!(
-        "{}:{}:{}:{}:{}:{}",
+        "{}:{}:{}:{}:{}:{}:{}",
         current.document,
         current.version,
         current.source,
         current.name,
         current.relative,
-        current.hash
+        current.hash,
+        current.root
     ))
 }
 fn owns(

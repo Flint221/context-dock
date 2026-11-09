@@ -151,6 +151,35 @@ pub struct Staged {
     pub size: i64,
     pub modified: Option<String>,
 }
+pub fn stage_metadata(root: &Path, relative: &str) -> Result<Staged> {
+    let source = checked(root, relative, false)?;
+    let first = fs::metadata(&source.path).map_err(io)?;
+    let quiet = Duration::from_millis(if cfg!(test) { 5 } else { 650 });
+    if first
+        .modified()
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_none_or(|age| age < quiet)
+    {
+        std::thread::sleep(quiet);
+    }
+    let mut file = locked_read(&source.path, false)?;
+    let before = file.metadata().map_err(io)?;
+    if first.len() != before.len() || stamp(&first) != stamp(&before) {
+        return Err("Document is still being written; capture will be retried.".into());
+    }
+    let hash = hash(&mut file)?;
+    let after = file.metadata().map_err(io)?;
+    if before.len() != after.len() || stamp(&before) != stamp(&after) {
+        return Err("Document changed while being captured. Source was left intact.".into());
+    }
+    Ok(Staged {
+        temporary: String::new(),
+        hash,
+        size: i64::try_from(after.len()).map_err(|_| "Document is too large.")?,
+        modified: stamp(&after),
+    })
+}
 pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     let source = checked(root, relative, false)?;
     let first = fs::metadata(&source.path).map_err(io)?;
@@ -262,6 +291,9 @@ pub fn snapshot_seal(store: &Path, temp: &str, final_relative: &str) -> Result<(
     Ok(())
 }
 pub fn discard_stage(store: &Path, temp: &str) -> Result<()> {
+    if temp.is_empty() {
+        return Ok(());
+    }
     let p = checked(store, temp, false)?;
     fs::remove_file(&p.path).map_err(io)
 }

@@ -27,7 +27,7 @@ impl Fixture {
         .unwrap();
         let store = temp.path().join("app");
         fs::create_dir(&store).unwrap();
-        let mut r = Registry::open(&store.join("test.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&store.join("test.db")).unwrap();
         let p = r.add("Synthetic", folder.to_str().unwrap()).unwrap();
         let sources = r.source_ids(&p).unwrap();
         r.configure_tracking(&p, true, false, sources).unwrap();
@@ -116,7 +116,7 @@ fn ai_migration_preserves_schema_three_entities_cloud_settings_and_snapshots() {
         .unwrap();
     let path = f.r.store.join("test.db");
     drop(f.r);
-    let r = Registry::open(&path).unwrap();
+    let r = Registry::open_legacy_fixture(&path).unwrap();
     assert_eq!(r.snapshot().unwrap().projects[0].id, f.p);
     assert_eq!(
         s(&cloud::project(&r.db, &f.p).unwrap(), "store_id"),

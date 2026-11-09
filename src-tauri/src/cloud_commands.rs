@@ -365,6 +365,16 @@ impl IdleChecks {
     }
 }
 impl CloudRuntime {
+    /// Only the local mutation gate survives in the current app. Legacy cloud
+    /// request handlers are unregistered; this starts no worker or HTTP work.
+    pub fn dormant(path: PathBuf) -> std::io::Result<Self> {
+        Ok(Self {
+            path: runtime_database_path(path)?,
+            gate: Arc::new(Mutex::new(())),
+            stop: Arc::new(AtomicBool::new(true)),
+            worker: None,
+        })
+    }
     pub(crate) fn request_stop(&self) {
         self.stop.store(true, Ordering::Relaxed);
         if let Some(worker) = &self.worker {

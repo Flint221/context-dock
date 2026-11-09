@@ -161,7 +161,7 @@ impl Fixture {
         fs::create_dir(&store).unwrap();
         fs::write(root.join("Master.md"), "one\n").unwrap();
         fs::write(root.join("Other.md"), "other\n").unwrap();
-        let mut r = Registry::open(&store.join("registry.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&store.join("registry.db")).unwrap();
         let project = r.add("Test", root.to_str().unwrap()).unwrap();
         let ids = r.source_ids(&project).unwrap();
         r.configure_tracking(&project, true, false, ids).unwrap();

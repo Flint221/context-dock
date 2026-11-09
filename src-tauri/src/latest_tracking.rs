@@ -1,0 +1,167 @@
+use crate::{
+    models, operations,
+    registry::{error, Registry, Result},
+    storage,
+    tracking_queries::Source,
+};
+use rusqlite::{params, Connection, OptionalExtension};
+use std::path::Path;
+pub fn enabled(db: &Connection) -> bool {
+    crate::review::preference(db, "workflow.latest_only", true)
+}
+impl Registry {
+    fn latest_source(&self, project: &str, path: &str) -> Result<serde_json::Value> {
+        let sources=crate::cloud::rows(&self.db,"SELECT id,document_id,relative_path,status,last_hash FROM source_files WHERE project_id=?1",&[&project])?;
+        let sources = sources
+            .into_iter()
+            .filter(|s| {
+                crate::path_selection::normalized(crate::cloud::s(s, "relative_path")) == path
+            })
+            .collect::<Vec<_>>();
+        if sources.len() != 1 {
+            return Err("The missing path is ambiguous or no longer registered. Refresh and review it again.".into());
+        }
+        Ok(sources.into_iter().next().unwrap())
+    }
+    pub(crate) fn latest_forget_plan(
+        &mut self,
+        project: &str,
+        path: &str,
+    ) -> Result<crate::forget::Plan> {
+        crate::folder_recovery::require_ready(&self.db, project)?;
+        self.refresh(project)?;
+        let path = crate::path_selection::normalized(path);
+        let source = self.latest_source(project, &path)?;
+        if crate::cloud::s(&source, "status") != "missing" {
+            return Err("Only a confirmed missing file can stop being tracked here. Present or inaccessible files are kept.".into());
+        }
+        let revision = crate::path_selection::revision(&self.db, project)?;
+        let folder_revision: i64 = self
+            .db
+            .query_row(
+                "SELECT folder_revision FROM projects WHERE id=?1",
+                [project],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        let token = crate::cloud::scope(&format!(
+            "{project}:{path}:{revision}:{folder_revision}:{}",
+            source
+        ));
+        Ok(crate::forget::Plan {
+            path,
+            revision_count: 0,
+            bytes: 0,
+            blockers: vec![],
+            token,
+        })
+    }
+    pub(crate) fn latest_forget(
+        &mut self,
+        project: &str,
+        path: &str,
+        token: &str,
+    ) -> Result<Vec<String>> {
+        let plan = self.latest_forget_plan(project, path)?;
+        if plan.token != token {
+            return Err(
+                "The file or folder selection changed. Review the missing file again.".into(),
+            );
+        }
+        let source = self.latest_source(project, &plan.path)?;
+        let source_id = crate::cloud::s(&source, "id");
+        let tx = self.db.transaction().map_err(error)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO path_exclusions(project_id,path,kind) VALUES(?1,?2,'file')",
+            params![project, plan.path],
+        )
+        .map_err(error)?;
+        tx.execute("INSERT INTO path_selection(project_id,revision) VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET revision=revision+1",[project]).map_err(error)?;
+        tx.execute("UPDATE documents SET tracking_state='ignored' WHERE project_id=?1 AND active_source_id=?2",params![project,source_id]).map_err(error)?;
+        tx.execute(
+            "UPDATE source_files SET disposition='ignored' WHERE project_id=?1 AND id=?2",
+            params![project, source_id],
+        )
+        .map_err(error)?;
+        tx.execute(
+            "DELETE FROM new_paths WHERE project_id=?1 AND path=?2",
+            params![project, plan.path],
+        )
+        .map_err(error)?;
+        tx.commit().map_err(error)?;
+        Ok(vec![])
+    }
+    pub(crate) fn finish_tracking_archival(&mut self, project: &str) -> Result<Vec<String>> {
+        if enabled(&self.db) {
+            Ok(vec![])
+        } else {
+            self.finish_archival_intent(project)
+        }
+    }
+    /// Explicit historical-regression fixture; production always opens through
+    /// `open` and the current migration's latest-only policy.
+    #[cfg(test)]
+    pub(crate) fn open_legacy_fixture(path: &Path) -> Result<Self> {
+        let r = Self::open(path)?;
+        crate::review::set_preference(&r.db, "workflow.latest_only", false)?;
+        Ok(r)
+    }
+    pub(crate) fn stage_tracking(&self, root: &Path, relative: &str) -> Result<storage::Staged> {
+        if enabled(&self.db) {
+            storage::stage_metadata(root, relative)
+        } else {
+            storage::stage(root, relative, &self.store)
+        }
+    }
+    pub(crate) fn capture_metadata(
+        &mut self,
+        source: &Source,
+        staged: storage::Staged,
+        reason: &str,
+    ) -> Result<()> {
+        let group = crate::versioning::effective(&self.db, &source.document_id, &source.name)?;
+        let previous:Option<(String,String,String,String)>=self.db.query_row("SELECT v.id,v.snapshot_relative,COALESCE(v.version_key,''),v.sha256 FROM documents d JOIN document_versions v ON v.id=d.current_version_id WHERE d.id=?1",[&source.document_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(error)?;
+        let reusable = previous
+            .as_ref()
+            .filter(|(_, path, key, _)| path.starts_with("metadata/") && *key == group)
+            .map(|(id, _, _, _)| id.clone());
+        let tx = self.db.transaction().map_err(error)?;
+        let version = if let Some(version) = reusable {
+            tx.execute("UPDATE document_versions SET source_name=?2,source_relative=?3,captured_at=?4,modified_at=?5,size=?6,sha256=?7,reason=?8 WHERE id=?1",params![version,source.name,source.relative,models::now(),staged.modified,staged.size,staged.hash,reason]).map_err(error)?;
+            version
+        } else {
+            let version = uuid::Uuid::new_v4().to_string();
+            let number: i64 = tx
+                .query_row(
+                    "SELECT COALESCE(MAX(number),0)+1 FROM document_versions WHERE document_id=?1",
+                    [&source.document_id],
+                    |r| r.get(0),
+                )
+                .map_err(error)?;
+            let placeholder = format!("metadata/{}/{version}", source.document_id);
+            tx.execute("INSERT INTO document_versions(id,document_id,number,source_name,source_relative,captured_at,modified_at,size,sha256,snapshot_relative,reason,version_key) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",params![version,source.document_id,number,source.name,source.relative,models::now(),staged.modified,staged.size,staged.hash,placeholder,reason,group]).map_err(error)?;
+            version
+        };
+        operations::activate(
+            &tx,
+            source,
+            &version,
+            &staged.hash,
+            staged.size,
+            staged.modified.as_deref(),
+        )?;
+        tx.commit().map_err(error)?;
+        storage::discard_stage(&self.store, &staged.temporary)?;
+        if previous.is_none_or(|(_, _, _, hash)| hash != staged.hash) {
+            self.activity(
+                &source.project_id,
+                "tracked",
+                &format!(
+                    "{}: latest contents tracked and SHA-256 verified.",
+                    source.name
+                ),
+            )?;
+        }
+        Ok(())
+    }
+}

@@ -1,9 +1,8 @@
-import { Cloud, FolderTree, MessageSquare } from "lucide-react";
-export type ProjectTab = "files" | "cloud" | "ai";
+import { Cloud, FolderTree } from "lucide-react";
+export type ProjectTab = "files" | "cloud";
 const tabs = [
   { id: "files", label: "Files & tracking", Icon: FolderTree },
-  { id: "cloud", label: "Cloud sync", Icon: Cloud },
-  { id: "ai", label: "Ask AI", Icon: MessageSquare },
+  { id: "cloud", label: "Drive publishing", Icon: Cloud },
 ] as const;
 export function ProjectTabs({
   tab,

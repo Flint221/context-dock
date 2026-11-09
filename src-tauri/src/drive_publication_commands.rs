@@ -87,7 +87,20 @@ pub async fn drive_project_read(
         let (enabled,automatic,recycle,account,folder_id,error)=settings.unwrap_or((false,false,false,String::new(),None,None));
         let connected=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone())).is_some_and(|id|account.is_empty()||id==account);
         let root_ready=registry.db.query_row("SELECT root_ready FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
-        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,error,documents:drive_publish::publications(&registry.db,&project).map_err(|e|e.message)?})
+        let mut documents=drive_publish::publications(&registry.db,&project).map_err(|e|e.message)?;
+        let blocked=crate::path_selection::blocked_documents(&registry.db,&project)?;
+        let hidden=crate::cloud::rows(&registry.db,"SELECT id FROM documents WHERE project_id=?1 AND (merged_into IS NOT NULL OR tracking_state IN ('ignored','grouped_history'))",&[&project])?.into_iter().map(|d|crate::cloud::s(&d,"id").to_string()).collect::<std::collections::HashSet<_>>();
+        documents.retain(|d|!blocked.contains(&d.document_id)&&!hidden.contains(&d.document_id));
+        for document in &mut documents {
+            if document.state=="synced" {
+                match drive_publish::current(&registry.db,&project,&document.document_id) {
+                    Ok(current) if document.verified_hash.as_deref()==Some(current.hash.as_str()) && document.verified_name.as_deref()==Some(current.name.as_str()) => {},
+                    Ok(_)=>document.state="queued".into(),
+                    Err(_)=>document.state="waiting_file".into(),
+                }
+            }
+        }
+        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,error,documents})
     }).await
 }
 pub fn open(path: &std::path::Path) -> Result<Registry, String> {
@@ -226,7 +239,8 @@ pub async fn drive_project_action(
             }
         }
         if !problems.is_empty() {return Err(problems.join(" "));}
-        let pending=drive_publish::publications(&registry.db,&id).map_err(|e|e.message)?.iter().any(|d|d.state!="synced");
+        let publications=drive_publish::publications(&registry.db,&id).map_err(|e|e.message)?;
+        let pending=drive_publish::eligible_documents(&registry.db,&id).map_err(|e|e.message)?.iter().any(|document|publications.iter().all(|row|&row.document_id!=document||row.state!="synced"));
         registry.db.execute("UPDATE drive_projects SET requested=?2,attempts=0,next_at=0,error=NULL WHERE project_id=?1",params![id,pending]).map_err(error)?;
         Ok(())
     }).await.map_err(|_|"Drive publication task could not finish.".to_string())?;

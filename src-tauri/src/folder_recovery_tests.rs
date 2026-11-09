@@ -25,7 +25,7 @@ impl Fixture {
         fs::write(root.join("docs/Notes.md"), "Original notes").unwrap();
         fs::write(root.join("Other.md"), "Other content").unwrap();
         let db = app.join("test.db");
-        let mut r = Registry::open(&db).unwrap();
+        let mut r = Registry::open_legacy_fixture(&db).unwrap();
         let id = r.add("My project", root.to_str().unwrap()).unwrap();
         if tracking {
             let ids = r.source_ids(&id).unwrap();
@@ -66,7 +66,7 @@ fn loss_persists_across_restart_but_the_original_returning_root_reconnects() {
         f.r.snapshot().unwrap().projects[0].folder_state,
         "needs_reassignment"
     );
-    f.r = Registry::open(&f.db).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.db).unwrap();
     fs::rename(&target, &f.root).unwrap();
     // Startup workspace read checks lost roots as well as ready ones.
     assert_eq!(f.r.snapshot().unwrap().projects[0].folder_state, "ready");
@@ -164,7 +164,7 @@ fn different_directory_at_old_path_does_not_silently_replace_the_project() {
     let _target = f.moved();
     fs::create_dir(&f.root).unwrap();
     fs::write(f.root.join("unrelated.md"), "Wrong project").unwrap();
-    let r = Registry::open(&f.db).unwrap();
+    let r = Registry::open_legacy_fixture(&f.db).unwrap();
     assert_eq!(
         r.snapshot().unwrap().projects[0].folder_state,
         "needs_reassignment"
@@ -240,7 +240,7 @@ fn lost_root_blocks_capture_chat_cloud_and_recovery_without_losing_saved_data() 
 fn schema_five_migrates_in_place_and_all_missing_files_can_be_reviewed() {
     let mut f = Fixture::new(true);
     f.r.db.execute_batch("ALTER TABLE projects DROP COLUMN folder_state; ALTER TABLE projects DROP COLUMN folder_identity; ALTER TABLE projects DROP COLUMN folder_revision; PRAGMA user_version=5;").unwrap();
-    f.r = Registry::open(&f.db).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.db).unwrap();
     assert_eq!(f.r.snapshot().unwrap().projects[0].id, f.id);
     let empty = f.root.parent().unwrap().join("Empty replacement");
     fs::create_dir(&empty).unwrap();

@@ -1,27 +1,42 @@
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod ai;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod ai_commands;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod ai_inference;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod ai_models;
 #[cfg(test)]
 mod ai_tests;
+#[allow(dead_code)] // Historical readers retained for existing data and explicit legacy tests.
 mod archival;
 #[cfg(test)]
 mod archival_tests;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod chat;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod chat_commands;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod chat_stream;
 #[cfg(test)]
 mod chat_tests;
 mod cloud;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod cloud_api;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod cloud_cleanup;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod cloud_commands;
 mod cloud_credentials;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod cloud_models;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod cloud_sync;
 #[cfg(test)]
 mod cloud_tests;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod comparison;
+#[allow(dead_code)] // Retained legacy data/fixtures; no active AI or indexing commands.
 mod comparison_models;
 #[cfg(test)]
 mod comparison_tests;
@@ -47,6 +62,9 @@ mod forget;
 #[cfg(test)]
 mod forget_tests;
 mod initial_import;
+mod latest_tracking;
+#[cfg(test)]
+mod latest_tracking_tests;
 mod matching;
 mod models;
 mod monitor;
@@ -65,6 +83,7 @@ mod storage;
 mod tests;
 mod tracking;
 mod tracking_models;
+#[allow(dead_code)] // Historical readers retained for existing data and explicit legacy tests.
 mod tracking_queries;
 #[cfg(test)]
 mod tracking_tests;
@@ -139,7 +158,7 @@ async fn remove_project(
     retain_cloud: bool,
 ) -> Result<(), String> {
     work(state.inner().clone(), move |r| {
-        r.remove_with_cloud_choice(&id, retain_cloud)
+        r.remove_with_cloud_choice(&id, retain_cloud || crate::latest_tracking::enabled(&r.db))
     })
     .await
 }
@@ -212,39 +231,6 @@ async fn configure_tracking(
     .map_err(|e| format!("Tracking settings failed: {e}"))?
 }
 #[tauri::command]
-async fn archival_review(
-    state: tauri::State<'_, Store>,
-    project: String,
-    enabled: bool,
-) -> Result<archival::Review, String> {
-    work(state.inner().clone(), move |r| {
-        r.archival_review(&project, enabled)
-    })
-    .await
-}
-#[tauri::command]
-async fn apply_archival_review(
-    state: tauri::State<'_, Store>,
-    runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
-    app: tauri::AppHandle,
-    project: String,
-    enabled: bool,
-    token: String,
-) -> Result<(), String> {
-    let store = state.inner().clone();
-    let gate = runtime.gate.clone();
-    let id = project.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _gate = gate.lock().map_err(|_| "Cloud worker is unavailable.")?;
-        let mut r = store.0.lock().map_err(|_| "Registry is unavailable.")?;
-        r.apply_archival(&id, enabled, &token)
-    })
-    .await
-    .map_err(|e| format!("Archival action failed: {e}"))??;
-    let _ = app.emit("registry-changed", &project);
-    Ok(())
-}
-#[tauri::command]
 async fn resolve_match(
     state: tauri::State<'_, Store>,
     runtime: tauri::State<'_, cloud_commands::CloudRuntime>,
@@ -262,57 +248,6 @@ async fn resolve_match(
     })
     .await
     .map_err(|e| format!("Document selection failed: {e}"))?
-}
-#[tauri::command]
-async fn document_versions(
-    state: tauri::State<'_, Store>,
-    document: String,
-) -> Result<Vec<tracking_models::Version>, String> {
-    work(state.inner().clone(), move |r| {
-        r.published_versions(&document)
-    })
-    .await
-}
-#[tauri::command]
-async fn compare_versions(
-    state: tauri::State<'_, Store>,
-    earlier: String,
-    later: String,
-) -> Result<comparison_models::Comparison, String> {
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static RUNNING: AtomicBool = AtomicBool::new(false);
-    if RUNNING.swap(true, Ordering::AcqRel) {
-        return Err("A comparison is already running. Please retry when it finishes.".into());
-    }
-    struct Permit;
-    impl Drop for Permit {
-        fn drop(&mut self) {
-            RUNNING.store(false, Ordering::Release);
-        }
-    }
-    let permit = Permit;
-    let job = work(state.inner().clone(), move |r| {
-        r.comparison_job(&earlier, &later)
-    })
-    .await?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let _permit = permit;
-        comparison::compare(job)
-    })
-    .await
-    .map_err(|e| format!("Comparison worker failed: {e}"))?
-}
-#[tauri::command]
-async fn open_version_location(
-    state: tauri::State<'_, Store>,
-    version: String,
-    archive: bool,
-) -> Result<(), String> {
-    work(state.inner().clone(), move |r| {
-        let path = r.version_location(&version, archive)?;
-        open_location(&path)
-    })
-    .await
 }
 #[tauri::command]
 async fn open_current_location(
@@ -482,13 +417,8 @@ pub fn run() {
                 dir.join("contextdock.db"),
                 app.handle().clone(),
             )?);
-            app.manage(
-                ai_commands::Runtime::new(dir.join("contextdock.db"))
-                    .map_err(std::io::Error::other)?,
-            );
-            app.manage(cloud_commands::CloudRuntime::start(
+            app.manage(cloud_commands::CloudRuntime::dormant(
                 dir.join("contextdock.db"),
-                app.handle().clone(),
             )?);
             let handle = app.handle().clone();
             let monitor = monitor::Monitor::start(registry, move |project| {
@@ -526,12 +456,6 @@ pub fn run() {
             desktop::pending_read,
             desktop::pending_preview,
             desktop::pending_apply,
-            ai_commands::ai_action,
-            chat_commands::chat_action,
-            cloud_commands::cloud_read,
-            cloud_commands::cloud_link,
-            cloud_commands::cloud_key,
-            cloud_commands::cloud_action,
             snapshot,
             path_selection_view,
             save_path_selection,
@@ -548,12 +472,7 @@ pub fn run() {
             open_project,
             tracking_view,
             configure_tracking,
-            archival_review,
-            apply_archival_review,
             resolve_match,
-            document_versions,
-            compare_versions,
-            open_version_location,
             open_current_location,
             retry_operations,
             processes::process_inventory,

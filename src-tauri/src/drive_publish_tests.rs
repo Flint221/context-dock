@@ -565,7 +565,7 @@ fn drive_publication_schema_thirteen_migration_keeps_ids_snapshots_and_cloud_off
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        15
+        16
     );
 }
 
@@ -794,7 +794,7 @@ fn drive_scheduler_schema_fourteen_upgrade_preserves_the_pending_operation() {
             .db
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        15
+        16
     );
 }
 

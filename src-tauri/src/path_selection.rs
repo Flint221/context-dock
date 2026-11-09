@@ -167,7 +167,8 @@ impl Registry {
                 },
             );
         }
-        let sources=cloud::rows(&self.db,"SELECT s.relative_path,s.status,EXISTS(SELECT 1 FROM new_paths n WHERE n.project_id=s.project_id AND n.path=lower(replace(s.relative_path,char(92),'/'))) is_new FROM source_files s WHERE s.project_id=?1 AND s.status!='archived'",&[&project])?;
+        let latest = crate::latest_tracking::enabled(&self.db);
+        let sources=cloud::rows(&self.db,"SELECT s.relative_path,s.status,EXISTS(SELECT 1 FROM new_paths n WHERE n.project_id=s.project_id AND n.path=lower(replace(s.relative_path,char(92),'/'))) is_new FROM source_files s WHERE s.project_id=?1 AND s.status!='archived' AND NOT(?2 AND s.status='missing' AND s.disposition='ignored')",&[&project,&latest])?;
         for s in sources {
             let path = cloud::s(&s, "relative_path").replace('\\', "/");
             entries.insert(
@@ -180,7 +181,15 @@ impl Registry {
                 },
             );
         }
+        let forgotten: HashSet<String> = if latest {
+            cloud::rows(&self.db,"SELECT relative_path FROM source_files WHERE project_id=?1 AND status='missing' AND disposition='ignored'",&[&project])?.iter().map(|s|normalized(cloud::s(s,"relative_path"))).collect()
+        } else {
+            HashSet::new()
+        };
         for rule in &exclusions {
+            if rule.kind == "file" && forgotten.contains(&rule.path) {
+                continue;
+            }
             entries.entry(rule.path.clone()).or_insert_with(|| Entry {
                 path: rule.path.clone(),
                 kind: rule.kind.clone(),
@@ -193,7 +202,11 @@ impl Registry {
             exclusions,
             entries: entries.into_values().collect(),
             warnings,
-            cloud_pending: cloud::selection_removals(&self.db, project)?.len(),
+            cloud_pending: if crate::latest_tracking::enabled(&self.db) {
+                0
+            } else {
+                cloud::selection_removals(&self.db, project)?.len()
+            },
         })
     }
     pub fn save_path_selection(
@@ -213,6 +226,7 @@ impl Registry {
     ) -> Result<()> {
         self.path(project)?;
         crate::folder_recovery::require_ready(&self.db, project)?;
+        let latest = crate::latest_tracking::enabled(&self.db);
         let next = validate(input)?;
         let previous = rules(&self.db, project)?;
         let tx = self.db.transaction().map_err(error)?;
@@ -223,8 +237,9 @@ impl Registry {
             );
         }
         let p = cloud::project(&tx, project)?;
-        if ["cleanup_pending", "cleanup_failed"].contains(&cloud::s(&p, "status"))
-            || cloud::n(&p, "delete_requested") == 1
+        if !latest
+            && (["cleanup_pending", "cleanup_failed"].contains(&cloud::s(&p, "status"))
+                || cloud::n(&p, "delete_requested") == 1)
         {
             return Err("Finish cloud cleanup before changing folder selection.".into());
         }
@@ -277,32 +292,43 @@ impl Registry {
                 .map_err(error)?;
             }
         }
-        let blocked = blocked_versions(&tx, project)?;
-        for j in cloud::jobs(&tx, project)? {
-            if blocked.contains(cloud::s(&j, "version_id")) {
-                tx.execute("UPDATE cloud_jobs SET desired=0,phase=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') THEN 'path_remove' ELSE phase END,state=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') THEN 'removing' ELSE state END,next_at=0,error=NULL WHERE id=?1",[cloud::s(&j,"id")]).map_err(error)?;
+        if !latest {
+            let blocked = blocked_versions(&tx, project)?;
+            for j in cloud::jobs(&tx, project)? {
+                if blocked.contains(cloud::s(&j, "version_id")) {
+                    tx.execute("UPDATE cloud_jobs SET desired=0,phase=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') THEN 'path_remove' ELSE phase END,state=CASE WHEN file_id IS NOT NULL AND state NOT IN ('removed','purged') THEN 'removing' ELSE state END,next_at=0,error=NULL WHERE id=?1",[cloud::s(&j,"id")]).map_err(error)?;
+                }
             }
-        }
-        tx.execute("UPDATE cloud_projects SET revision=revision+1,sync_requested=CASE WHEN enabled=1 AND started=1 THEN 1 ELSE sync_requested END,next_at=0,error=NULL,attempts=0 WHERE project_id=?1",[project]).map_err(error)?;
-        for job in cloud::jobs(&tx, project)? {
-            if blocked.contains(cloud::s(&job, "version_id"))
-                && (cloud::n(&job, "desired") != 0
-                    || (!cloud::s(&job, "file_id").is_empty()
-                        && !["removed", "purged"].contains(&cloud::s(&job, "state"))
-                        && (cloud::s(&job, "phase") != "path_remove"
-                            || cloud::s(&job, "state") != "removing")))
+            tx.execute("UPDATE cloud_projects SET revision=revision+1,sync_requested=CASE WHEN enabled=1 AND started=1 THEN 1 ELSE sync_requested END,next_at=0,error=NULL,attempts=0 WHERE project_id=?1",[project]).map_err(error)?;
+            for job in cloud::jobs(&tx, project)? {
+                if blocked.contains(cloud::s(&job, "version_id"))
+                    && (cloud::n(&job, "desired") != 0
+                        || (!cloud::s(&job, "file_id").is_empty()
+                            && !["removed", "purged"].contains(&cloud::s(&job, "state"))
+                            && (cloud::s(&job, "phase") != "path_remove"
+                                || cloud::s(&job, "state") != "removing")))
+                {
+                    return Err(
+                        "Cloud exclusion intent could not be verified. No folder changes saved."
+                            .into(),
+                    );
+                }
+            }
+            if cloud::n(&cloud::project(&tx, project)?, "revision") != cloud::n(&p, "revision") + 1
             {
                 return Err(
-                    "Cloud exclusion intent could not be verified. No folder changes saved.".into(),
+                    "Cloud selection revision could not be verified. No changes saved.".into(),
                 );
             }
         }
-        if cloud::n(&cloud::project(&tx, project)?, "revision") != cloud::n(&p, "revision") + 1 {
-            return Err("Cloud selection revision could not be verified. No changes saved.".into());
-        }
-        tx.execute("INSERT INTO tracking_activity(id,project_id,kind,message,created_at) VALUES(?1,?2,'path_selection','Folder/file selection saved. Excluded paths stop capture and leave the cloud index; local history is retained.',?3)",params![uuid::Uuid::new_v4().to_string(),project,models::now()]).map_err(error)?;
+        let message = if latest {
+            "Folder/file selection saved. Excluded paths stop monitoring and Drive publication; existing files are kept."
+        } else {
+            "Folder/file selection saved. Excluded paths stop capture and leave the cloud index; local history is retained."
+        };
+        tx.execute("INSERT INTO tracking_activity(id,project_id,kind,message,created_at) VALUES(?1,?2,'path_selection',?3,?4)",params![uuid::Uuid::new_v4().to_string(),project,message,models::now()]).map_err(error)?;
         if let Some((action, paths)) = review {
-            if cloud::n(&p, "auto_sync") == 0 {
+            if !latest && cloud::n(&p, "auto_sync") == 0 {
                 // Review grants path permission; it must not manufacture a Sync
                 // request for a project whose upload policy is manual.
                 tx.execute(

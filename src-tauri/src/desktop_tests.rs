@@ -50,7 +50,7 @@ impl Fixture {
         fs::create_dir(&root).unwrap();
         fs::create_dir(t.path().join("app")).unwrap();
         fs::write(root.join("Existing_v1.md"), "original").unwrap();
-        let mut r = Registry::open(&t.path().join("app/test.db")).unwrap();
+        let mut r = Registry::open_legacy_fixture(&t.path().join("app/test.db")).unwrap();
         let id = r.add("Disposable", root.to_str().unwrap()).unwrap();
         r.configure_tracking(&id, true, false, r.source_ids(&id).unwrap())
             .unwrap();
@@ -122,7 +122,7 @@ fn ignored_files_and_desktop_choices_survive_restart_without_losing_history() {
     review::apply(&mut f.r, &req, p["token"].as_str().unwrap()).unwrap();
     review::set_preference(&f.r.db, "desktop.uploads_paused", true).unwrap();
     review::set_preference(&f.r.db, "desktop.keep_running", false).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert!(review::pending(&f.r.db).unwrap().is_empty());
     assert!(!path_selection::allowed(&f.r.db, &f.id, "Unwanted.md").unwrap());
     assert!(desktop::uploads_paused(&f.r.db));
@@ -193,7 +193,7 @@ fn notification_batching_watermarks_survive_restart_and_throttle_new_bursts() {
     assert!(!review::notice_due(&f.r.db, key, "one,two", 1020, 30).unwrap());
     assert!(review::notice_due(&f.r.db, key, "one,two", 1030, 30).unwrap());
     review::notice_sent(&f.r.db, key, 1030).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert!(!review::notice_due(&f.r.db, key, "one,two", 1400, 30).unwrap());
     assert!(!review::notice_due(&f.r.db, key, "three", 1040, 30).unwrap());
     assert!(!review::notice_due(&f.r.db, key, "three", 1100, 30).unwrap());
@@ -210,7 +210,7 @@ fn schema_eleven_upgrade_preserves_registry_snapshots_and_pending_files() {
             "DROP TABLE review_decisions; DROP TABLE desktop_notices; PRAGMA user_version=11;",
         )
         .unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     assert_eq!(
         before,
         cloud::rows(&f.r.db, "SELECT * FROM document_versions", &[]).unwrap()
@@ -447,7 +447,7 @@ fn shared_drive_folder_alert_is_one_durable_batch_and_rearms_after_recovery() {
     }
     assert!(desktop::parse_route(&route).is_some());
     review::notice_sent(&f.r.db, "problem:unavailable-folders", 1030).unwrap();
-    f.r = Registry::open(&f.r.store.join("test.db")).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.r.store.join("test.db")).unwrap();
     let mut reversed = projects.clone();
     reversed.reverse();
     assert!(

@@ -19,7 +19,7 @@ impl Fixture {
             fs::write(root.join(path), text).unwrap();
         }
         let db = app.join("registry.db");
-        let mut r = Registry::open(&db).unwrap();
+        let mut r = Registry::open_legacy_fixture(&db).unwrap();
         let id = r.add("Disposable", root.to_str().unwrap()).unwrap();
         r.configure_tracking(&id, true, false, vec![]).unwrap();
         Self {
@@ -54,7 +54,7 @@ fn forgetting_unapproved_deleted_file_clears_discovery_pending_rules_and_restart
     assert_eq!(f.count("SELECT count(*) FROM new_paths"), 0);
     assert_eq!(f.count("SELECT count(*) FROM path_exclusions"), 0);
     drop(f.r);
-    f.r = Registry::open(&f.db).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.db).unwrap();
     assert_eq!(
         f.r.path_selection(&f.id)
             .unwrap()
@@ -248,7 +248,7 @@ fn forgetting_excluded_current_file_never_selects_retained_older_history() {
         assert_eq!(f.count("SELECT count(*) FROM pragma_foreign_key_check"), 0);
         assert!(f.root.join("Keep_v1.md").exists());
         drop(f.r);
-        f.r = Registry::open(&f.db).unwrap();
+        f.r = Registry::open_legacy_fixture(&f.db).unwrap();
         assert_eq!(
             crate::cloud::view(&f.r.db, &f.id).unwrap()["localReady"],
             true
@@ -335,7 +335,7 @@ fn locked_snapshot_cleanup_is_durable_and_retried_after_restart() {
     assert!(f.r.store.join(&relative).exists());
     drop(lock);
     drop(f.r);
-    f.r = Registry::open(&f.db).unwrap();
+    f.r = Registry::open_legacy_fixture(&f.db).unwrap();
     assert!(!f.r.store.join(relative).exists());
     assert_eq!(f.count("SELECT count(*) FROM forgotten_snapshots"), 0);
 }

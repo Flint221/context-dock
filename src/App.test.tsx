@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
 import { cloud } from "./cloud";
+import { drive } from "./drive";
 import { registry } from "./services/registry";
 import type { Snapshot } from "./types";
 import { processes } from "./services/processes";
@@ -19,8 +20,21 @@ vi.mock("./services/registry", () => ({
     pickFolder: vi.fn(),
     subscribe: vi.fn(),
     tracking: vi.fn(),
+    configureTracking: vi.fn(),
     paths: vi.fn(),
     savePaths: vi.fn(),
+  },
+}));
+vi.mock("./drive", () => ({
+  drive: {
+    connection: vi.fn(),
+    project: vi.fn(),
+    subscribe: vi.fn(),
+    action: vi.fn(),
+    cancel: vi.fn(),
+    configure: vi.fn(),
+    publish: vi.fn(),
+    createFolders: vi.fn(),
   },
 }));
 vi.mock("./cloud", async (original) => ({
@@ -36,7 +50,7 @@ let state: Snapshot;
 it("preserves page controls during status updates and resets the scene and scroll only on navigation", async () => {
   let notify: () => void = () => {};
   vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
-    notify = cb;
+    if (vi.mocked(registry.subscribe).mock.calls.length === 1) notify = cb;
     return () => {};
   });
   const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
@@ -46,6 +60,8 @@ it("preserves page controls during status updates and resets the scene and scrol
   });
   const user = userEvent.setup();
   render(<App />);
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByText("Optional tools"));
   await user.click(screen.getByRole("button", { name: "Current processes" }));
   const search = await screen.findByRole("searchbox", {
     name: "Search apps or ports",
@@ -70,31 +86,29 @@ it("preserves page controls during status updates and resets the scene and scrol
   });
   inventory.mockRestore();
 });
-it("places Current processes above Settings and opens it independently of project registrations", async () => {
+it("opens on Projects and keeps process tools out of the main navigation", async () => {
+  const user = userEvent.setup();
   const inventory = vi.spyOn(processes, "inventory").mockResolvedValue({
     processes: [],
     warnings: [],
     scannedAt: "2026-10-20T12:00:00Z",
   });
-  const user = userEvent.setup();
   render(<App />);
   const nav = screen.getByRole("navigation", { name: "Main navigation" });
-  const buttons = within(nav).getAllByRole("button");
-  expect(buttons[2]).toHaveTextContent("Pending approvals");
-  expect(buttons[3]).toHaveTextContent("Current processes");
-  expect(buttons[4]).toHaveTextContent("Settings");
-  await user.click(buttons[3]);
+  expect(
+    within(nav).queryByRole("button", { name: "Dashboard" }),
+  ).not.toBeInTheDocument();
+  expect(
+    within(nav).queryByRole("button", { name: "Current processes" }),
+  ).not.toBeInTheDocument();
+  expect(inventory).not.toHaveBeenCalled();
+  await user.click(screen.getByRole("button", { name: "Settings" }));
+  await user.click(await screen.findByText("Optional tools"));
+  await user.click(screen.getByRole("button", { name: "Current processes" }));
   expect(
     await screen.findByRole("button", { name: "Refresh processes" }),
   ).toBeInTheDocument();
-  await waitFor(() => expect(inventory).toHaveBeenCalled());
-  expect(
-    screen.queryByRole("button", { name: "Add project" }),
-  ).not.toBeInTheDocument();
-  await user.click(buttons[4]);
-  expect(
-    screen.queryByRole("button", { name: "Refresh processes" }),
-  ).not.toBeInTheDocument();
+  await waitFor(() => expect(inventory).toHaveBeenCalledOnce());
   inventory.mockRestore();
 });
 it("does not let an older registry read dismiss a newer folder-loss state", async () => {
@@ -116,7 +130,7 @@ it("does not let an older registry read dismiss a newer folder-loss state", asyn
   state = { projects: [p], documents: [], theme: "system" };
   let notify: () => void = () => {};
   vi.mocked(registry.subscribe).mockImplementation(async (cb) => {
-    notify = cb;
+    if (vi.mocked(registry.subscribe).mock.calls.length === 1) notify = cb;
     return () => {};
   });
   let finish: (value: Snapshot) => void = () => {};
@@ -135,17 +149,33 @@ it("does not let an older registry read dismiss a newer folder-loss state", asyn
     ],
   };
   await act(async () => notify());
-  expect(
-    await screen.findByText("Folders needing attention", { selector: "h2" }),
-  ).toBeInTheDocument();
+  expect(await screen.findByText("Folder unavailable")).toBeInTheDocument();
   await act(async () =>
     finish({ projects: [p], documents: [], theme: "system" }),
   );
-  expect(
-    screen.getByText("Folders needing attention", { selector: "h2" }),
-  ).toBeInTheDocument();
+  expect(screen.getByText("Folder unavailable")).toBeInTheDocument();
 });
 beforeEach(() => {
+  vi.mocked(drive.connection).mockResolvedValue({
+    configured: false,
+    connected: false,
+    connecting: false,
+    account: null,
+    error: null,
+  });
+  vi.mocked(drive.project).mockResolvedValue({
+    enabled: false,
+    automatic: false,
+    recycle: false,
+    connected: false,
+    accountId: null,
+    folderId: null,
+    rootReady: false,
+    error: null,
+    documents: [],
+  });
+  vi.mocked(drive.subscribe).mockResolvedValue(() => {});
+
   vi.mocked(registry.paths).mockResolvedValue({
     revision: 0,
     exclusions: [],
@@ -310,7 +340,12 @@ it("registers a real picker selection and opens its discovered documents", async
       name: "Add project",
     }),
   );
-  expect(await screen.findByText("Context.md")).toBeInTheDocument();
+  expect(
+    await screen.findByRole("heading", { name: "Cattle Tool" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "Monitor selected files" }),
+  ).not.toBeChecked();
   expect(registry.add).toHaveBeenCalledWith(
     "Cattle Tool",
     "C:\\Temporary project",
@@ -318,7 +353,7 @@ it("registers a real picker selection and opens its discovered documents", async
   await user.click(screen.getByText("Project folder and options"));
   await user.click(screen.getByRole("button", { name: "Remove project" }));
   expect(
-    screen.getByText(/snapshots, version history and saved chats/),
+    screen.getByText(/Your local files and cloud copies stay in place/),
   ).toBeInTheDocument();
   await user.click(screen.getByText("Cancel"));
   expect(registry.remove).not.toHaveBeenCalled();
@@ -407,7 +442,7 @@ it("renames, refreshes and removes only after the final confirmation", async () 
   await screen.findByText("Add your first project");
   expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   expect(registry.snapshot).toHaveBeenCalledTimes(snapshotsBeforeRemoval + 1);
-  expect(registry.remove).toHaveBeenCalledWith("p1", false);
+  expect(registry.remove).toHaveBeenCalledWith("p1", true);
 });
 
 it("returns to All projects after removal and ignores an older read across later navigation", async () => {
@@ -444,7 +479,8 @@ it("returns to All projects after removal and ignores an older read across later
   }));
   let notify: () => void = () => {};
   vi.mocked(registry.subscribe).mockImplementation(async (listener) => {
-    notify = listener;
+    if (vi.mocked(registry.subscribe).mock.calls.length === 1)
+      notify = listener;
     return () => {};
   });
   vi.mocked(registry.remove).mockImplementation(async (id) => {
@@ -489,17 +525,11 @@ it("returns to All projects after removal and ignores an older read across later
     screen.queryByRole("button", { name: "All projects" }),
   ).not.toBeInTheDocument();
   await act(async () => finishOldRead(stale));
-  await user.click(screen.getByRole("button", { name: "Dashboard" }));
+  await user.click(screen.getByRole("button", { name: "Projects1" }));
   expect(
     screen.queryByRole("button", { name: /Removed project/ }),
   ).not.toBeInTheDocument();
   expect(screen.queryByText("Removed project.md")).not.toBeInTheDocument();
-  expect(
-    screen.getByText("Registered projects").parentElement,
-  ).toHaveTextContent("1");
-  expect(screen.getByText("Discovered files").parentElement).toHaveTextContent(
-    "1",
-  );
   await user.click(screen.getByRole("button", { name: "Projects1" }));
   expect(
     screen.queryByRole("button", { name: /Removed project/ }),
@@ -507,7 +537,7 @@ it("returns to All projects after removal and ignores an older read across later
   expect(
     screen.getByRole("button", { name: /Remaining project C:/ }),
   ).toBeInTheDocument();
-  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", false);
+  expect(registry.remove).toHaveBeenCalledExactlyOnceWith("p1", true);
 });
 
 it("keeps one live tracking panel through updates and removes it on navigation", async () => {
@@ -531,7 +561,8 @@ it("keeps one live tracking panel through updates and removes it on navigation",
   ];
   let notify: () => void = () => {};
   vi.mocked(registry.subscribe).mockImplementation(async (listener) => {
-    notify = listener;
+    if (vi.mocked(registry.subscribe).mock.calls.length === 1)
+      notify = listener;
     return () => {};
   });
   vi.mocked(registry.tracking).mockResolvedValue({
@@ -550,28 +581,28 @@ it("keeps one live tracking panel through updates and removes it on navigation",
   await user.click(
     await screen.findByRole("button", { name: /Tracked project/ }),
   );
-  await screen.findByRole("button", { name: "Disable tracking" });
+  await screen.findByRole("checkbox", { name: "Monitor selected files" });
   for (let revision = 1; revision <= 8; revision++) {
     state.projects[0].trackingRevision = revision;
     await act(async () => notify());
     expect(
-      screen.getAllByRole("heading", { name: "Document tracking" }),
+      screen.getAllByRole("heading", { name: /Latest documents/ }),
     ).toHaveLength(1);
     expect(
       screen.getByRole("button", { name: "Refresh documents" }),
     ).toBeEnabled();
   }
-  await user.click(screen.getByRole("button", { name: "Scan for changes" }));
+  await user.click(screen.getByRole("button", { name: "Refresh documents" }));
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Disable tracking" }),
+      screen.getByRole("checkbox", { name: "Monitor selected files" }),
     ).toBeEnabled(),
   );
   expect(screen.queryByText("Working…")).not.toBeInTheDocument();
-  for (const page of ["Dashboard", "Projects1", "Settings"]) {
+  for (const page of ["Projects1", "Settings"]) {
     await user.click(screen.getByRole("button", { name: page }));
     expect(
-      screen.queryByRole("heading", { name: "Document tracking" }),
+      screen.queryByRole("heading", { name: /Latest documents/ }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Refresh documents" }),
@@ -584,7 +615,7 @@ it("keeps one live tracking panel through updates and removes it on navigation",
       ).toBeEnabled(),
     );
     expect(
-      screen.getAllByRole("heading", { name: "Document tracking" }),
+      screen.getAllByRole("heading", { name: /Latest documents/ }),
     ).toHaveLength(1);
     expect(
       screen.getByRole("heading", { name: "Registered folder" }),
@@ -641,18 +672,11 @@ it("organizes project sections, guards unsaved tab changes and retains the folde
     screen.getByRole("heading", { name: "Tabbed project" }).closest("header"),
   ).toHaveClass("project-header");
   const files = screen.getByRole("tab", { name: "Files & tracking" });
-  const cloudTab = screen.getByRole("tab", { name: "Cloud sync" });
-  const ai = screen.getByRole("tab", { name: "Ask AI" });
+  const cloudTab = screen.getByRole("tab", { name: "Drive publishing" });
+  expect(screen.queryByRole("tab", { name: "Ask AI" })).not.toBeInTheDocument();
   expect(files).toHaveAttribute("aria-selected", "true");
   const tree = await screen.findByRole("checkbox", { name: "Include Drafts" });
   await waitFor(() => expect(tree).toBeEnabled());
-  expect(
-    screen.getByRole("region", { name: "Project overview" }),
-  ).toHaveTextContent("Selected files1");
-  const overview = screen.getByRole("region", { name: "Project overview" });
-  expect(
-    screen.queryByRole("region", { name: "Cloud sync" }),
-  ).not.toBeInTheDocument();
   await user.click(tree);
   await user.click(cloudTab);
   expect(
@@ -669,29 +693,14 @@ it("organizes project sections, guards unsaved tab changes and retains the folde
     expect(cloudTab).toHaveAttribute("aria-selected", "true"),
   );
   expect(
-    screen.getByRole("region", { name: "Cloud sync" }),
+    screen.getByRole("region", { name: "Google Drive publication" }),
   ).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Project overview" })).toBe(
-    overview,
-  );
-  expect(overview).toHaveTextContent("Selected files0");
   expect(
     screen.queryByRole("region", { name: "Ask project" }),
   ).not.toBeInTheDocument();
-  await user.click(ai);
-  expect(screen.getByRole("region", { name: "Project overview" })).toBe(
-    overview,
-  );
-  expect(overview).toHaveTextContent("Selected files0");
-  expect(
-    screen.getByRole("region", { name: "Ask project" }),
-  ).toBeInTheDocument();
   await user.click(files);
   expect(screen.getByRole("checkbox", { name: "Include Drafts" })).toBe(tree);
   expect(tree).not.toBeChecked();
-  expect(
-    screen.getByRole("region", { name: "Project overview" }),
-  ).toHaveTextContent("Selected files0");
   files.focus();
   await user.keyboard("{ArrowRight}");
   expect(cloudTab).toHaveFocus();
