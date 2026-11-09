@@ -78,6 +78,8 @@ mod operations;
 mod path_selection;
 #[cfg(test)]
 mod path_selection_tests;
+#[cfg(windows)]
+mod power;
 mod processes;
 mod profile;
 mod recycle_bin;

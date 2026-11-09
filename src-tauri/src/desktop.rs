@@ -48,11 +48,7 @@ pub(crate) fn uploads_paused_for_power(db: &rusqlite::Connection, saver: bool) -
 pub fn battery_saver_active() -> bool {
     #[cfg(all(windows, not(test)))]
     {
-        use windows_sys::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
-        let mut status = SYSTEM_POWER_STATUS::default();
-        // The API fills this owned structure; a failed/unknown probe never
-        // invents a pause. Query the OS, without WMI or a helper process.
-        unsafe { GetSystemPowerStatus(&mut status) != 0 && status.SystemStatusFlag == 1 }
+        crate::power::saving_energy()
     }
     #[cfg(any(not(windows), test))]
     {
