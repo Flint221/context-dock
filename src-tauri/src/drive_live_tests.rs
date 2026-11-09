@@ -334,9 +334,12 @@ fn live_google_revoked_pilot_grant_requires_reconnection() {
     drop(saved);
     // Google must actually reject the revoked refresh token. Never replace
     // credentials with fabricated data or treat a network error as acceptance.
-    let failure = drive_auth::access(&NativeVault, &http, chrono::Utc::now().timestamp())
-        .err()
-        .expect("Google unexpectedly accepted the revoked pilot grant.");
+    let failure = match drive_auth::access(&NativeVault, &http, chrono::Utc::now().timestamp()) {
+        Err(failure) => failure,
+        // Do not use expect_err: its unexpected-success diagnostic could
+        // include the access token's Debug representation.
+        Ok(_) => panic!("Google unexpectedly accepted the revoked pilot grant."),
+    };
     assert!(failure.contains("Google authorization was rejected"));
     println!("Live check: Google rejected the genuinely revoked pilot refresh token. No files or cloud receipts were changed; reconnect the pilot in Settings.");
 }
