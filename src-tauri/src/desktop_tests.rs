@@ -356,7 +356,35 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
         Arc, Mutex,
     };
     use tauri::{Listener, Manager};
+    fn memory_level(window: &tauri::WebviewWindow) -> i32 {
+        let (send, receive) = std::sync::mpsc::channel();
+        window
+            .with_webview(move |view| {
+                use webview2_com::Microsoft::Web::WebView2::Win32::{
+                    ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
+                };
+                use windows::core::Interface;
+                let value = (|| -> windows::core::Result<i32> {
+                    unsafe {
+                        let core = view
+                            .controller()
+                            .CoreWebView2()?
+                            .cast::<ICoreWebView2_19>()?;
+                        let mut level = COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(0);
+                        core.MemoryUsageTargetLevel(&mut level)?;
+                        Ok(level.0)
+                    }
+                })();
+                let _ = send.send(value.map_err(|error| error.to_string()));
+            })
+            .unwrap();
+        receive
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+            .unwrap()
+    }
     let f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
     let root = f.root.clone();
     let db = f.r.store.join("test.db");
     let shared = Arc::new(Mutex::new(f.r));
@@ -373,12 +401,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
         tauri::WebviewUrl::External("about:blank".parse().unwrap());
     let app = tauri::Builder::default()
         .any_thread()
-        .on_window_event(|w, e| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = e {
-                api.prevent_close();
-                desktop::request_close(w.app_handle(), "close");
-            }
-        })
+        .on_window_event(desktop::window_event)
         .setup(move |app| {
             app.manage(crate::Store(for_setup.clone()));
             app.manage(crate::drive_commands::DriveRuntime::default());
@@ -386,10 +409,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
                 db.clone(),
                 app.handle().clone(),
             )?);
-            app.manage(crate::cloud_commands::CloudRuntime::start(
-                db.clone(),
-                app.handle().clone(),
-            )?);
+            app.manage(crate::cloud_commands::CloudRuntime::dormant(db.clone())?);
             app.manage(crate::monitor::Monitor::start(for_setup.clone(), |_| {})?);
             app.manage(desktop::start(app.handle(), db.clone())?);
             desktop::tray(app.handle())?;
@@ -412,8 +432,20 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
             assert!(!w.is_visible().unwrap());
             desktop::launch(&handle, &["verification".into(), "--background".into()]);
             assert!(!w.is_visible().unwrap());
+            assert_eq!(
+                memory_level(&w),
+                1,
+                "Hidden startup must request low WebView2 memory use."
+            );
             desktop::launch(&handle, &["verification".into()]);
             assert!(w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 0);
+            desktop::launch(&handle, &["verification".into(), "--background".into()]);
+            assert_eq!(
+                memory_level(&w),
+                0,
+                "A duplicate background launch must leave a visible app's normal policy intact."
+            );
             desktop::desktop_ready(handle.clone()).unwrap();
             let closes = Arc::new(AtomicUsize::new(0));
             let counter = closes.clone();
@@ -437,6 +469,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
             ))
             .unwrap();
             assert!(!w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 1);
             fs::write(root.join("Existing_v1.md"), "edited while hidden").unwrap();
             fs::write(root.join("Brand_New.md"), "requires review").unwrap();
             let mut observed = false;
@@ -465,6 +498,7 @@ fn windows_tray_hidden_tracking_reopen_and_guarded_exit() {
                 .clone();
             desktop::navigate(&handle, serde_json::json!({"page":"review","project":id}));
             assert!(w.is_visible().unwrap());
+            assert_eq!(memory_level(&w), 0);
             assert_eq!(
                 desktop::desktop_route(handle.clone()).unwrap()["page"],
                 "review"

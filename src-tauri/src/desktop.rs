@@ -127,6 +127,29 @@ pub fn launch(app: &tauri::AppHandle, args: &[String]) {
         navigate(app, route);
     } else if !args.iter().any(|a| a == "--background") {
         show(app);
+    } else if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(true) {
+            webview_memory(&window, true);
+        }
+    }
+}
+pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        api.prevent_close();
+        request_close(window.app_handle(), "close");
+    }
+    if matches!(
+        event,
+        tauri::WindowEvent::Focused(true) | tauri::WindowEvent::Resized(_)
+    ) {
+        if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+            let low =
+                window.is_minimized().unwrap_or(false) || !window.is_visible().unwrap_or(true);
+            webview_memory(&webview, low);
+        }
+    }
+    if matches!(event, tauri::WindowEvent::Focused(true)) {
+        let _ = window.app_handle().emit("desktop-changed", ());
     }
 }
 pub fn request_close(app: &tauri::AppHandle, action: &str) {
