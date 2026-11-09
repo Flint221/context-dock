@@ -309,3 +309,31 @@ fn live_google_recovery_refresh_and_verified_recycling() {
         .unwrap();
     assert!(!enabled);
 }
+
+#[test]
+#[ignore = "Explicitly revokes the isolated pilot grant; interactive Google sign-in is needed afterward"]
+fn live_google_revoked_pilot_grant_requires_reconnection() {
+    use crate::drive_auth::OAuthHttp;
+    assert_eq!(
+        std::env::var("CONTEXTDOCK_RUN_LIVE_CHECKS").unwrap(),
+        "revoke-pilot-only"
+    );
+    // Require the marked pilot profile even though credentials live in its
+    // separate vault. No installed-profile credential target is compiled here.
+    let data = crate::profile::pilot_data_dir().unwrap();
+    assert!(data.join("contextdock.db").is_file());
+    let mut saved = NativeVault.load().unwrap().expect("Connect the pilot first.");
+    let session = saved.session.as_mut().expect("Sign in to the pilot first.");
+    let http = drive_auth::GoogleHttp::new().unwrap();
+    http.revoke(&session.refresh_token).unwrap();
+    session.expires_at = 0;
+    NativeVault.save(&saved).unwrap();
+    drop(saved);
+    // Google must actually reject the revoked refresh token. Never replace
+    // credentials with fabricated data or treat a network error as acceptance.
+    let failure = drive_auth::access(&NativeVault, &http, chrono::Utc::now().timestamp())
+        .err()
+        .expect("Google unexpectedly accepted the revoked pilot grant.");
+    assert!(failure.contains("Google authorization was rejected"));
+    println!("Live check: Google rejected the genuinely revoked pilot refresh token. No files or cloud receipts were changed; reconnect the pilot in Settings.");
+}

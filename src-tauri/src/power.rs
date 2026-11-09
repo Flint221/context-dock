@@ -124,5 +124,6 @@ fn windows_energy_saver_matches_selected_os_mode() {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+    assert_ne!(STATUS.load(Ordering::Acquire), u32::MAX);
     assert_eq!(saving_energy(), expected);
 }
