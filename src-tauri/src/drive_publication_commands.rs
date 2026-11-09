@@ -72,6 +72,7 @@ pub struct View {
     account_id: Option<String>,
     folder_id: Option<String>,
     root_ready: bool,
+    folder_ready: bool,
     error: Option<String>,
     cleanup_error: Option<String>,
     documents: Vec<drive_publish::Publication>,
@@ -88,6 +89,7 @@ pub async fn drive_project_read(
         let (enabled,automatic,recycle,account,folder_id,error)=settings.unwrap_or((false,false,false,String::new(),None,None));
         let connected=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone())).is_some_and(|id|account.is_empty()||id==account);
         let root_ready=registry.db.query_row("SELECT root_ready FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
+        let folder_ready=registry.db.query_row("SELECT folder_ready FROM drive_projects WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
         let cleanup_error=registry.db.query_row("SELECT error FROM drive_cleanup WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.flatten();
         let mut documents=drive_publish::publications(&registry.db,&project).map_err(|e|e.message)?;
         let blocked=crate::path_selection::blocked_documents(&registry.db,&project)?;
@@ -102,7 +104,7 @@ pub async fn drive_project_read(
                 }
             }
         }
-        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,error,cleanup_error,documents})
+        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,folder_ready,error,cleanup_error,documents})
     }).await
 }
 pub fn open(path: &std::path::Path) -> Result<Registry, String> {
@@ -233,6 +235,7 @@ pub async fn drive_project_action(
         let documents=drive_publish::eligible_documents(&registry.db,&id).map_err(|e|e.message)?;
         if documents.is_empty() && action=="publish" {return Err("No stable selected documents are ready. Check file tracking and folder selection.".into());}
         if action=="create_root" {
+            registry.db.execute("INSERT INTO drive_folder_choices(project_id,may_create) VALUES(?1,1) ON CONFLICT(project_id) DO UPDATE SET may_create=1",[&id]).map_err(error)?;
             registry.db.execute("UPDATE drive_accounts SET create_root=1 WHERE account_id=?1",[&account]).map_err(error)?;
             let allowed:bool=registry.db.query_row("SELECT create_root FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).map_err(error)?;
             if !allowed {return Err("The Drive folder creation choice did not save. No folders were created.".into());}

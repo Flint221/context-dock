@@ -1,3 +1,20 @@
+# ContextDock 0.11.0 preview
+
+ContextDock monitors selected local project folders, groups numbered Markdown/Word versions and optionally publishes each family's latest file to Google Drive. Moves, renames and newer versions retain their saved document and Drive identities. Local files remain the source of truth.
+
+The active interface opens on Projects and provides Files & tracking and Drive publishing tabs. Embedded Ask AI, vector-store controls, historical snapshot/comparison browsing and automatic archival are retired. New tracking stores metadata without accumulating permanent copies. Existing snapshots, archives, chats and legacy cloud resources are retained.
+
+Stable saves trigger publication after settling, with five-minute metadata reconciliation for missed events. Uploads require exact remote readback before Up to date appears. Pending work, retries and file IDs survive restart. Battery saver pauses new publication writes by default, local monitoring continues in the tray, and hidden/minimized WebView2 receives a low-memory request.
+
+Optional older-file recycling is off by default. It requires a fresh verified replacement, unchanged older bytes/identity and a lower numeric version of the same selected family. The newest local working file is kept. Unsupported volumes and uncertain operations retain files; there is no permanent-delete fallback. Windows Recycle Bin restoration returns files to the recorded safety folder.
+
+This development branch is awaiting app-owned live Google acceptance. The installed app/profile have not been upgraded. Start with the [Google setup and live pilot guide](docs/ContextDock_Drive_Setup_v2.md), [native/resource pilot evidence](docs/ContextDock_Drive_Pilot_v1.md) and [recycling safeguards](docs/ContextDock_Drive_Recycling_v1.md). The existing chat connector does not authorize the desktop app.
+
+Build/check commands: `npm ci`, `npm test`, `npm run lint`, `npm run build`, `cargo test --locked --manifest-path src-tauri/Cargo.toml`, and `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`. `npm run tauri -- build --bundles nsis --ci` packages the Windows app. The isolated pilot build uses the separate feature/configuration documented in the pilot report. Schema 18 is forward-only; older app versions refuse an upgraded registry.
+
+<details>
+<summary>Historical release notes and earlier workflows</summary>
+
 # ContextDock 0.10.16: tracking, sync and resource improvements
 
 Clear numbered exports arriving together now join one tracked family in numeric order. Verified moves inside the registered project preserve source identity and history instead of leaving duplicate missing rows. Source lists distinguish physical files from tracked document families. Ambiguous copies, excluded destinations and existing complex separate histories still require review.
@@ -248,3 +265,5 @@ Installer output: `src-tauri/target/release/bundle/nsis/ContextDock_0.10.16_x64-
 The existing Windows workflow runs checks, Rust safety tests, frontend tests and NSIS packaging on PRs to `main`, pushes to `main`/`codex/**`, and manual dispatches. Tagged releases require a tag matching all app versions. No release tag is created automatically. Keep `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` synchronized. Only the isolated tag-publishing job has repository write permission.
 
 See [architecture](docs/architecture.md), [roadmap](docs/roadmap.md), and [verification](docs/verification.md). Milestone 5 now presents simple cloud-backed questions and local chats; earlier analysis/baseline records are retained. Milestone 6 begins with persistent folder recovery and safe reassignment. Signing, storage management and automatic update delivery remain future work.
+
+</details>

@@ -12,6 +12,7 @@ vi.mock("../drive", () => ({
     subscribe: vi.fn(),
     createFolders: vi.fn(),
     recycling: vi.fn(),
+    chooseProjectFolder: vi.fn(),
   },
 }));
 let state: DriveProject;
@@ -23,7 +24,7 @@ beforeEach(() => {
     recycle: false,
     connected: true,
     accountId: null,
-    folderId: null,
+    folderId: "project-folder",
     rootReady: true,
     error: null,
     documents: [],
@@ -100,6 +101,31 @@ it("enables automatic publication without a duplicate immediate manual request",
   expect(
     await screen.findByText(/Drive publication enabled/),
   ).toBeInTheDocument();
+});
+it("requires a project-folder choice and verifies picker adoption before publication", async () => {
+  state.enabled = true;
+  state.folderId = null;
+  state.folderReady = false;
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  expect(
+    await screen.findByRole("button", { name: "Publish latest" }),
+  ).toBeDisabled();
+  vi.mocked(drive.chooseProjectFolder).mockImplementation(async () => {
+    state.folderId = "existing-folder";
+    state.folderReady = true;
+  });
+  await user.click(
+    screen.getByRole("button", {
+      name: "Choose existing Drive project folder",
+    }),
+  );
+  expect(drive.chooseProjectFolder).toHaveBeenCalledWith("sample");
+  expect(
+    await screen.findByText(/Existing project folder selected/),
+  ).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Publish latest" })).toBeEnabled();
+  expect(drive.createFolders).not.toHaveBeenCalled();
 });
 it("only reports publication success after verified documents are returned", async () => {
   state.enabled = true;

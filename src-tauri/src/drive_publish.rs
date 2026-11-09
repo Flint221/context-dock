@@ -209,7 +209,12 @@ fn ensure_folder(
                 folder.id
             }
             None => {
-                if project.is_none() {
+                if let Some(project) = project {
+                    let allowed:bool=db.query_row("SELECT COALESCE((SELECT may_create FROM drive_folder_choices WHERE project_id=?1),0)",[project],|r|r.get(0)).map_err(error)?;
+                    if !allowed {
+                        return Err(ApiError::local("Choose the existing Drive project folder, or explicitly create its folders if none exists. A narrow Drive search cannot prove an unselected folder is absent."));
+                    }
+                } else {
                     let allowed: bool = db
                         .query_row(
                             "SELECT create_root FROM drive_accounts WHERE account_id=?1",
@@ -315,6 +320,73 @@ pub fn adopt_root(db: &Connection, account: &str, id: &str, api: &dyn DriveApi) 
         .flatten();
     if saved.as_deref() != Some(id) {
         return Err(ApiError::local("The selected Drive folder did not save."));
+    }
+    tx.commit().map_err(error)?;
+    Ok(())
+}
+pub fn adopt_project(
+    db: &Connection,
+    project: &str,
+    account: &str,
+    id: &str,
+    api: &dyn DriveApi,
+) -> Result<()> {
+    require_enabled(db, project, account)?;
+    drive_api::valid_id(id)?;
+    let root: String = db
+        .query_row(
+            "SELECT root_id FROM drive_accounts WHERE account_id=?1 AND root_ready=1",
+            [account],
+            |r| r.get(0),
+        )
+        .map_err(|_| ApiError::local("Choose the ContextDock root folder first."))?;
+    let folder = api.get(id)?;
+    folder_valid(&folder, id, &root)?;
+    let name: String = db
+        .query_row("SELECT name FROM projects WHERE id=?1", [project], |r| {
+            r.get(0)
+        })
+        .map_err(error)?;
+    if folder.name != name
+        || folder
+            .app_properties
+            .get("project")
+            .is_some_and(|p| p != project)
+    {
+        return Err(ApiError::local("Choose the matching project folder directly inside ContextDock. Its name and project identity must match."));
+    }
+    let tx = db.unchecked_transaction().map_err(error)?;
+    let previous: Option<String> = tx
+        .query_row(
+            "SELECT folder_id FROM drive_projects WHERE project_id=?1",
+            [project],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    let used: bool = tx
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM drive_documents WHERE project_id=?1)",
+            [project],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if used && previous.as_deref() != Some(id) {
+        return Err(ApiError::local("This project already has mapped cloud files. Keep its existing Drive folder to preserve those identities."));
+    }
+    tx.execute(
+        "UPDATE drive_projects SET folder_id=?2,folder_ready=1,error=NULL WHERE project_id=?1",
+        params![project, id],
+    )
+    .map_err(error)?;
+    let saved: Option<String> = tx
+        .query_row(
+            "SELECT folder_id FROM drive_projects WHERE project_id=?1 AND folder_ready=1",
+            [project],
+            |r| r.get(0),
+        )
+        .map_err(error)?;
+    if saved.as_deref() != Some(id) {
+        return Err(ApiError::local("The selected project folder did not save."));
     }
     tx.commit().map_err(error)?;
     Ok(())

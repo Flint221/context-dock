@@ -99,25 +99,48 @@ pub async fn drive_action(
     app: tauri::AppHandle,
     action: String,
     path: Option<String>,
+    project: Option<String>,
 ) -> Result<(), String> {
     let gate = state.gate.clone();
     let pending = state.pending.clone();
     let error = state.error.clone();
     let database = publisher.path.clone();
+    let publication_gate = publisher.gate.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
+        let _publication = if ["pick_root", "pick_project"].contains(&action.as_str()) {
+            Some(publication_gate.try_lock().map_err(|_| {
+                "A publication is running. Pause it and retry choosing the destination."
+            })?)
+        } else {
+            None
+        };
         let _guard = gate
             .try_lock()
             .map_err(|_| "A Google Drive operation is already running.")?;
         if let Ok(mut slot) = error.lock() {
             *slot = None;
         }
-        let mut result = action_inner(&action, path.as_deref(), pending, &database);
-        if result.is_ok() && ["connect", "test", "pick_root"].contains(&action.as_str()) {
+        let mut result = action_inner(
+            &action,
+            path.as_deref(),
+            project.as_deref(),
+            pending,
+            &database,
+        );
+        if result.is_ok()
+            && ["connect", "test", "pick_root", "pick_project"].contains(&action.as_str())
+        {
             let resumed = (|| -> Result<(), String> {
                 if let Some(saved) = NativeVault.load()? {
                     if let Some(session) = saved.session {
                         let registry = crate::drive_publication_commands::open(&database)?;
                         crate::drive_scheduler::resume_auth(&registry, &session.account.id)?;
+                        if action == "pick_project" {
+                            crate::drive_scheduler::reset(
+                                &registry,
+                                project.as_deref().ok_or("Choose a project first.")?,
+                            )?;
+                        }
                     }
                 }
                 Ok(())
@@ -140,6 +163,7 @@ pub async fn drive_action(
 fn action_inner(
     action: &str,
     path: Option<&str>,
+    project: Option<&str>,
     pending: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     database: &std::path::Path,
 ) -> Result<(), String> {
@@ -157,12 +181,22 @@ fn action_inner(
                 .map_err(|_| "The OAuth client JSON could not be read.")?;
             drive_auth::configure(&NativeVault, &bytes)
         }
-        "connect" | "pick_root" => {
+        "connect" | "pick_root" | "pick_project" => {
+            let picking = action != "connect";
             let mut saved = NativeVault
                 .load()?
                 .ok_or("Import the ContextDock Desktop OAuth client first.")?;
-            if action == "pick_root" && saved.session.is_none() {
+            if picking && saved.session.is_none() {
                 return Err("Connect Google Drive before choosing its existing folder.".into());
+            }
+            if action == "pick_project" {
+                let r = crate::drive_publication_commands::open(database)?;
+                crate::drive_publish::require_enabled(
+                    &r.db,
+                    project.ok_or("Choose a project first.")?,
+                    &saved.session.as_ref().unwrap().account.id,
+                )
+                .map_err(|e| e.message)?;
             }
             let cancel = Arc::new(AtomicBool::new(false));
             *pending
@@ -175,7 +209,7 @@ fn action_inner(
                 .local_addr()
                 .map_err(|_| "Google sign-in callback unavailable.")?
                 .port();
-            let flow = if action == "pick_root" {
+            let flow = if picking {
                 drive_auth::Flow::pick_folder(&saved.config, port)
             } else {
                 drive_auth::Flow::new(&saved.config, port)
@@ -192,7 +226,7 @@ fn action_inner(
             if cancel.load(Ordering::SeqCst) {
                 return Err("Google sign-in cancelled. No new connection was saved.".into());
             }
-            if action == "pick_root" {
+            if picking {
                 if saved
                     .session
                     .as_ref()
@@ -207,8 +241,19 @@ fn action_inner(
                     |_| Ok(()),
                 )
                 .map_err(|e| e.message)?;
-                crate::drive_publish::adopt_root(&registry.db, &session.account.id, id, &api)
+                if action == "pick_project" {
+                    crate::drive_publish::adopt_project(
+                        &registry.db,
+                        project.ok_or("Choose a project first.")?,
+                        &session.account.id,
+                        id,
+                        &api,
+                    )
                     .map_err(|e| e.message)?;
+                } else {
+                    crate::drive_publish::adopt_root(&registry.db, &session.account.id, id, &api)
+                        .map_err(|e| e.message)?;
+                }
             }
             saved.session = Some(session);
             NativeVault.save(&saved)

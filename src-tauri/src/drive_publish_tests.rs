@@ -434,6 +434,7 @@ struct FakeDrive {
     corrupt: Cell<bool>,
     after_upload: RefCell<Option<Box<dyn FnOnce()>>>,
     checkpoint: RefCell<Option<Checkpoint>>,
+    hidden_folders: RefCell<HashSet<String>>,
 }
 impl FakeDrive {
     fn missing() -> ApiError {
@@ -475,6 +476,7 @@ impl DriveApi for FakeDrive {
             .values()
             .filter(|(r, _)| {
                 r.parents == [parent]
+                    && !self.hidden_folders.borrow().contains(&r.id)
                     && r.name == name
                     && r.mime_type == drive_api::FOLDER
                     && !r.trashed
@@ -569,6 +571,85 @@ impl DriveApi for FakeDrive {
         Ok(format!("{:x}", Sha256::digest(bytes)))
     }
 }
+
+#[test]
+fn drive_folder_choice_prevents_duplicates_when_scope_hides_an_existing_project_folder() {
+    let f = Fixture::new(&[("ContextDock_Context_v1.md", b"one")]);
+    f.registry
+        .db
+        .execute("DELETE FROM drive_folder_choices", [])
+        .unwrap();
+    assert!(
+        publish::ensure_destination(&f.registry.db, &f.project, "account-A", &f.api)
+            .unwrap_err()
+            .message
+            .contains("existing Drive project folder")
+    );
+    let root: String = f
+        .registry
+        .db
+        .query_row("SELECT root_id FROM drive_accounts", [], |r| r.get(0))
+        .unwrap();
+    f.api
+        .create_folder(
+            "preexisting-project",
+            &root,
+            "Sample Project",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    f.api
+        .hidden_folders
+        .borrow_mut()
+        .insert("preexisting-project".into());
+    assert!(publish::ensure_destination(&f.registry.db, &f.project, "account-A", &f.api).is_err());
+    assert_eq!(
+        f.api
+            .files
+            .borrow()
+            .values()
+            .filter(|(r, _)| r.name == "Sample Project")
+            .count(),
+        1
+    );
+    publish::adopt_project(
+        &f.registry.db,
+        &f.project,
+        "account-A",
+        "preexisting-project",
+        &f.api,
+    )
+    .unwrap();
+    f.run().unwrap();
+    assert_eq!(
+        f.api.get(&f.saved().file_id).unwrap().parents,
+        ["preexisting-project"]
+    );
+    assert_eq!(
+        f.api
+            .files
+            .borrow()
+            .values()
+            .filter(|(r, _)| r.name == "Sample Project")
+            .count(),
+        1
+    );
+    let other = f
+        .api
+        .create_folder(
+            "another-project-folder",
+            &root,
+            "Sample Project",
+            &BTreeMap::new(),
+        )
+        .unwrap();
+    assert!(
+        publish::adopt_project(&f.registry.db, &f.project, "account-A", &other.id, &f.api)
+            .unwrap_err()
+            .message
+            .contains("mapped cloud files")
+    );
+}
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -596,6 +677,13 @@ impl Fixture {
             .configure_tracking(&project, true, false, vec![])
             .unwrap();
         publish::configure(&registry.db, &project, "account-A", true, false).unwrap();
+        registry
+            .db
+            .execute(
+                "INSERT INTO drive_folder_choices(project_id,may_create) VALUES(?1,1)",
+                [&project],
+            )
+            .unwrap();
         registry
             .db
             .execute(
@@ -983,7 +1071,7 @@ fn drive_publication_schema_thirteen_migration_keeps_ids_snapshots_and_cloud_off
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        18
     );
 }
 
@@ -1212,7 +1300,7 @@ fn drive_scheduler_schema_fourteen_upgrade_preserves_the_pending_operation() {
             .db
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        17
+        18
     );
 }
 

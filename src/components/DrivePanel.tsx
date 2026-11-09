@@ -128,26 +128,40 @@ export function DrivePanel({ project }: { project: string }) {
       </p>
       {view && (
         <>
-          {view.enabled && !view.rootReady && (
-            <div className="banner warning">
-              <p>
-                Choose your existing ContextDock folder in Settings, or create
-                the Drive folders here if you do not already have one.
-              </p>
-              <button
-                disabled={busy || !view.connected}
-                onClick={() =>
-                  void run(
-                    () => drive.createFolders(project),
-                    "Drive folders are ready. No documents were uploaded.",
-                    (next) => next.rootReady && !!next.folderId,
-                  )
-                }
-              >
-                Create Drive folders
-              </button>
-            </div>
-          )}
+          {view.enabled &&
+            (!view.rootReady || !(view.folderReady ?? !!view.folderId)) && (
+              <div className="banner warning">
+                <p>
+                  Choose your existing ContextDock root in Settings, then select
+                  this project's existing folder below. Create folders here only
+                  when this project has no existing Drive destination.
+                </p>
+                <button
+                  disabled={busy || !view.connected || !view.rootReady}
+                  onClick={() =>
+                    void run(
+                      () => drive.chooseProjectFolder(project),
+                      "Existing project folder selected. Its Drive identity is saved.",
+                      (next) => !!next.folderId && (next.folderReady ?? true),
+                    )
+                  }
+                >
+                  Choose existing Drive project folder
+                </button>
+                <button
+                  disabled={busy || !view.connected}
+                  onClick={() =>
+                    void run(
+                      () => drive.createFolders(project),
+                      "Drive folders are ready. No documents were uploaded.",
+                      (next) => next.rootReady && !!next.folderId,
+                    )
+                  }
+                >
+                  Create Drive folders
+                </button>
+              </div>
+            )}
           {!view.connected && (
             <p>
               Connect the project's Google Drive account in Settings to publish.
@@ -195,7 +209,11 @@ export function DrivePanel({ project }: { project: string }) {
             <button
               className="primary"
               disabled={
-                busy || !view.enabled || !view.connected || !view.rootReady
+                busy ||
+                !view.enabled ||
+                !view.connected ||
+                !view.rootReady ||
+                !(view.folderReady ?? !!view.folderId)
               }
               onClick={() =>
                 void run(

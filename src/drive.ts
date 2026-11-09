@@ -20,6 +20,7 @@ export interface DriveProject {
   accountId: string | null;
   folderId: string | null;
   rootReady: boolean;
+  folderReady?: boolean;
   error: string | null;
   documents: DrivePublication[];
   cleanupError?: string | null;
@@ -43,7 +44,7 @@ export const drive = {
       | "forget_client"
       | "pick_root",
     path: string | null = null,
-  ) => invoke<void>("drive_action", { action, path }),
+  ) => invoke<void>("drive_action", { action, path, project: null }),
   cancel: () => invoke<void>("drive_cancel"),
   project: (project: string) =>
     invoke<DriveProject>("drive_project_read", { project }),
@@ -70,6 +71,12 @@ export const drive = {
       recycle,
       enabled: null,
       automatic: null,
+    }),
+  chooseProjectFolder: (project: string) =>
+    invoke<void>("drive_action", {
+      action: "pick_project",
+      path: null,
+      project,
     }),
   createFolders: (project: string) =>
     invoke<void>("drive_project_action", {
