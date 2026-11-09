@@ -1,4 +1,4 @@
-# ContextDock 0.11.0 preview
+# ContextDock 0.11.0
 
 ContextDock monitors selected local project folders, groups numbered Markdown/Word versions and optionally publishes each family's latest file to Google Drive. Moves, renames and newer versions retain their saved document and Drive identities. Local files remain the source of truth.
 
@@ -8,7 +8,9 @@ Stable saves trigger publication after settling, with five-minute metadata recon
 
 Optional older-file recycling is off by default. It requires a fresh verified replacement, unchanged older bytes/identity and a lower numeric version of the same selected family. The newest local working file is kept. Unsupported volumes and uncertain operations retain files; there is no permanent-delete fallback. Windows Recycle Bin restoration returns files to the recorded safety folder.
 
-This development branch is awaiting app-owned live Google acceptance. The installed app/profile have not been upgraded. Start with the [Google setup and live pilot guide](docs/ContextDock_Drive_Setup_v2.md), [native/resource pilot evidence](docs/ContextDock_Drive_Pilot_v1.md) and [recycling safeguards](docs/ContextDock_Drive_Recycling_v1.md). The existing chat connector does not authorize the desktop app.
+The latest-file workflow is merged to main. Native acceptance passed for real Google replacement, Windows recycling, physical Wi-Fi loss/recovery, revoked authorization/reconnection and energy-saver pause/resume. The local 0.11.0 installation was verified with a fresh schema-18 registry. See the [release audit](docs/ContextDock_App_Audit_v8.md) and [fresh-profile record](docs/ContextDock_Local_Reset_v3.md) for evidence and limits.
+
+For Drive publishing, import your Desktop OAuth client in Settings, sign in and choose the existing ContextDock root. Then add project folders, save their file selection and choose each project's Drive destination. The desktop app uses its own Google connection; a ChatGPT connector or isolated pilot sign-in does not connect the installed app. Start with the [Google setup guide](docs/ContextDock_Drive_Setup_v2.md) and [recycling safeguards](docs/ContextDock_Drive_Recycling_v1.md). Recycling stays off until explicitly enabled per project.
 
 Build/check commands: `npm ci`, `npm test`, `npm run lint`, `npm run build`, `cargo test --locked --manifest-path src-tauri/Cargo.toml`, and `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`. `npm run tauri -- build --bundles nsis --ci` packages the Windows app. The isolated pilot build uses the separate feature/configuration documented in the pilot report. Schema 18 is forward-only; older app versions refuse an upgraded registry.
 
