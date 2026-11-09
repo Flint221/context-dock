@@ -17,6 +17,7 @@ struct Step {
     headers: String,
     body: Vec<u8>,
     check: Check,
+    truncate_response: bool,
 }
 impl Step {
     fn json(method: &'static str, path: &'static str, body: Value) -> Self {
@@ -27,6 +28,7 @@ impl Step {
             headers: "Content-Type: application/json\r\n".into(),
             body: serde_json::to_vec(&body).unwrap(),
             check: Box::new(|_, _| {}),
+            truncate_response: false,
         }
     }
 }
@@ -88,7 +90,12 @@ impl Wire {
                     step.headers
                 );
                 socket.write_all(header.as_bytes()).unwrap();
-                socket.write_all(&step.body).unwrap();
+                let body = if step.truncate_response {
+                    &step.body[..step.body.len() / 2]
+                } else {
+                    &step.body
+                };
+                socket.write_all(body).unwrap();
             }
         });
         Self { origin, worker }
@@ -102,6 +109,53 @@ impl Wire {
 }
 fn remote(name: &str, size: usize, version: u8) -> Value {
     json!({"id":"same-file","name":name,"mimeType":"text/markdown","parents":["project-folder"],"size":size.to_string(),"version":version.to_string(),"trashed":false})
+}
+
+#[test]
+fn drive_wire_interrupted_upload_receipt_is_retryable_and_same_id_can_be_verified() {
+    let bytes = b"# ContextDock interrupted response marker";
+    let wire = Wire::new(|origin| {
+        let mut init = Step::json("POST", "/upload/drive/v3/files?", json!({}));
+        init.headers.push_str(&format!(
+            "Location: {origin}/upload/drive/v3/files?session=interrupted\r\n"
+        ));
+        let mut upload = Step::json(
+            "PUT",
+            "/upload/drive/v3/files?session=interrupted",
+            remote("ContextDock_Transfer_v1.md", bytes.len(), 1),
+        );
+        upload.truncate_response = true;
+        upload.check = Box::new(move |_, body| assert_eq!(body, bytes));
+        let get = Step::json(
+            "GET",
+            "/drive/v3/files/same-file?",
+            remote("ContextDock_Transfer_v1.md", bytes.len(), 1),
+        );
+        let mut download = Step::json("GET", "/drive/v3/files/same-file?", json!({}));
+        download.body = bytes.to_vec();
+        vec![init, upload, get, download]
+    });
+    let t = tempfile::tempdir().unwrap();
+    let path = t.path().join("ContextDock_Transfer_v1.md");
+    std::fs::write(&path, bytes).unwrap();
+    let api = wire.api();
+    let failure = api
+        .upload(
+            "same-file",
+            json!({"name":"ContextDock_Transfer_v1.md","mimeType":"text/markdown"}),
+            &path,
+            true,
+            None,
+        )
+        .unwrap_err();
+    assert!(failure.retry);
+    assert!(!failure.auth);
+    assert_eq!(api.get("same-file").unwrap().id, "same-file");
+    assert_eq!(
+        api.download_hash("same-file", bytes.len() as i64).unwrap(),
+        format!("{:x}", Sha256::digest(bytes))
+    );
+    wire.finish();
 }
 
 #[test]

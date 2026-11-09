@@ -118,6 +118,22 @@ pub struct GoogleDrive {
     test_origin: Option<String>,
 }
 impl GoogleDrive {
+    fn json<T: serde::de::DeserializeOwned>(response: Response, problem: &str) -> Result<T> {
+        let mut bytes = Vec::new();
+        response
+            .take(1_048_577)
+            .read_to_end(&mut bytes)
+            .map_err(|_| ApiError::offline())?;
+        if bytes.len() > 1_048_576 {
+            return Err(ApiError::local(
+                "Google Drive metadata exceeded its size limit.",
+            ));
+        }
+        serde_json::from_slice(&bytes).map_err(|error| ApiError {
+            retry: error.is_eof(),
+            ..ApiError::local(problem)
+        })
+    }
     pub fn new(
         access: Zeroizing<String>,
         guard: impl Fn(bool) -> Result<()> + 'static,
@@ -210,9 +226,8 @@ impl GoogleDrive {
             .get("etag")
             .and_then(|h| h.to_str().ok())
             .map(str::to_owned);
-        let mut remote: Remote = response
-            .json()
-            .map_err(|_| ApiError::local("Google Drive returned incomplete file metadata."))?;
+        let mut remote: Remote =
+            Self::json(response, "Google Drive returned incomplete file metadata.")?;
         valid_id(&remote.id)?;
         remote.etag = etag;
         Ok(remote)
@@ -223,15 +238,13 @@ impl DriveApi for GoogleDrive {
         (self.guard)(write)
     }
     fn generate_id(&self) -> Result<String> {
-        let data: Value = self
-            .send(
-                self.http
-                    .get(self.url("/drive/v3/files/generateIds"))
-                    .query(&[("count", "1"), ("space", "drive"), ("type", "files")]),
-                false,
-            )?
-            .json()
-            .map_err(|_| ApiError::local("Google Drive did not reserve a file identity."))?;
+        let response = self.send(
+            self.http
+                .get(self.url("/drive/v3/files/generateIds"))
+                .query(&[("count", "1"), ("space", "drive"), ("type", "files")]),
+            false,
+        )?;
+        let data: Value = Self::json(response, "Google Drive did not reserve a file identity.")?;
         let id = data["ids"]
             .as_array()
             .filter(|a| a.len() == 1)
@@ -275,24 +288,23 @@ impl DriveApi for GoogleDrive {
                 #[serde(default)]
                 incomplete_search: bool,
             }
-            let listing: Listing = self
-                .send(
-                    self.http.get(self.url("/drive/v3/files")).query(&[
-                        ("q", query.as_str()),
-                        ("spaces", "drive"),
-                        ("pageSize", "100"),
-                        (
-                            "fields",
-                            &format!("nextPageToken,incompleteSearch,files({FIELDS})"),
-                        ),
-                        ("pageToken", page.as_str()),
-                    ]),
-                    false,
-                )?
-                .json()
-                .map_err(|_| {
-                    ApiError::local("Google Drive folder listing could not be verified.")
-                })?;
+            let response = self.send(
+                self.http.get(self.url("/drive/v3/files")).query(&[
+                    ("q", query.as_str()),
+                    ("spaces", "drive"),
+                    ("pageSize", "100"),
+                    (
+                        "fields",
+                        &format!("nextPageToken,incompleteSearch,files({FIELDS})"),
+                    ),
+                    ("pageToken", page.as_str()),
+                ]),
+                false,
+            )?;
+            let listing: Listing = Self::json(
+                response,
+                "Google Drive folder listing could not be verified.",
+            )?;
             if listing.incomplete_search {
                 return Err(ApiError::local(
                     "Google Drive returned an incomplete folder search. No folder was created.",
