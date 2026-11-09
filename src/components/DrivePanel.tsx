@@ -257,6 +257,11 @@ export function DrivePanel({ project }: { project: string }) {
             </ul>
           )}
           {view.error && !error && <p role="alert">{view.error}</p>}
+          {view.cleanupError && (
+            <p role="alert">
+              Older-file cleanup needs attention: {view.cleanupError}
+            </p>
+          )}
           <details>
             <summary>Optional local cleanup</summary>
             <label className="check-row">
@@ -287,9 +292,18 @@ export function DrivePanel({ project }: { project: string }) {
               back to its original project location when needed.
             </p>
             {view.cleanupError && (
-              <p role="alert">
-                Older-file cleanup needs attention: {view.cleanupError}
-              </p>
+              <button
+                disabled={busy}
+                onClick={() =>
+                  void run(
+                    () => drive.recoverCleanup(project),
+                    "Interrupted cleanup checked. Available safety files were restored where their original paths were free.",
+                    (next) => !next.cleanupError,
+                  )
+                }
+              >
+                Retry interrupted cleanup
+              </button>
             )}
           </details>
         </>

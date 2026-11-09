@@ -134,6 +134,35 @@ it("shows one current row for v1 and v2 without history or archive controls", as
     screen.queryByRole("button", { name: /history|archive|Ask AI/i }),
   ).not.toBeInTheDocument();
 });
+it.each(["auth", "attention"])(
+  "shows a project %s block beside latest documents",
+  async (blocked) => {
+    publication.blocked = blocked;
+    publication.error = "Review the Drive connection or destination.";
+    page();
+    expect(await screen.findByText("Needs attention")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Review the Drive connection or destination",
+    );
+    expect(screen.queryByText("Up to date")).not.toBeInTheDocument();
+  },
+);
+it("shows destination setup as attention while keeping local monitoring available", async () => {
+  publication.folderReady = false;
+  page();
+  expect(await screen.findByText("Needs attention")).toBeInTheDocument();
+  expect(
+    screen.getByRole("checkbox", { name: "Monitor selected files" }),
+  ).toBeEnabled();
+});
+it("keeps a cleanup warning on the main file view without invalidating a verified cloud receipt", async () => {
+  publication.cleanupError = "Original path is occupied; safety file kept.";
+  page();
+  expect(await screen.findByText("Up to date")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Open Drive publishing to retry recovery",
+  );
+});
 it.each([
   ["uploading", "Uploading"],
   ["verifying", "Uploading"],

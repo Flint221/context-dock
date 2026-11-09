@@ -258,6 +258,23 @@ fn drive_recycling_recovery_retains_safety_bytes_when_original_path_is_reoccupie
         .unwrap();
     assert_eq!(fs::read(f.root.join(relative)).unwrap(), b"one");
     assert_eq!(f.saved().state, "synced");
+    crate::drive_recycle::configure(&f.registry.db, &f.project, false).unwrap();
+    assert!(crate::drive_recycle::recover_project(&f.registry, &f.project).is_err());
+    fs::rename(
+        f.root.join("ContextDock_Context_v1.md"),
+        f.root.join("ContextDock_Preserved_Replacement_v1.md"),
+    )
+    .unwrap();
+    crate::drive_recycle::recover_project(&f.registry, &f.project).unwrap();
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Context_v1.md")).unwrap(),
+        b"one"
+    );
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Preserved_Replacement_v1.md")).unwrap(),
+        b"replacement"
+    );
+    assert_eq!(f.saved().state, "synced");
 }
 #[test]
 fn drive_recycling_opt_out_after_quarantine_restores_file_before_bin_transfer() {

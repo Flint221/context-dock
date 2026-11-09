@@ -13,6 +13,7 @@ vi.mock("../drive", () => ({
     createFolders: vi.fn(),
     recycling: vi.fn(),
     chooseProjectFolder: vi.fn(),
+    recoverCleanup: vi.fn(),
   },
 }));
 let state: DriveProject;
@@ -33,6 +34,27 @@ beforeEach(() => {
     structuredClone(state),
   );
   vi.mocked(drive.subscribe).mockResolvedValue(() => {});
+});
+it("keeps recovery visible while disconnected and retries without publishing", async () => {
+  state.connected = false;
+  state.cleanupError = "A safety file needs recovery.";
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "safety file needs recovery",
+  );
+  await user.click(screen.getByText("Optional local cleanup"));
+  vi.mocked(drive.recoverCleanup).mockImplementation(async () => {
+    state.cleanupError = null;
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Retry interrupted cleanup" }),
+  );
+  expect(drive.recoverCleanup).toHaveBeenCalledWith("sample");
+  expect(
+    await screen.findByText(/Interrupted cleanup checked/),
+  ).toBeInTheDocument();
+  expect(drive.publish).not.toHaveBeenCalled();
 });
 it("requires an explicit recycling choice and verifies its saved preference", async () => {
   state.enabled = true;

@@ -268,12 +268,25 @@ fn restore(r: &Registry, id: &str) -> Result<()> {
     tx.commit().map_err(error)
 }
 pub fn recover(r: &Registry) -> Result<()> {
-    for row in cloud::rows(&r.db,"SELECT id,project_id FROM drive_recycle WHERE state IN ('prepared','quarantined','bin_pending')",&[])? {
+    recover_selected(r, None, false)
+}
+fn recover_selected(r: &Registry, project: Option<&str>, attention: bool) -> Result<()> {
+    for row in cloud::rows(&r.db,"SELECT id,project_id FROM drive_recycle WHERE (?1 IS NULL OR project_id=?1) AND (state IN ('prepared','quarantined','bin_pending') OR (?2 AND state='attention'))",&[&project,&attention])? {
         let id=cloud::s(&row,"id");
         if let Err(message)=restore(r,id) {
             r.db.execute("UPDATE drive_recycle SET state='attention',error=?2 WHERE id=?1",params![id,message]).map_err(error)?;
             r.db.execute("INSERT INTO drive_cleanup(project_id,error) VALUES(?1,?2) ON CONFLICT(project_id) DO UPDATE SET error=excluded.error",params![cloud::s(&row,"project_id"),message]).map_err(error)?;
         }
     }
+    Ok(())
+}
+pub fn recover_project(r: &Registry, project: &str) -> Result<()> {
+    r.path(project)?;
+    recover_selected(r, Some(project), true)?;
+    let pending:bool=r.db.query_row("SELECT EXISTS(SELECT 1 FROM drive_recycle WHERE project_id=?1 AND state IN ('prepared','quarantined','bin_pending','attention'))",[project],|r|r.get(0)).map_err(error)?;
+    if pending {
+        return Err("Some older-file recovery still needs attention. Available safety files were kept; occupied original paths were not overwritten.".into());
+    }
+    r.db.execute("INSERT INTO drive_cleanup(project_id,error) VALUES(?1,NULL) ON CONFLICT(project_id) DO UPDATE SET error=NULL",[project]).map_err(error)?;
     Ok(())
 }

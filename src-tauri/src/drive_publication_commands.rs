@@ -75,6 +75,7 @@ pub struct View {
     folder_ready: bool,
     error: Option<String>,
     cleanup_error: Option<String>,
+    blocked: Option<String>,
     documents: Vec<drive_publish::Publication>,
 }
 type SavedSettings = (bool, bool, bool, String, Option<String>, Option<String>);
@@ -90,7 +91,8 @@ pub async fn drive_project_read(
         let connected=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone())).is_some_and(|id|account.is_empty()||id==account);
         let root_ready=registry.db.query_row("SELECT root_ready FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
         let folder_ready=registry.db.query_row("SELECT folder_ready FROM drive_projects WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
-        let cleanup_error=registry.db.query_row("SELECT error FROM drive_cleanup WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.flatten();
+        let schedule_block=registry.db.query_row("SELECT blocked FROM drive_schedule WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.flatten();
+        let cleanup_error=registry.db.query_row("SELECT COALESCE((SELECT error FROM drive_cleanup WHERE project_id=?1),(SELECT COALESCE(error,'An older-file safety move has not finished.') FROM drive_recycle WHERE project_id=?1 AND state IN ('prepared','quarantined','bin_pending','attention') LIMIT 1))",[&project],|r|r.get(0)).map_err(crate::registry::error)?;
         let mut documents=drive_publish::publications(&registry.db,&project).map_err(|e|e.message)?;
         let blocked=crate::path_selection::blocked_documents(&registry.db,&project)?;
         let hidden=crate::cloud::rows(&registry.db,"SELECT id FROM documents WHERE project_id=?1 AND (merged_into IS NOT NULL OR tracking_state IN ('ignored','grouped_history'))",&[&project])?.into_iter().map(|d|crate::cloud::s(&d,"id").to_string()).collect::<std::collections::HashSet<_>>();
@@ -104,7 +106,7 @@ pub async fn drive_project_read(
                 }
             }
         }
-        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,folder_ready,error,cleanup_error,documents})
+        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,folder_ready,error,cleanup_error,blocked:schedule_block,documents})
     }).await
 }
 pub fn open(path: &std::path::Path) -> Result<Registry, String> {
@@ -202,6 +204,11 @@ pub async fn drive_project_action(
     let stop = state.stop.clone();
     let result=tauri::async_runtime::spawn_blocking(move || {
         let registry=open(&path)?;
+        if action=="recover_cleanup" {
+            let _gate=gate.try_lock().map_err(|_|"A publication or cleanup is running. Pause it and retry recovery.")?;
+            crate::drive_recycle::recover_project(&registry,&id)?;
+            return Ok(());
+        }
         if action=="recycle" {
             let value=recycle.ok_or("Specify whether recycling should be enabled.")?;
             if value {

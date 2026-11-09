@@ -24,6 +24,7 @@ export interface DriveProject {
   error: string | null;
   documents: DrivePublication[];
   cleanupError?: string | null;
+  blocked?: string | null;
 }
 
 export interface DriveConnection {
@@ -77,6 +78,14 @@ export const drive = {
       action: "pick_project",
       path: null,
       project,
+    }),
+  recoverCleanup: (project: string) =>
+    invoke<void>("drive_project_action", {
+      project,
+      action: "recover_cleanup",
+      enabled: null,
+      automatic: null,
+      recycle: null,
     }),
   createFolders: (project: string) =>
     invoke<void>("drive_project_action", {

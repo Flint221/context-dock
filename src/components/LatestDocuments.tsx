@@ -120,6 +120,8 @@ export function LatestDocuments({
     if (cloudUnknown) return "Needs attention";
     if (!cloud?.enabled) return "Local only";
     if (!cloud.connected) return "Offline";
+    if (cloud.blocked || !cloud.rootReady || cloud.folderReady === false)
+      return "Needs attention";
     const remote = cloud.documents.find((d) => d.documentId === family.id);
     if (remote?.state === "needs_attention") return "Needs attention";
     if (remote?.state === "offline") return "Offline";
@@ -132,6 +134,15 @@ export function LatestDocuments({
   }
   return (
     <section className="panel" aria-labelledby="latest-documents-heading">
+      {cloud?.cleanupError && (
+        <p role="alert">
+          Older-file cleanup needs attention: {cloud.cleanupError} Open Drive
+          publishing to retry recovery.
+        </p>
+      )}
+      {cloud?.enabled && cloud.blocked && cloud.error && (
+        <p role="alert">Drive publication needs attention: {cloud.error}</p>
+      )}
       <div className="section-heading">
         <div>
           <h2 id="latest-documents-heading">

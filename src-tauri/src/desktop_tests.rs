@@ -14,6 +14,71 @@ struct Fixture {
     id: String,
 }
 #[test]
+fn latest_desktop_problems_ignore_retired_index_errors_and_show_drive_and_cleanup_failures() {
+    let f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
+    let retired =
+        f.r.db
+            .execute(
+                "UPDATE cloud_projects SET error='Retired OpenAI failure' WHERE project_id=?1",
+                [&f.id],
+            )
+            .unwrap();
+    assert_eq!(retired, 1);
+    assert!(desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0]).is_none());
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, true).unwrap();
+    let doc: String =
+        f.r.db
+            .query_row(
+                "SELECT id FROM documents WHERE project_id=?1 AND merged_into IS NULL",
+                [&f.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+    f.r.db.execute("INSERT INTO drive_documents(document_id,project_id,file_id,state,error) VALUES(?1,?2,'fixture-cloud-file','offline','Drive is offline')",rusqlite::params![doc,f.id]).unwrap();
+    f.r.db
+        .execute(
+            "UPDATE drive_projects SET error='Drive is offline' WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    let problems = desktop::project_problems(&f.r.db).unwrap();
+    assert_eq!(cloud::n(&problems[0], "failed"), 1);
+    assert!(desktop::problem_signature(&problems[0])
+        .unwrap()
+        .contains("Drive is offline"));
+    f.r.db
+        .execute(
+            "UPDATE source_files SET disposition='ignored' WHERE document_id=?1",
+            [&doc],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "UPDATE documents SET tracking_state='ignored' WHERE id=?1",
+            [&doc],
+        )
+        .unwrap();
+    assert!(desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0]).is_none());
+    f.r.db
+        .execute(
+            "UPDATE drive_projects SET enabled=0 WHERE project_id=?1",
+            [&f.id],
+        )
+        .unwrap();
+    f.r.db
+        .execute(
+            "INSERT INTO drive_cleanup(project_id,error) VALUES(?1,'A safety file needs recovery')",
+            [&f.id],
+        )
+        .unwrap();
+    assert!(
+        desktop::problem_signature(&desktop::project_problems(&f.r.db).unwrap()[0])
+            .unwrap()
+            .contains("safety file needs recovery")
+    );
+}
+#[test]
 fn battery_saver_pauses_only_uploads_and_respects_persisted_override_and_manual_pause() {
     let f = Fixture::new();
     assert!(!desktop::uploads_paused_for_power(&f.r.db, false));

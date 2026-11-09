@@ -347,6 +347,35 @@ pub(crate) fn problem_signature(project: &Value) -> Option<String> {
     );
     (signature != "|||0").then_some(signature)
 }
+pub(crate) fn project_problems(db: &rusqlite::Connection) -> Result<Vec<Value>> {
+    if !crate::latest_tracking::enabled(db) {
+        return cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain') AND (j.error IS NULL OR instr(j.error,?1)=0)) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[&cloud::SOURCE_BUSY]);
+    }
+    let mut projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,dp.enabled drive_enabled,dp.error drive_error,ds.blocked drive_blocked,COALESCE((SELECT error FROM drive_cleanup WHERE project_id=p.id),(SELECT COALESCE(error,'An older-file safety move has not finished.') FROM drive_recycle WHERE project_id=p.id AND state IN ('prepared','quarantined','bin_pending','attention') LIMIT 1)) cleanup_error FROM projects p LEFT JOIN drive_projects dp ON dp.project_id=p.id LEFT JOIN drive_schedule ds ON ds.project_id=p.id WHERE p.removed_at IS NULL",&[])?;
+    for project in &mut projects {
+        let id = cloud::s(project, "id");
+        let enabled = cloud::n(project, "drive_enabled") == 1;
+        let failed = if enabled {
+            let blocked = crate::path_selection::blocked_documents(db, id)?;
+            cloud::rows(db,"SELECT dd.document_id FROM drive_documents dd JOIN documents d ON d.id=dd.document_id WHERE dd.project_id=?1 AND dd.state IN ('offline','needs_attention') AND d.tracking_state='tracked' AND d.merged_into IS NULL",&[&id])?.into_iter().filter(|d|!blocked.contains(cloud::s(d,"document_id"))).count()
+        } else {
+            0
+        };
+        let remote = if enabled && (failed > 0 || !cloud::s(project, "drive_blocked").is_empty()) {
+            cloud::s(project, "drive_error")
+        } else {
+            ""
+        };
+        let errors = [remote, cloud::s(project, "cleanup_error")]
+            .into_iter()
+            .filter(|e| !e.is_empty())
+            .collect::<Vec<_>>()
+            .join(" | ");
+        project["cloud_error"] = json!(errors);
+        project["failed"] = json!(failed);
+    }
+    Ok(projects)
+}
 fn background_tick(
     db: &rusqlite::Connection,
     app: &tauri::AppHandle,
@@ -372,7 +401,7 @@ fn background_tick(
             "Pause uploads"
         });
     }
-    let projects=cloud::rows(db,"SELECT p.id,p.name,p.folder_state,p.scan_error,p.tracking_error,c.error cloud_error,c.status cloud_status,(SELECT count(*) FROM cloud_jobs j WHERE j.project_id=p.id AND j.desired=1 AND j.state IN ('failed','uncertain') AND (j.error IS NULL OR instr(j.error,?1)=0)) failed FROM projects p LEFT JOIN cloud_projects c ON c.project_id=p.id WHERE p.removed_at IS NULL",&[&cloud::SOURCE_BUSY])?;
+    let projects = project_problems(db)?;
     let problems = projects
         .iter()
         .filter(|p| problem_signature(p).is_some())
