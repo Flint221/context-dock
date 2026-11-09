@@ -11,13 +11,16 @@ export function DrivePanel({ project }: { project: string }) {
   const [pausing, setPausing] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const alive = useRef(true);
+  const sequence = useRef(0);
   const refresh = useCallback(async () => {
+    const request = ++sequence.current;
     const next = await drive.project(project);
-    if (alive.current) setView(next);
+    if (alive.current && request === sequence.current) setView(next);
     return next;
   }, [project]);
   useEffect(() => {
     alive.current = true;
+    let disposed = false;
     let stop: (() => void) | undefined;
     void refresh().catch((e) => {
       if (alive.current) setError(String(e));
@@ -27,7 +30,7 @@ export function DrivePanel({ project }: { project: string }) {
         await refresh();
       })
       .then((release) => {
-        if (alive.current) stop = release;
+        if (!disposed) stop = release;
         else release();
       })
       .catch((e) => {
@@ -35,6 +38,7 @@ export function DrivePanel({ project }: { project: string }) {
       });
     return () => {
       alive.current = false;
+      disposed = true;
       stop?.();
     };
   }, [project, refresh]);

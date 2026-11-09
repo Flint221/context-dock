@@ -74,6 +74,34 @@ it("requires an explicit recycling choice and verifies its saved preference", as
   );
   expect(option).not.toBeChecked();
 });
+it("does not let a late status read undo a verified recycling preference", async () => {
+  state.enabled = true;
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(await screen.findByText("Optional local cleanup"));
+  const old = structuredClone(state);
+  let finish!: (value: DriveProject) => void;
+  vi.mocked(drive.project).mockImplementationOnce(
+    () =>
+      new Promise<DriveProject>((r) => {
+        finish = r;
+      }),
+  );
+  const pending = vi.mocked(drive.subscribe).mock.calls[0][1]();
+  vi.mocked(drive.recycling).mockImplementation(async (_project, value) => {
+    state.recycle = value;
+  });
+  const choice = screen.getByRole("checkbox", {
+    name: "Recycle unchanged older local versions",
+  });
+  await user.click(choice);
+  await waitFor(() => expect(choice).toBeChecked());
+  await act(async () => {
+    finish(old);
+    await pending;
+  });
+  expect(choice).toBeChecked();
+});
 it("can disable recycling during publication and keeps cleanup errors separate", async () => {
   state.enabled = true;
   state.recycle = true;

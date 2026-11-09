@@ -9,9 +9,11 @@ export function GoogleDriveConnection() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const alive = useRef(true);
+  const sequence = useRef(0);
   const refresh = useCallback(async () => {
+    const request = ++sequence.current;
     const next = await drive.connection();
-    if (alive.current) setConnection(next);
+    if (alive.current && request === sequence.current) setConnection(next);
     return next;
   }, []);
   useEffect(() => {

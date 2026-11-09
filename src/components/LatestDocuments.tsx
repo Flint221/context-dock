@@ -43,9 +43,10 @@ export function LatestDocuments({
   }, [project.id]);
   useEffect(() => {
     alive.current = true;
+    let disposed = false;
     const stops: (() => void)[] = [];
     const keep = (stop: () => void) => {
-      if (alive.current) stops.push(stop);
+      if (!disposed) stops.push(stop);
       else stop();
     };
     void registry
@@ -60,6 +61,7 @@ export function LatestDocuments({
       .catch(() => {});
     return () => {
       alive.current = false;
+      disposed = true;
       stops.forEach((s) => s());
     };
   }, [project.id, refresh]);
