@@ -752,6 +752,66 @@ impl Fixture {
     }
 }
 #[test]
+fn drive_pending_publication_defers_old_version_path_retirement() {
+    let mut f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"same"),
+        ("ContextDock_Context_v2.md", b"same"),
+    ]);
+    f.api.fail_before.set(true);
+    assert!(f.run().is_err());
+    fs::remove_file(f.root.join("ContextDock_Context_v1.md")).unwrap();
+    f.reconcile();
+    assert!(f
+        .registry
+        .snapshot()
+        .unwrap()
+        .documents
+        .iter()
+        .any(|d| d.name.ends_with("v1.md") && d.status == "missing"));
+    let before = f.saved();
+    f.api.fail_before.set(false);
+    f.run().unwrap();
+    f.reconcile();
+    assert!(f
+        .registry
+        .snapshot()
+        .unwrap()
+        .documents
+        .iter()
+        .all(|d| d.status != "missing"));
+    assert_eq!(f.saved().file_id, before.file_id);
+}
+
+#[test]
+fn drive_version_rename_retires_missing_path_without_replacing_cloud_identity() {
+    let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"rename marker")]);
+    f.run().unwrap();
+    let before = f.saved();
+    fs::rename(
+        f.root.join("ContextDock_Context_v1.md"),
+        f.root.join("ContextDock_Context_v2.md"),
+    )
+    .unwrap();
+    f.reconcile();
+    f.run().unwrap();
+    let after = f.saved();
+    assert_eq!(before.file_id, after.file_id);
+    assert_eq!(before.document_id, after.document_id);
+    assert_eq!(
+        after.verified_name.as_deref(),
+        Some("ContextDock_Context_v2.md")
+    );
+    assert_eq!(f.cloud_documents(), 1);
+    assert!(f
+        .registry
+        .snapshot()
+        .unwrap()
+        .documents
+        .iter()
+        .all(|d| d.status != "missing"));
+}
+
+#[test]
 fn drive_worker_reopened_storage_publishes_and_replaces_under_the_same_id() {
     let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"worker v1")]);
     let registry = crate::drive_publication_commands::open(&f.db).unwrap();

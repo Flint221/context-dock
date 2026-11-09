@@ -251,7 +251,7 @@ impl Registry {
                         .optional()
                         .map_err(error)?;
                     if let Some(sid) = existing {
-                        tx.execute("UPDATE source_files SET name=?1,relative_path=?2,kind=?3,size=?4,modified_at=?5,last_observed=?6,status='available',disposition=CASE WHEN disposition IN ('archived','recycled') THEN 'superseded' ELSE disposition END WHERE id=?7",params![f.name,f.relative,f.kind,f.size,f.modified,now,sid]).map_err(error)?;
+                        tx.execute("UPDATE source_files SET name=?1,relative_path=?2,kind=?3,size=?4,modified_at=?5,last_observed=?6,status='available',disposition=CASE WHEN disposition IN ('archived','recycled','renamed') THEN 'superseded' ELSE disposition END WHERE id=?7",params![f.name,f.relative,f.kind,f.size,f.modified,now,sid]).map_err(error)?;
                     } else {
                         let did = uuid::Uuid::new_v4().to_string();
                         let sid = uuid::Uuid::new_v4().to_string();
@@ -307,7 +307,7 @@ impl Registry {
     pub fn snapshot(&self) -> Result<Snapshot> {
         self.check_folders()?;
         let latest = crate::latest_tracking::enabled(&self.db);
-        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition='ignored')),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id),p.folder_state FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT p.id,p.name,p.path,p.created_at,p.status,p.last_scan,p.scan_error,(SELECT COUNT(*) FROM source_files s WHERE s.project_id=p.id AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition IN ('ignored','renamed'))),(SELECT MAX(modified_at) FROM source_files s WHERE s.project_id=p.id AND s.status='available'),p.tracking_enabled,p.archive_enabled,(SELECT COALESCE(MAX(a.rowid),0) FROM tracking_activity a WHERE a.project_id=p.id),p.folder_state FROM projects p WHERE p.removed_at IS NULL ORDER BY p.name COLLATE NOCASE").map_err(error)?;
         let projects = q
             .query_map([latest], |r| {
                 Ok(Project {
@@ -329,7 +329,7 @@ impl Registry {
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
-        let mut q=self.db.prepare("SELECT s.id,s.project_id,s.name,s.relative_path,p.path,s.kind,s.size,s.modified_at,s.last_observed,s.status,s.document_id FROM source_files s JOIN projects p ON p.id=s.project_id WHERE p.removed_at IS NULL AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition='ignored') ORDER BY s.relative_path COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT s.id,s.project_id,s.name,s.relative_path,p.path,s.kind,s.size,s.modified_at,s.last_observed,s.status,s.document_id FROM source_files s JOIN projects p ON p.id=s.project_id WHERE p.removed_at IS NULL AND s.status!='archived' AND NOT(?1 AND s.status='missing' AND s.disposition IN ('ignored','renamed')) ORDER BY s.relative_path COLLATE NOCASE").map_err(error)?;
         let documents = q
             .query_map([latest], |r| {
                 let root: String = r.get(4)?;

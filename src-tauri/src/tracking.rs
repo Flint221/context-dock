@@ -217,6 +217,7 @@ impl Registry {
         problems.extend(self.recover_operations(project, full)?);
         let mut path_rules = crate::path_selection::rules(&self.db, project)?;
         self.reconcile_relocations(project, root, &path_rules)?;
+        self.retire_version_rename_paths(project, root, &path_rules)?;
         path_rules = crate::path_selection::rules(&self.db, project)?;
         let mut sources = self
             .source_ids(project)?
@@ -386,7 +387,10 @@ impl Registry {
             if !crate::path_selection::permits(&path_rules, &source.relative) {
                 continue;
             }
-            if source.disposition == "ignored" || source.disposition == "archived" {
+            if matches!(
+                source.disposition.as_str(),
+                "ignored" | "archived" | "renamed"
+            ) {
                 continue;
             }
             let changed =
@@ -539,8 +543,12 @@ impl Registry {
             return Ok(());
         }
         let blocked = crate::path_selection::blocked_documents(&self.db, project)?;
-        for id in self.source_ids(project)? {
-            let source = self.source(&id)?;
+        let observed = self
+            .source_ids(project)?
+            .iter()
+            .map(|id| self.source(id))
+            .collect::<Result<Vec<_>>>()?;
+        for source in &observed {
             if source.disposition != "discovered" || source.last_hash.is_some() {
                 continue;
             }
@@ -577,8 +585,19 @@ impl Registry {
                 } else {
                     old.disposition == "tracked"
                 };
+                let numeric_rename = crate::latest_tracking::enabled(&self.db)
+                    && old.disposition == "tracked"
+                    && crate::latest_tracking::newer_same_path_family(&old, source)
+                    && observed
+                        .iter()
+                        .filter(|s| {
+                            s.disposition == "discovered"
+                                && crate::latest_tracking::newer_same_path_family(&old, s)
+                        })
+                        .count()
+                        == 1;
                 // A partial scan or inaccessible old path cannot prove absence.
-                if same_version
+                if (same_version || numeric_rename)
                     && std::fs::symlink_metadata(root.join(&old.relative))
                         .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
                 {
@@ -608,8 +627,8 @@ impl Registry {
                 tx.execute("UPDATE documents SET active_source_id=NULL,tracking_state='merged',merged_into=?1 WHERE id=?2",params![old.document_id,source.document_id]).map_err(error)?;
                 tx.execute("DELETE FROM source_files WHERE id=?1", [&source.id])
                     .map_err(error)?;
-                tx.execute("UPDATE source_files SET name=?1,relative_path=?2,path_key=?3,size=?4,modified_at=?5,last_observed=?6,status='available',hashed_stamp=?5,hashed_size=?4 WHERE id=?7",
-                    params![source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now(),old.id]).map_err(error)?;
+                tx.execute("UPDATE source_files SET name=?1,relative_path=?2,path_key=?3,size=?4,modified_at=?5,last_observed=?6,status='available',hashed_stamp=CASE WHEN ?8 THEN NULL ELSE ?5 END,hashed_size=?4 WHERE id=?7",
+                    params![source.name,source.relative,models::key(&source.relative),staged.size,staged.modified,models::now(),old.id,crate::versioning::key(&old.name)!=crate::versioning::key(&source.name)]).map_err(error)?;
                 tx.execute(
                     "DELETE FROM path_exclusions WHERE project_id=?1 AND path=?2 AND kind='file'",
                     params![project, path],

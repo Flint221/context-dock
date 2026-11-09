@@ -9,7 +9,86 @@ use std::path::Path;
 pub fn enabled(db: &Connection) -> bool {
     crate::review::preference(db, "workflow.latest_only", true)
 }
+pub(crate) fn newer_same_path_family(old: &Source, next: &Source) -> bool {
+    old.kind == next.kind
+        && crate::matching::parent_key(&old.relative) == crate::matching::parent_key(&next.relative)
+        && crate::matching::stem(&old.name).normalized
+            == crate::matching::stem(&next.name).normalized
+        && crate::versioning::key(&old.name) != crate::versioning::key(&next.name)
+        && matches!((crate::matching::version_order(&old.name),crate::matching::version_order(&next.name)),(Some(a),Some(b)) if b>a)
+}
 impl Registry {
+    /// Repair already-captured rename ghosts without deleting version metadata,
+    /// source IDs or publication receipts. Never infer this from names alone.
+    pub(crate) fn retire_version_rename_paths(
+        &mut self,
+        project: &str,
+        root: &Path,
+        rules: &[crate::path_selection::Rule],
+    ) -> Result<()> {
+        if !enabled(&self.db) {
+            return Ok(());
+        }
+        let blocked = crate::path_selection::blocked_documents(&self.db, project)?;
+        let rows = crate::cloud::rows(&self.db,"SELECT s.id FROM source_files s JOIN documents d ON d.id=s.document_id WHERE s.project_id=?1 AND s.status IN ('missing','available') AND s.disposition IN ('tracked','superseded') AND s.last_hash IS NOT NULL AND d.tracking_state='tracked' AND d.merged_into IS NULL AND NOT EXISTS(SELECT 1 FROM operations o WHERE o.document_id=d.id AND o.state NOT IN ('done','cancelled','restored')) AND NOT EXISTS(SELECT 1 FROM pending_matches m JOIN source_files f ON f.id=m.source_id WHERE f.document_id=d.id) AND NOT EXISTS(SELECT 1 FROM drive_documents p WHERE p.document_id=d.id AND p.pending_hash IS NOT NULL) AND NOT EXISTS(SELECT 1 FROM drive_recycle r WHERE r.source_id=s.id)",&[&project])?;
+        let sources = rows
+            .iter()
+            .map(|r| self.source(crate::cloud::s(r, "id")))
+            .collect::<Result<Vec<_>>>()?;
+        let mut pairs = vec![];
+        for old in sources.iter().filter(|s| {
+            s.status == "missing"
+                && !blocked.contains(&s.document_id)
+                && crate::path_selection::permits(rules, &s.relative)
+        }) {
+            if !std::fs::symlink_metadata(root.join(&old.relative))
+                .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+            let candidates = sources
+                .iter()
+                .filter(|next| {
+                    next.status == "available"
+                        && next.document_id == old.document_id
+                        && next.last_hash == old.last_hash
+                        && newer_same_path_family(old, next)
+                        && crate::path_selection::permits(rules, &next.relative)
+                })
+                .collect::<Vec<_>>();
+            if candidates.len() == 1 {
+                pairs.push((old, candidates[0]));
+            }
+        }
+        for (old, next) in &pairs {
+            if pairs
+                .iter()
+                .filter(|(_, candidate)| candidate.id == next.id)
+                .count()
+                != 1
+            {
+                continue;
+            }
+            let new_path = storage::checked(root, &next.relative, false)?;
+            let old_path = storage::checked(root, &old.relative, false)?;
+            let Ok(mut file) = storage::locked_read(&new_path.path, false) else {
+                continue;
+            };
+            if storage::hash(&mut file).ok().as_deref() != old.last_hash.as_deref()
+                || !std::fs::symlink_metadata(&old_path.path)
+                    .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+            {
+                continue;
+            }
+            let tx = self.db.transaction().map_err(error)?;
+            let changed=tx.execute("UPDATE source_files SET disposition='renamed' WHERE id=?1 AND status='missing' AND last_hash=?2 AND NOT EXISTS(SELECT 1 FROM documents WHERE active_source_id=?1) AND NOT EXISTS(SELECT 1 FROM drive_documents WHERE document_id=?3 AND pending_hash IS NOT NULL)",params![old.id,old.last_hash,old.document_id]).map_err(error)?;
+            tx.commit().map_err(error)?;
+            if changed == 1 {
+                self.activity(project,"source_relocated",&format!("{} -> {}. Retired an absent older path after unique identical-content version-rename verification; version metadata and cloud identity retained.",old.relative,next.relative))?;
+            }
+        }
+        Ok(())
+    }
     fn latest_source(&self, project: &str, path: &str) -> Result<serde_json::Value> {
         let sources=crate::cloud::rows(&self.db,"SELECT id,document_id,relative_path,status,last_hash FROM source_files WHERE project_id=?1",&[&project])?;
         let sources = sources

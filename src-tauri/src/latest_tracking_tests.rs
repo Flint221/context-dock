@@ -2,6 +2,134 @@ use crate::{latest_tracking, registry::Registry};
 use std::{collections::HashSet, fs};
 use tempfile::tempdir;
 
+fn rename_fixture(
+    files: &[(&str, &str)],
+) -> (tempfile::TempDir, std::path::PathBuf, Registry, String) {
+    let t = tempdir().unwrap();
+    let root = t.path().join("Project");
+    let app = t.path().join("App");
+    fs::create_dir(&root).unwrap();
+    fs::create_dir(&app).unwrap();
+    for (name, contents) in files {
+        fs::write(root.join(name), contents).unwrap();
+    }
+    let mut r = Registry::open(&app.join("registry.db")).unwrap();
+    let project = r.add("Project", root.to_str().unwrap()).unwrap();
+    r.configure_tracking(&project, true, false, vec![]).unwrap();
+    (t, root, r, project)
+}
+
+#[test]
+fn latest_tracking_version_rename_retires_old_path_but_a_real_missing_latest_still_warns() {
+    let (_t, root, mut r, project) = rename_fixture(&[("ContextDock_Context_v8.md", "same")]);
+    let family = crate::drive_publish::eligible_documents(&r.db, &project).unwrap()[0].clone();
+    fs::rename(
+        root.join("ContextDock_Context_v8.md"),
+        root.join("ContextDock_Context_v9.md"),
+    )
+    .unwrap();
+    r.reconcile(&project, "watcher", &HashSet::new(), true)
+        .unwrap();
+    let visible = r.snapshot().unwrap().documents;
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].name, "ContextDock_Context_v9.md");
+    assert_eq!(visible[0].document_id, family);
+    assert_eq!(visible[0].status, "available");
+    assert!(r
+        .path_selection(&project)
+        .unwrap()
+        .entries
+        .iter()
+        .all(|e| !e.path.ends_with("ContextDock_Context_v8.md")));
+    assert_eq!(r.versions(&family).unwrap().len(), 2);
+    fs::remove_file(root.join("ContextDock_Context_v9.md")).unwrap();
+    r.reconcile(&project, "watcher", &HashSet::new(), true)
+        .unwrap();
+    let visible = r.snapshot().unwrap().documents;
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].status, "missing");
+}
+
+#[test]
+fn latest_tracking_repairs_existing_version_rename_metadata_and_restores_a_reappearing_path() {
+    let (_t, root, mut r, project) = rename_fixture(&[
+        ("ContextDock_Context_v6.md", "same"),
+        ("ContextDock_Context_v7.md", "same"),
+        ("ContextDock_Context_v8.md", "newer"),
+    ]);
+    let old = r
+        .snapshot()
+        .unwrap()
+        .documents
+        .into_iter()
+        .find(|d| d.name.ends_with("v6.md"))
+        .unwrap();
+    let before = r.versions(&old.document_id).unwrap().len();
+    fs::remove_file(root.join("ContextDock_Context_v6.md")).unwrap();
+    r.reconcile(&project, "startup_reconciliation", &HashSet::new(), true)
+        .unwrap();
+    assert!(r
+        .snapshot()
+        .unwrap()
+        .documents
+        .iter()
+        .all(|d| d.status != "missing"));
+    assert_eq!(r.versions(&old.document_id).unwrap().len(), before);
+    assert_eq!(r.source(&old.id).unwrap().disposition, "renamed");
+    fs::write(root.join("ContextDock_Context_v6.md"), "same").unwrap();
+    r.reconcile(&project, "watcher", &HashSet::new(), true)
+        .unwrap();
+    let restored = r
+        .snapshot()
+        .unwrap()
+        .documents
+        .into_iter()
+        .find(|d| d.id == old.id)
+        .unwrap();
+    assert_eq!(restored.status, "available");
+    assert_eq!(restored.document_id, old.document_id);
+}
+
+#[test]
+fn latest_tracking_missing_path_is_not_retired_for_changed_ambiguous_or_excluded_successors() {
+    for (contents, ambiguous, excluded) in [
+        ("different", false, false),
+        ("same", true, false),
+        ("same", false, true),
+    ] {
+        let (_t, root, mut r, project) = rename_fixture(&[
+            ("ContextDock_Context_v1.md", "same"),
+            ("ContextDock_Context_v2.md", contents),
+        ]);
+        if ambiguous {
+            fs::write(root.join("ContextDock_Context_v3.md"), "same").unwrap();
+            r.reconcile(&project, "watcher", &HashSet::new(), true)
+                .unwrap();
+        }
+        if excluded {
+            let revision = crate::path_selection::revision(&r.db, &project).unwrap();
+            r.save_path_selection(
+                &project,
+                revision,
+                vec![crate::path_selection::Rule {
+                    path: "ContextDock_Context_v2.md".into(),
+                    kind: "file".into(),
+                }],
+            )
+            .unwrap();
+        }
+        fs::remove_file(root.join("ContextDock_Context_v1.md")).unwrap();
+        r.reconcile(&project, "watcher", &HashSet::new(), true)
+            .unwrap();
+        assert!(r
+            .snapshot()
+            .unwrap()
+            .documents
+            .iter()
+            .any(|d| d.name.ends_with("v1.md") && d.status == "missing"));
+    }
+}
+
 #[test]
 fn latest_tracking_does_not_create_archives_or_snapshot_bytes_and_reuses_save_metadata() {
     let t = tempdir().unwrap();

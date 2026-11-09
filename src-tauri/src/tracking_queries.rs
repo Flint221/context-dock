@@ -111,18 +111,21 @@ impl Registry {
         for family in &mut families {
             family.version_count = crate::versioning::heads(&self.db, &family.id)?.len() as i64;
         }
-        let mut q=self.db.prepare("SELECT id,document_id,name,relative_path,status,disposition FROM source_files WHERE project_id=?1 AND status!='archived' ORDER BY relative_path COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT id,document_id,name,relative_path,status,disposition FROM source_files WHERE project_id=?1 AND status!='archived' AND NOT(?2 AND status='missing' AND disposition='renamed') ORDER BY relative_path COLLATE NOCASE").map_err(error)?;
         let sources = q
-            .query_map([project], |r| {
-                Ok(SourceChoice {
-                    id: r.get(0)?,
-                    document_id: r.get(1)?,
-                    name: r.get(2)?,
-                    relative_path: r.get(3)?,
-                    status: r.get(4)?,
-                    disposition: r.get(5)?,
-                })
-            })
+            .query_map(
+                rusqlite::params![project, crate::latest_tracking::enabled(&self.db)],
+                |r| {
+                    Ok(SourceChoice {
+                        id: r.get(0)?,
+                        document_id: r.get(1)?,
+                        name: r.get(2)?,
+                        relative_path: r.get(3)?,
+                        status: r.get(4)?,
+                        disposition: r.get(5)?,
+                    })
+                },
+            )
             .map_err(error)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(error)?;
