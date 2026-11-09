@@ -110,12 +110,13 @@ pub async fn drive_project_read(
     }).await
 }
 pub fn open(path: &std::path::Path) -> Result<Registry, String> {
+    // Match Registry::open: checked staging requires the canonical storage root,
+    // including Windows' extended-length prefix. Keep its link checks intact.
+    let store = std::fs::canonicalize(path.parent().ok_or("Drive registry path is unavailable.")?)
+        .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
     Ok(Registry {
         db: crate::cloud::connect(path)?,
-        store: path
-            .parent()
-            .ok_or("Drive registry path is unavailable.")?
-            .to_path_buf(),
+        store,
     })
 }
 pub fn api(

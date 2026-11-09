@@ -752,6 +752,48 @@ impl Fixture {
     }
 }
 #[test]
+fn drive_worker_reopened_storage_publishes_and_replaces_under_the_same_id() {
+    let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"worker v1")]);
+    let registry = crate::drive_publication_commands::open(&f.db).unwrap();
+    let parent =
+        publish::ensure_destination(&registry.db, &f.project, "account-A", &f.api).unwrap();
+    publish::publish(
+        &registry,
+        &f.project,
+        "account-A",
+        &f.current(),
+        &parent,
+        &f.api,
+    )
+    .unwrap();
+    let first = f.saved();
+    fs::write(f.root.join("ContextDock_Context_v2.md"), b"worker v2").unwrap();
+    f.reconcile();
+    let reopened = crate::drive_publication_commands::open(&f.db).unwrap();
+    publish::publish(
+        &reopened,
+        &f.project,
+        "account-A",
+        &f.current(),
+        &parent,
+        &f.api,
+    )
+    .unwrap();
+    let second = f.saved();
+    assert_eq!(first.file_id, second.file_id);
+    assert_eq!(
+        second.verified_name.as_deref(),
+        Some("ContextDock_Context_v2.md")
+    );
+    assert_eq!(
+        second.verified_hash,
+        Some(format!("{:x}", Sha256::digest(b"worker v2")))
+    );
+    assert_eq!(second.state, "synced");
+    assert_eq!(f.cloud_documents(), 1);
+}
+
+#[test]
 fn drive_publication_v1_v2_reuses_cloud_file_and_project_folder_ids() {
     let mut f = Fixture::new(&[("ContextDock_Context_v1.md", b"sample v1")]);
     f.run().unwrap();
