@@ -86,7 +86,17 @@ pub fn preview(r: &Registry, request: &ReviewRequest) -> Result<Value> {
     let project=cloud::rows(&r.db,"SELECT name,folder_revision,folder_state,tracking_enabled FROM projects WHERE id=?1 AND removed_at IS NULL",&[&request.project])?.pop().ok_or("Project is no longer registered.")?;
     crate::folder_recovery::require_ready(&r.db, &request.project)?;
     let revision = path_selection::revision(&r.db, &request.project)?;
-    let policy = cloud::project(&r.db, &request.project)?;
+    let latest = crate::latest_tracking::enabled(&r.db);
+    let policy = if latest {
+        cloud::rows(&r.db,"SELECT p.enabled,p.automatic auto_sync,p.account_id,p.folder_id,p.folder_ready,p.recycle,a.root_id,a.root_ready FROM drive_projects p LEFT JOIN drive_accounts a ON a.account_id=p.account_id WHERE p.project_id=?1",&[&request.project])?.pop().unwrap_or_else(||json!({"enabled":0,"auto_sync":0}))
+    } else {
+        cloud::project(&r.db, &request.project)?
+    };
+    let policy_scope = if latest {
+        policy.clone()
+    } else {
+        policy["revision"].clone()
+    };
     let token = format!(
         "{:x}",
         Sha256::digest(
@@ -96,7 +106,7 @@ pub fn preview(r: &Registry, request: &ReviewRequest) -> Result<Value> {
                 rows,
                 project,
                 revision,
-                policy["revision"]
+                policy_scope
             ]))
             .map_err(|e| e.to_string())?
         )

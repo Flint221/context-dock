@@ -321,8 +321,8 @@ export function PendingApprovals({
           </ul>
           <p>
             {review.request.action === "ignore"
-              ? "These files will stay excluded from tracking and cloud indexing. Source files and existing local history are kept."
-              : `These paths become selected. Tracking is ${review.plan.trackingEnabled ? "on" : "off"}; cloud sync is ${review.plan.cloudEnabled ? "on" : "off"}. Approval does not enable either setting. Uploads follow the saved project policy and any global pause.`}
+              ? "These files will stay excluded from tracking and Drive publishing. Local files and existing cloud copies are kept."
+              : `These paths become selected. Tracking is ${review.plan.trackingEnabled ? "on" : "off"}; Drive publishing is ${review.plan.cloudEnabled ? "enabled" : "disabled"}. Approval changes file selection only. Uploads follow the saved project policy and any global pause.`}
           </p>
           <div className="actions">
             <button disabled={busy} onClick={() => setReview(null)}>

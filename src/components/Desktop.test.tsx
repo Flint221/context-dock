@@ -180,7 +180,7 @@ it("requires explicit selection and confirmation before approving only selected 
   let dialog = await screen.findByRole("dialog", {
     name: "Approve new files?",
   });
-  expect(dialog).toHaveTextContent("cloud sync is off");
+  expect(dialog).toHaveTextContent("Drive publishing is disabled");
   await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
   expect(desktop.apply).not.toHaveBeenCalled();
   await user.click(
@@ -214,7 +214,7 @@ it("ignores a confirmed batch and shows stale-review errors without pretending s
     name: "Ignore new files?",
   });
   expect(dialog).toHaveTextContent(
-    "Source files and existing local history are kept",
+    "Local files and existing cloud copies are kept",
   );
   vi.mocked(desktop.apply).mockRejectedValueOnce(
     new Error("Files changed. Reload and review again."),

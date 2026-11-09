@@ -14,6 +14,40 @@ struct Fixture {
     id: String,
 }
 #[test]
+fn latest_approval_uses_drive_policy_and_rejects_changed_publication_settings() {
+    let mut f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
+    f.add("ContextDock_New_v1.md");
+    let req = f.request("ContextDock_New_v1.md", "approve");
+    let disabled = review::preview(&f.r, &req).unwrap();
+    assert_eq!(cloud::n(&disabled, "cloudEnabled"), 0);
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, true).unwrap();
+    assert!(review::apply(&mut f.r, &req, cloud::s(&disabled, "token")).is_err());
+    assert!(!path_selection::allowed(&f.r.db, &f.id, "ContextDock_New_v1.md").unwrap());
+    let enabled = review::preview(&f.r, &req).unwrap();
+    assert_eq!(cloud::n(&enabled, "cloudEnabled"), 1);
+    assert_eq!(cloud::n(&enabled, "automatic"), 1);
+    assert_eq!(
+        cloud::n(&cloud::project(&f.r.db, &f.id).unwrap(), "enabled"),
+        0
+    );
+    crate::drive_publish::configure(&f.r.db, &f.id, "pilot-account", true, false).unwrap();
+    assert!(review::apply(&mut f.r, &req, cloud::s(&enabled, "token")).is_err());
+    let manual = review::preview(&f.r, &req).unwrap();
+    review::apply(&mut f.r, &req, cloud::s(&manual, "token")).unwrap();
+    assert!(path_selection::allowed(&f.r.db, &f.id, "ContextDock_New_v1.md").unwrap());
+    let saved: (bool, bool, bool) =
+        f.r.db
+            .query_row(
+                "SELECT enabled,automatic,recycle FROM drive_projects WHERE project_id=?1",
+                [&f.id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+    assert_eq!(saved, (true, false, false));
+}
+
+#[test]
 fn latest_desktop_problems_ignore_retired_index_errors_and_show_drive_and_cleanup_failures() {
     let f = Fixture::new();
     review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
