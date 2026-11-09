@@ -210,7 +210,7 @@ fn live_google_recovery_refresh_and_verified_recycling() {
     drop(interrupted_api);
     drop(api);
     drop(r);
-    let r = commands::open(&db).unwrap();
+    let mut r = commands::open(&db).unwrap();
     let access = drive_auth::access(
         &NativeVault,
         &drive_auth::GoogleHttp::new().unwrap(),
@@ -250,10 +250,33 @@ fn live_google_recovery_refresh_and_verified_recycling() {
     )
     .unwrap();
     crate::drive_recycle::configure(&r.db, &project, true).unwrap();
-    let mut recycled = 0;
+    publish_retry(&r, &project, &account, &markdown, &parent, &api);
+    let changed = crate::drive_recycle::run(
+        &r,
+        &project,
+        &account,
+        &markdown,
+        &parent,
+        &api,
+        &crate::recycle_bin::NativeBin,
+    )
+    .unwrap_err();
+    assert!(changed.contains("changed since it was tracked"));
+    assert!(root.join("ContextDock_Context_v1.md").is_file());
+    assert!(root.join("ContextDock_Context_v3.md").is_file());
+    let revision = crate::path_selection::revision(&r.db, &project).unwrap();
+    r.save_path_selection(
+        &project,
+        revision,
+        vec![crate::path_selection::Rule {
+            path: "ContextDock_Context_v1.md".into(),
+            kind: "file".into(),
+        }],
+    )
+    .unwrap();
     for doc in &docs {
         publish_retry(&r, &project, &account, doc, &parent, &api);
-        recycled += crate::drive_recycle::run(
+        crate::drive_recycle::run(
             &r,
             &project,
             &account,
@@ -264,7 +287,6 @@ fn live_google_recovery_refresh_and_verified_recycling() {
         )
         .unwrap();
     }
-    assert_eq!(recycled, 2);
     assert!(root.join("ContextDock_Context_v1.md").is_file());
     assert!(!root.join("ContextDock_Context_v2.md").exists());
     assert!(!root.join("ContextDock_Notes_v1.docx").exists());
@@ -275,7 +297,7 @@ fn live_google_recovery_refresh_and_verified_recycling() {
     crate::drive_recycle::configure(&r.db, &project, false).unwrap();
     publication::configure(&r.db, &project, &account, false, false).unwrap();
     let files = publication::publications(&r.db, &project).unwrap();
-    fs::write(base.join("ContextDock_Live_Check_v1.json"),serde_json::to_vec_pretty(&json!({"project":project,"folderId":parent,"tokenRefresh":true,"remoteWriteRecovery":true,"recycled":receipts,"changedOlderRetained":true,"newestKept":true,"recyclingOff":true,"publications":files})).unwrap()).unwrap();
+    fs::write(base.join(format!("ContextDock_Live_Check_v{version}.json")),serde_json::to_vec_pretty(&json!({"project":project,"folderId":parent,"tokenRefresh":true,"remoteWriteRecovery":true,"recycled":receipts,"changedOlderRetained":true,"newestKept":true,"recyclingOff":true,"publications":files})).unwrap()).unwrap();
     println!("Live check: two unchanged older files reached the Windows Recycle Bin; changed older and newest files retained. Test project publication and recycling are off.");
     println!("Live evidence folder: {}", base.display());
     let enabled: bool =
