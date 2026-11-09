@@ -27,6 +27,317 @@ pub(crate) fn sample_docx(marker: &str) -> Vec<u8> {
     zip.finish().unwrap().into_inner()
 }
 
+struct FakeBin {
+    root: PathBuf,
+    calls: Cell<usize>,
+    unsupported: bool,
+    fail: bool,
+    crash: bool,
+    before: RefCell<Option<Box<dyn FnOnce()>>>,
+}
+impl FakeBin {
+    fn new(f: &Fixture) -> Self {
+        let root = f.root.parent().unwrap().join("Bin");
+        fs::create_dir(&root).unwrap();
+        Self {
+            root,
+            calls: Cell::new(0),
+            unsupported: false,
+            fail: false,
+            crash: false,
+            before: RefCell::new(None),
+        }
+    }
+}
+impl crate::recycle_bin::Bin for FakeBin {
+    fn supported(&self, _: &Path) -> Result<(), String> {
+        if self.unsupported {
+            Err("This test volume cannot recycle.".into())
+        } else {
+            Ok(())
+        }
+    }
+    fn recycle(&self, path: &Path, hash: &str) -> Result<String, String> {
+        self.calls.set(self.calls.get() + 1);
+        if let Some(before) = self.before.borrow_mut().take() {
+            before();
+        }
+        assert!(
+            !self.crash,
+            "simulated process interruption before bin transfer"
+        );
+        if self.fail {
+            return Err("Bin transfer failed.".into());
+        }
+        crate::storage::verify(path, hash)?;
+        let destination = self.root.join(format!(
+            "{}-{}",
+            uuid::Uuid::new_v4(),
+            path.file_name().unwrap().to_string_lossy()
+        ));
+        fs::rename(path, &destination).map_err(|e| e.to_string())?;
+        Ok(destination.to_string_lossy().into())
+    }
+}
+fn enable_recycling(f: &Fixture) {
+    crate::drive_recycle::configure(&f.registry.db, &f.project, true).unwrap();
+    f.run().unwrap();
+}
+fn cleanup(f: &Fixture, bin: &dyn crate::recycle_bin::Bin) -> Result<usize, String> {
+    let parent: String = f
+        .registry
+        .db
+        .query_row(
+            "SELECT folder_id FROM drive_projects WHERE project_id=?1",
+            [&f.project],
+            |r| r.get(0),
+        )
+        .unwrap();
+    crate::drive_recycle::run(
+        &f.registry,
+        &f.project,
+        "account-A",
+        &f.current(),
+        &parent,
+        &f.api,
+        bin,
+    )
+}
+#[test]
+fn drive_recycling_is_opt_in_and_keeps_the_newest_local_file() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    let bin = FakeBin::new(&f);
+    assert_eq!(cleanup(&f, &bin).unwrap(), 0);
+    assert_eq!(bin.calls.get(), 0);
+    enable_recycling(&f);
+    assert_eq!(cleanup(&f, &bin).unwrap(), 1);
+    assert!(!f.root.join("ContextDock_Context_v1.md").exists());
+    assert_eq!(
+        fs::read_to_string(f.root.join("ContextDock_Context_v2.md")).unwrap(),
+        "two"
+    );
+    assert_eq!(f.saved().state, "synced");
+    assert_eq!(
+        f.registry
+            .db
+            .query_row("SELECT state FROM drive_recycle", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "recycled"
+    );
+    assert_eq!(cleanup(&f, &bin).unwrap(), 0);
+    assert_eq!(bin.calls.get(), 1);
+}
+#[test]
+fn drive_recycling_requires_a_fresh_matching_cloud_readback() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let bin = FakeBin::new(&f);
+    f.api
+        .files
+        .borrow_mut()
+        .get_mut(&f.saved().file_id)
+        .unwrap()
+        .1 = b"bad".to_vec();
+    assert!(cleanup(&f, &bin).is_err());
+    assert_eq!(bin.calls.get(), 0);
+    assert!(f.root.join("ContextDock_Context_v1.md").exists());
+    assert_eq!(
+        f.registry
+            .db
+            .query_row("SELECT COUNT(*) FROM drive_recycle", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+}
+#[test]
+fn drive_recycling_keeps_changed_older_files_and_unsupported_volumes() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let mut bin = FakeBin::new(&f);
+    bin.unsupported = true;
+    assert!(cleanup(&f, &bin).is_err());
+    assert!(f.root.join("ContextDock_Context_v1.md").exists());
+    bin.unsupported = false;
+    fs::write(f.root.join("ContextDock_Context_v1.md"), b"new").unwrap();
+    assert!(cleanup(&f, &bin).unwrap_err().contains("changed"));
+    assert_eq!(bin.calls.get(), 0);
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Context_v1.md")).unwrap(),
+        b"new"
+    );
+}
+#[test]
+fn drive_recycling_failed_bin_transfer_restores_the_original_without_overwrite() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let mut bin = FakeBin::new(&f);
+    bin.fail = true;
+    assert!(cleanup(&f, &bin).is_err());
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Context_v1.md")).unwrap(),
+        b"one"
+    );
+    assert_eq!(
+        f.registry
+            .db
+            .query_row("SELECT state FROM drive_recycle", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "restored"
+    );
+    assert_eq!(f.saved().state, "synced");
+}
+#[test]
+fn drive_recycling_restart_restores_a_journaled_safety_file() {
+    let mut f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let mut bin = FakeBin::new(&f);
+    bin.crash = true;
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleanup(&f, &bin))).is_err());
+    assert!(!f.root.join("ContextDock_Context_v1.md").exists());
+    f.registry = Registry::open(&f.db).unwrap();
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Context_v1.md")).unwrap(),
+        b"one"
+    );
+    assert!(f.root.join("ContextDock_Context_v2.md").exists());
+    assert_eq!(
+        f.registry
+            .db
+            .query_row("SELECT state FROM drive_recycle", [], |r| r
+                .get::<_, String>(0))
+            .unwrap(),
+        "restored"
+    );
+}
+#[test]
+fn drive_recycling_recovery_retains_safety_bytes_when_original_path_is_reoccupied() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let mut bin = FakeBin::new(&f);
+    bin.fail = true;
+    let original = f.root.join("ContextDock_Context_v1.md");
+    let replacement = original.clone();
+    *bin.before.borrow_mut() = Some(Box::new(move || {
+        fs::write(replacement, b"replacement").unwrap()
+    }));
+    assert!(cleanup(&f, &bin).unwrap_err().contains("occupied"));
+    assert_eq!(fs::read(original).unwrap(), b"replacement");
+    let relative: String = f
+        .registry
+        .db
+        .query_row("SELECT safety_relative FROM drive_recycle", [], |r| {
+            r.get(0)
+        })
+        .unwrap();
+    assert_eq!(fs::read(f.root.join(relative)).unwrap(), b"one");
+    assert_eq!(f.saved().state, "synced");
+}
+#[test]
+fn drive_recycling_opt_out_after_quarantine_restores_file_before_bin_transfer() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let bin = FakeBin::new(&f);
+    let db = f.db.clone();
+    let project = f.project.clone();
+    let mut checks = 0;
+    *f.api.checkpoint.borrow_mut() = Some(Box::new(move || {
+        checks += 1;
+        if checks == 4 {
+            let db = crate::cloud::connect(&db).unwrap();
+            crate::drive_recycle::configure(&db, &project, false).unwrap();
+        }
+        Ok(())
+    }));
+    assert!(cleanup(&f, &bin).unwrap_err().contains("paused"));
+    assert_eq!(bin.calls.get(), 0);
+    assert!(f.root.join("ContextDock_Context_v1.md").exists());
+}
+#[test]
+fn drive_recycling_keeps_unversioned_files_and_a_newest_file_changed_after_upload() {
+    let f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"one"),
+        ("ContextDock_Context_v2.md", b"two"),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    let bin = FakeBin::new(&f);
+    fs::write(f.root.join("ContextDock_Context_v2.md"), b"newest edit").unwrap();
+    assert!(cleanup(&f, &bin).is_err());
+    assert_eq!(bin.calls.get(), 0);
+    assert!(f.root.join("ContextDock_Context_v1.md").exists());
+    let unversioned = Fixture::new(&[("ContextDock_Context.md", b"working")]);
+    unversioned.run().unwrap();
+    enable_recycling(&unversioned);
+    let bin2 = FakeBin::new(&unversioned);
+    assert_eq!(cleanup(&unversioned, &bin2).unwrap(), 0);
+    assert!(unversioned.root.join("ContextDock_Context.md").exists());
+}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "Explicit end-to-end Windows cleanup pilot with simulated Drive and disposable source files"]
+fn drive_recycling_native_bin_keeps_latest_and_records_verified_recycle_receipt() {
+    let f = Fixture::new(&[
+        (
+            "ContextDock_Recycling_Pilot_v1.md",
+            b"disposable older marker",
+        ),
+        (
+            "ContextDock_Recycling_Pilot_v2.md",
+            b"disposable newest marker",
+        ),
+    ]);
+    f.run().unwrap();
+    enable_recycling(&f);
+    assert_eq!(cleanup(&f, &crate::recycle_bin::NativeBin).unwrap(), 1);
+    assert!(!f.root.join("ContextDock_Recycling_Pilot_v1.md").exists());
+    assert_eq!(
+        fs::read(f.root.join("ContextDock_Recycling_Pilot_v2.md")).unwrap(),
+        b"disposable newest marker"
+    );
+    let (state, receipt): (String, String) = f
+        .registry
+        .db
+        .query_row("SELECT state,bin_receipt FROM drive_recycle", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .unwrap();
+    assert_eq!(state, "recycled");
+    assert!(!receipt.is_empty());
+    assert_eq!(f.saved().state, "synced");
+}
+
 #[test]
 fn drive_pilot_word_and_markdown_survive_versions_offline_renames_and_restart() {
     let word1 = sample_docx("Word pilot one");
@@ -112,6 +423,7 @@ fn drive_pilot_word_and_markdown_survive_versions_offline_renames_and_restart() 
     assert!(!f.registry.store.join("snapshots").exists());
 }
 
+type Checkpoint = Box<dyn FnMut() -> drive_api::Result<()>>;
 #[derive(Default)]
 struct FakeDrive {
     next: Cell<usize>,
@@ -121,6 +433,7 @@ struct FakeDrive {
     lose_after: Cell<bool>,
     corrupt: Cell<bool>,
     after_upload: RefCell<Option<Box<dyn FnOnce()>>>,
+    checkpoint: RefCell<Option<Checkpoint>>,
 }
 impl FakeDrive {
     fn missing() -> ApiError {
@@ -137,6 +450,12 @@ impl FakeDrive {
     }
 }
 impl DriveApi for FakeDrive {
+    fn checkpoint(&self, _write: bool) -> drive_api::Result<()> {
+        if let Some(check) = self.checkpoint.borrow_mut().as_mut() {
+            check()?;
+        }
+        Ok(())
+    }
     fn generate_id(&self) -> drive_api::Result<String> {
         let next = self.next.get() + 1;
         self.next.set(next);
@@ -664,7 +983,7 @@ fn drive_publication_schema_thirteen_migration_keeps_ids_snapshots_and_cloud_off
     assert_eq!(
         r.db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
 }
 
@@ -893,7 +1212,7 @@ fn drive_scheduler_schema_fourteen_upgrade_preserves_the_pending_operation() {
             .db
             .query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
             .unwrap(),
-        16
+        17
     );
 }
 

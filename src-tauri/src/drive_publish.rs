@@ -449,6 +449,42 @@ fn verify_remote(
     }
     Ok(after)
 }
+pub fn verify_for_cleanup(
+    registry: &Registry,
+    project: &str,
+    account: &str,
+    document: &str,
+    parent: &str,
+    api: &dyn DriveApi,
+) -> Result<Current> {
+    require_enabled(&registry.db, project, account)?;
+    let c = current(&registry.db, project, document)?;
+    let p = publication(&registry.db, project, document)?
+        .ok_or_else(|| ApiError::local("A verified publication is required before recycling."))?;
+    if p.state != "synced"
+        || p.pending_hash.is_some()
+        || p.verified_hash.as_deref() != Some(c.hash.as_str())
+        || p.verified_name.as_deref() != Some(c.name.as_str())
+        || p.verified_size != Some(c.size)
+    {
+        return Err(ApiError::local(
+            "The latest document is not fully verified. Older files stay in place.",
+        ));
+    }
+    verify_remote(
+        &registry.db,
+        project,
+        parent,
+        &p,
+        api,
+        Expected {
+            hash: &c.hash,
+            name: &c.name,
+            size: c.size,
+        },
+    )?;
+    Ok(c)
+}
 /// One invocation publishes at most one current document. Every attempted write
 /// has a reserved ID and pending generation in SQLite before it reaches Drive.
 pub fn publish(

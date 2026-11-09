@@ -73,6 +73,7 @@ pub struct View {
     folder_id: Option<String>,
     root_ready: bool,
     error: Option<String>,
+    cleanup_error: Option<String>,
     documents: Vec<drive_publish::Publication>,
 }
 type SavedSettings = (bool, bool, bool, String, Option<String>, Option<String>);
@@ -87,6 +88,7 @@ pub async fn drive_project_read(
         let (enabled,automatic,recycle,account,folder_id,error)=settings.unwrap_or((false,false,false,String::new(),None,None));
         let connected=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone())).is_some_and(|id|account.is_empty()||id==account);
         let root_ready=registry.db.query_row("SELECT root_ready FROM drive_accounts WHERE account_id=?1",[&account],|r|r.get(0)).optional().map_err(crate::registry::error)?.unwrap_or(false);
+        let cleanup_error=registry.db.query_row("SELECT error FROM drive_cleanup WHERE project_id=?1",[&project],|r|r.get(0)).optional().map_err(crate::registry::error)?.flatten();
         let mut documents=drive_publish::publications(&registry.db,&project).map_err(|e|e.message)?;
         let blocked=crate::path_selection::blocked_documents(&registry.db,&project)?;
         let hidden=crate::cloud::rows(&registry.db,"SELECT id FROM documents WHERE project_id=?1 AND (merged_into IS NOT NULL OR tracking_state IN ('ignored','grouped_history'))",&[&project])?.into_iter().map(|d|crate::cloud::s(&d,"id").to_string()).collect::<std::collections::HashSet<_>>();
@@ -100,7 +102,7 @@ pub async fn drive_project_read(
                 }
             }
         }
-        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,error,documents})
+        Ok(View {enabled,automatic,recycle,connected,account_id:(!account.is_empty()).then_some(account),folder_id,root_ready,error,cleanup_error,documents})
     }).await
 }
 pub fn open(path: &std::path::Path) -> Result<Registry, String> {
@@ -180,6 +182,7 @@ pub fn record_error(
     )
 }
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Three Tauri-injected states plus the explicit action payload.
 pub async fn drive_project_action(
     state: tauri::State<'_, Publisher>,
     auth: tauri::State<'_, DriveRuntime>,
@@ -188,6 +191,7 @@ pub async fn drive_project_action(
     action: String,
     enabled: Option<bool>,
     automatic: Option<bool>,
+    recycle: Option<bool>,
 ) -> Result<(), String> {
     let path = state.path.clone();
     let gate = state.gate.clone();
@@ -196,6 +200,15 @@ pub async fn drive_project_action(
     let stop = state.stop.clone();
     let result=tauri::async_runtime::spawn_blocking(move || {
         let registry=open(&path)?;
+        if action=="recycle" {
+            let value=recycle.ok_or("Specify whether recycling should be enabled.")?;
+            if value {
+                let current=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone())).ok_or("Connect the project's Google Drive account first.")?;
+                drive_publish::require_enabled(&registry.db,&id,&current).map_err(|e|e.message)?;
+            }
+            crate::drive_recycle::configure(&registry.db,&id,value)?;
+            return Ok(());
+        }
         if action=="configure" {
             let enabled=enabled.ok_or("Specify whether publication should be enabled.")?;
             let current=NativeVault.load()?.and_then(|s|s.session.as_ref().map(|s|s.account.id.clone()));
@@ -236,6 +249,8 @@ pub async fn drive_project_action(
             let client=api(path.clone(),id.clone(),account.clone(),Some((document.clone(),drive_publish::generation(&current))),zeroize::Zeroizing::new(access.to_string()),stop.clone()).map_err(|e|e.message)?;
             if let Err(e)=drive_publish::publish(&registry,&id,&account,&document,&destination,&client) {
                 record_error(&registry,&id,Some(&document),&e)?;problems.push(e.message);
+            } else {
+                crate::drive_recycle::after_publication(&registry,&id,&account,&document,&destination,&client);
             }
         }
         if !problems.is_empty() {return Err(problems.join(" "));}

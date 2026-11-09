@@ -22,6 +22,7 @@ export interface DriveProject {
   rootReady: boolean;
   error: string | null;
   documents: DrivePublication[];
+  cleanupError?: string | null;
 }
 
 export interface DriveConnection {
@@ -62,6 +63,14 @@ export const drive = {
     }),
   subscribe: (project: string, changed: () => Promise<void>) =>
     subscribeChanges("drive-changed", changed, project),
+  recycling: (project: string, recycle: boolean) =>
+    invoke<void>("drive_project_action", {
+      project,
+      action: "recycle",
+      recycle,
+      enabled: null,
+      automatic: null,
+    }),
   createFolders: (project: string) =>
     invoke<void>("drive_project_action", {
       project,

@@ -24,10 +24,10 @@ impl Registry {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 16 {
+        if version > 17 {
             return Err("This database requires a newer ContextDock version.".into());
         }
-        if version < 16 {
+        if version < 17 {
             db.pragma_update(None, "foreign_keys", false)
                 .map_err(error)?;
         }
@@ -37,7 +37,7 @@ impl Registry {
         let version: i64 = tx
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 16 {
+        if version > 17 {
             return Err("This database requires a newer ContextDock version.".into());
         }
         if version < 1 {
@@ -109,6 +109,10 @@ impl Registry {
             tx.execute_batch(include_str!("../migrations/016_latest_workflow.sql"))
                 .map_err(error)?;
         }
+        if version < 17 {
+            tx.execute_batch(include_str!("../migrations/017_drive_recycling.sql"))
+                .map_err(error)?;
+        }
         let invalid: bool = tx
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM pragma_foreign_key_check)",
@@ -119,13 +123,14 @@ impl Registry {
         if invalid {
             return Err("Registry migration found invalid history references. No migration changes were committed.".into());
         }
-        tx.pragma_update(None, "user_version", 16).map_err(error)?;
+        tx.pragma_update(None, "user_version", 17).map_err(error)?;
         tx.commit().map_err(error)?;
         db.pragma_update(None, "foreign_keys", true)
             .map_err(error)?;
         let store = std::fs::canonicalize(path.parent().unwrap_or(Path::new(".")))
             .map_err(|e| format!("Application storage cannot be resolved: {e}"))?;
         let registry = Self { db, store };
+        crate::drive_recycle::recover(&registry)?;
         let _ = registry.purge_forgotten_snapshots();
         Ok(registry)
     }
@@ -242,7 +247,7 @@ impl Registry {
                         .optional()
                         .map_err(error)?;
                     if let Some(sid) = existing {
-                        tx.execute("UPDATE source_files SET name=?1,relative_path=?2,kind=?3,size=?4,modified_at=?5,last_observed=?6,status='available',disposition=CASE WHEN disposition='archived' THEN 'superseded' ELSE disposition END WHERE id=?7",params![f.name,f.relative,f.kind,f.size,f.modified,now,sid]).map_err(error)?;
+                        tx.execute("UPDATE source_files SET name=?1,relative_path=?2,kind=?3,size=?4,modified_at=?5,last_observed=?6,status='available',disposition=CASE WHEN disposition IN ('archived','recycled') THEN 'superseded' ELSE disposition END WHERE id=?7",params![f.name,f.relative,f.kind,f.size,f.modified,now,sid]).map_err(error)?;
                     } else {
                         let did = uuid::Uuid::new_v4().to_string();
                         let sid = uuid::Uuid::new_v4().to_string();

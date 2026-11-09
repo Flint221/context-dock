@@ -9,6 +9,7 @@ export function DrivePanel({ project }: { project: string }) {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [pausing, setPausing] = useState(false);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
   const alive = useRef(true);
   const refresh = useCallback(async () => {
     const next = await drive.project(project);
@@ -87,6 +88,32 @@ export function DrivePanel({ project }: { project: string }) {
     } finally {
       release();
       if (alive.current) setPausing(false);
+    }
+  }
+  async function setRecycling(recycle: boolean) {
+    const release = beginOperation(`drive-recycling:${project}`);
+    if (!release) return;
+    setCleanupBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await drive.recycling(project, recycle);
+      const next = await refresh();
+      if (next.recycle !== recycle)
+        throw new Error(
+          "The recycling preference did not save. Refresh and retry.",
+        );
+      if (alive.current)
+        setMessage(
+          recycle
+            ? "Older-file recycling enabled. A fresh verified publication is required before cleanup."
+            : "Older-file recycling disabled. Your files are kept.",
+        );
+    } catch (e) {
+      if (alive.current) setError(String(e));
+    } finally {
+      release();
+      if (alive.current) setCleanupBusy(false);
     }
   }
   return (
@@ -212,6 +239,41 @@ export function DrivePanel({ project }: { project: string }) {
             </ul>
           )}
           {view.error && !error && <p role="alert">{view.error}</p>}
+          <details>
+            <summary>Optional local cleanup</summary>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={view.recycle}
+                disabled={
+                  cleanupBusy ||
+                  (!view.recycle && (busy || !view.connected || !view.enabled))
+                }
+                onChange={(e) => {
+                  void setRecycling(e.target.checked);
+                }}
+              />
+              Recycle unchanged older local versions
+            </label>
+            <p>
+              Off by default. After a fresh Drive readback, clearly numbered
+              older versions of the same family can go to the Windows Recycle
+              Bin. The newest local working file stays in place. Changed or
+              ambiguous files are kept. Automatic recycling supports local fixed
+              NTFS drives.
+            </p>
+            <p>
+              Cleanup uses a guarded safety folder inside .contextdock/recycle.
+              Interrupted moves are restored when safe. Restoring from the
+              Windows Recycle Bin returns a file to that safety folder; move it
+              back to its original project location when needed.
+            </p>
+            {view.cleanupError && (
+              <p role="alert">
+                Older-file cleanup needs attention: {view.cleanupError}
+              </p>
+            )}
+          </details>
         </>
       )}
       {busy && (
@@ -221,8 +283,8 @@ export function DrivePanel({ project }: { project: string }) {
       {error && <p role="alert">{error}</p>}
       <p>
         Local files are the source of truth. This publishes to Drive without
-        importing cloud edits. Older local files stay in place during this
-        stage.
+        importing cloud edits. Older local files stay in place unless you enable
+        optional recycling.
       </p>
     </section>
   );

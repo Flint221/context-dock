@@ -50,6 +50,7 @@ mod drive_publication_commands;
 mod drive_publish;
 #[cfg(test)]
 mod drive_publish_tests;
+mod drive_recycle;
 mod drive_scheduler;
 #[cfg(test)]
 mod drive_tests;
@@ -77,6 +78,7 @@ mod path_selection;
 mod path_selection_tests;
 mod processes;
 mod profile;
+mod recycle_bin;
 mod registry;
 mod review;
 mod scanner;

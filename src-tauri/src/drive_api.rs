@@ -74,6 +74,9 @@ pub struct Remote {
     pub etag: Option<String>,
 }
 pub trait DriveApi {
+    fn checkpoint(&self, _write: bool) -> Result<()> {
+        Ok(())
+    }
     fn generate_id(&self) -> Result<String>;
     fn get(&self, id: &str) -> Result<Remote>;
     fn folders(&self, parent: &str, name: &str) -> Result<Vec<Remote>>;
@@ -216,6 +219,9 @@ impl GoogleDrive {
     }
 }
 impl DriveApi for GoogleDrive {
+    fn checkpoint(&self, write: bool) -> Result<()> {
+        (self.guard)(write)
+    }
     fn generate_id(&self) -> Result<String> {
         let data: Value = self
             .send(

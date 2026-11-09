@@ -11,6 +11,7 @@ vi.mock("../drive", () => ({
     publish: vi.fn(),
     subscribe: vi.fn(),
     createFolders: vi.fn(),
+    recycling: vi.fn(),
   },
 }));
 let state: DriveProject;
@@ -31,6 +32,54 @@ beforeEach(() => {
     structuredClone(state),
   );
   vi.mocked(drive.subscribe).mockResolvedValue(() => {});
+});
+it("requires an explicit recycling choice and verifies its saved preference", async () => {
+  state.enabled = true;
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(await screen.findByText("Optional local cleanup"));
+  const option = screen.getByRole("checkbox", {
+    name: "Recycle unchanged older local versions",
+  });
+  expect(option).not.toBeChecked();
+  expect(drive.recycling).not.toHaveBeenCalled();
+  vi.mocked(drive.recycling).mockResolvedValue(undefined);
+  await user.click(option);
+  expect(drive.recycling).toHaveBeenCalledWith("sample", true);
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "preference did not save",
+  );
+  expect(option).not.toBeChecked();
+});
+it("can disable recycling during publication and keeps cleanup errors separate", async () => {
+  state.enabled = true;
+  state.recycle = true;
+  state.cleanupError = "Older file changed; kept in place.";
+  let finish!: () => void;
+  vi.mocked(drive.publish).mockImplementation(
+    () =>
+      new Promise<void>((r) => {
+        finish = r;
+      }),
+  );
+  vi.mocked(drive.recycling).mockImplementation(async (_project, value) => {
+    state.recycle = value;
+  });
+  const user = userEvent.setup();
+  render(<DrivePanel project="sample" />);
+  await user.click(await screen.findByText("Optional local cleanup"));
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "cleanup needs attention",
+  );
+  await user.click(screen.getByRole("button", { name: "Publish latest" }));
+  const option = screen.getByRole("checkbox", {
+    name: "Recycle unchanged older local versions",
+  });
+  expect(option).toBeEnabled();
+  await user.click(option);
+  await waitFor(() => expect(option).not.toBeChecked());
+  expect(drive.recycling).toHaveBeenCalledWith("sample", false);
+  await act(async () => finish());
 });
 it("enables automatic publication without a duplicate immediate manual request", async () => {
   vi.mocked(drive.configure).mockImplementation(

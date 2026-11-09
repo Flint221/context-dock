@@ -110,6 +110,14 @@ fn one(
         &api,
     );
     result.map_err(|e| Failure::Document(document.clone(), e))?;
+    crate::drive_recycle::after_publication(
+        registry,
+        &job.project,
+        &job.account,
+        document,
+        &parent,
+        &api,
+    );
     let publications = drive_publish::publications(&registry.db, &job.project)?;
     let all_current = drive_publish::eligible_documents(&registry.db, &job.project)?
         .iter()
