@@ -81,10 +81,35 @@ pub fn parse_route(url: &str) -> Option<Value> {
 }
 pub fn show(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
+        webview_memory(&w, false);
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+}
+pub fn webview_memory(window: &tauri::WebviewWindow, low: bool) {
+    #[cfg(windows)]
+    let _ = window.with_webview(move |view| {
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2_19, COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL,
+        };
+        use windows::core::Interface;
+        // Best effort on older WebView2 runtimes. Native monitoring and Drive
+        // publication continue while the hidden renderer conserves memory.
+        unsafe {
+            if let Ok(core) = view
+                .controller()
+                .CoreWebView2()
+                .and_then(|core| core.cast::<ICoreWebView2_19>())
+            {
+                let _ = core.SetMemoryUsageTargetLevel(COREWEBVIEW2_MEMORY_USAGE_TARGET_LEVEL(
+                    i32::from(low),
+                ));
+            }
+        }
+    });
+    #[cfg(not(windows))]
+    let _ = (window, low);
 }
 pub fn navigate(app: &tauri::AppHandle, route: Value) {
     if let Some(r) = app.try_state::<Runtime>() {
@@ -560,10 +585,9 @@ pub async fn desktop_complete(
         .unwrap_or(true)
     };
     if action == "close" && keep && app.state::<Runtime>().tray_ready.load(Ordering::Relaxed) {
-        app.get_webview_window("main")
-            .ok_or("Window unavailable")?
-            .hide()
-            .map_err(|e| e.to_string())?;
+        let window = app.get_webview_window("main").ok_or("Window unavailable")?;
+        window.hide().map_err(|e| e.to_string())?;
+        webview_memory(&window, true);
     } else {
         app.state::<crate::monitor::Monitor>().request_stop();
         app.state::<crate::drive_commands::DriveRuntime>()

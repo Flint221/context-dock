@@ -553,6 +553,7 @@ dependencies = [
  "tempfile",
  "uuid",
  "walkdir",
+ "webview2-com",
  "windows",
  "windows-registry",
  "windows-sys 0.61.2",

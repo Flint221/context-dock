@@ -501,7 +501,7 @@ function Workspace() {
           </div>
           <footer>
             <span>ContextDock {version}</span>
-            <span>Local snapshots · Source archival only when enabled</span>
+            <span>Latest files · Optional verified Drive publication</span>
           </footer>
         </main>
         {adding && (

@@ -53,6 +53,8 @@ mod drive_publish_tests;
 mod drive_scheduler;
 #[cfg(test)]
 mod drive_tests;
+#[cfg(test)]
+mod drive_wire_tests;
 mod drive_worker;
 mod extraction;
 mod folder_recovery;
@@ -74,6 +76,7 @@ mod path_selection;
 #[cfg(test)]
 mod path_selection_tests;
 mod processes;
+mod profile;
 mod registry;
 mod review;
 mod scanner;
@@ -390,11 +393,19 @@ pub fn run() {
                 desktop::request_close(window.app_handle(), "close");
             }
             if matches!(event, tauri::WindowEvent::Focused(true)) {
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    desktop::webview_memory(&webview, false);
+                }
                 let _ = window.app_handle().emit("desktop-changed", ());
+            }
+            if matches!(event, tauri::WindowEvent::Resized(_)) {
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    desktop::webview_memory(&webview, window.is_minimized().unwrap_or(false));
+                }
             }
         })
         .setup(|app| {
-            let dir: PathBuf = app.path().app_local_data_dir()?;
+            let dir: PathBuf = profile::data_dir(app)?;
             std::fs::create_dir_all(&dir)?;
             let lock = std::fs::OpenOptions::new()
                 .read(true)

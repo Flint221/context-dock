@@ -188,8 +188,8 @@ export function DesktopSettings() {
             </button>
             <p>
               Pausing keeps local tracking running and retains cloud data.
-              Existing indexing checks and confirmed removals continue. Each
-              project’s saved sync settings still apply.
+              Pending publication stays queued until uploads resume. Each
+              project’s saved publication settings still apply.
             </p>
             <label className="desktop-toggle">
               <input
@@ -204,7 +204,7 @@ export function DesktopSettings() {
             </label>
             <p>
               New uploads resume automatically when battery saver turns off.
-              Local tracking, indexing checks and confirmed removals continue.
+              Local tracking continues while publication waits.
               {status.batterySaverActive &&
                 " Windows battery saver is currently on."}
             </p>

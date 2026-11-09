@@ -13,6 +13,105 @@ use std::{
 };
 use tempfile::{tempdir, TempDir};
 
+pub(crate) fn sample_docx(marker: &str) -> Vec<u8> {
+    use std::io::{Cursor, Write};
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, text) in [
+        ("[Content_Types].xml", r#"<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#.to_owned()),
+        ("_rels/.rels", r#"<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#.to_owned()),
+        ("word/document.xml",format!(r#"<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>{marker}</w:t></w:r></w:p><w:sectPr/></w:body></w:document>"#))
+    ] {
+        zip.start_file(name,zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(text.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap().into_inner()
+}
+
+#[test]
+fn drive_pilot_word_and_markdown_survive_versions_offline_renames_and_restart() {
+    let word1 = sample_docx("Word pilot one");
+    let word2 = sample_docx("Word pilot two");
+    assert!(crate::extraction::extract(&word2, "word")
+        .unwrap()
+        .text
+        .contains("Word pilot two"));
+    let mut f = Fixture::new(&[
+        ("ContextDock_Context_v1.md", b"Markdown one"),
+        ("ContextDock_Context_v2.md", b"Markdown two"),
+        ("ContextDock_Notes_v1.docx", &word1),
+        ("ContextDock_Notes_v2.docx", &word2),
+    ]);
+    let docs = publish::eligible_documents(&f.registry.db, &f.project).unwrap();
+    assert_eq!(docs.len(), 2);
+    let parent =
+        publish::ensure_destination(&f.registry.db, &f.project, "account-A", &f.api).unwrap();
+    let publish_all = |r: &Registry| {
+        for doc in publish::eligible_documents(&r.db, &f.project).unwrap() {
+            publish::publish(r, &f.project, "account-A", &doc, &parent, &f.api).unwrap();
+        }
+    };
+    publish_all(&f.registry);
+    let before = publish::publications(&f.registry.db, &f.project).unwrap();
+    fs::create_dir(f.root.join("Moved")).unwrap();
+    fs::rename(
+        f.root.join("ContextDock_Context_v2.md"),
+        f.root.join("Moved/ContextDock_Context_v2.md"),
+    )
+    .unwrap();
+    fs::rename(
+        f.root.join("ContextDock_Notes_v2.docx"),
+        f.root.join("ContextDock_Technical_Notes_v2.docx"),
+    )
+    .unwrap();
+    f.reconcile();
+    let current = publish::eligible_documents(&f.registry.db, &f.project).unwrap();
+    assert_eq!(current.len(), 2);
+    let word = current
+        .iter()
+        .find(|doc| {
+            publish::current(&f.registry.db, &f.project, doc)
+                .unwrap()
+                .name
+                .ends_with(".docx")
+        })
+        .unwrap();
+    let word3 = sample_docx("Word pilot three");
+    fs::write(f.root.join("ContextDock_Technical_Notes_v3.docx"), &word3).unwrap();
+    f.reconcile();
+    f.api.fail_before.set(true);
+    assert!(
+        publish::publish(&f.registry, &f.project, "account-A", word, &parent, &f.api)
+            .unwrap_err()
+            .retry
+    );
+    let pending = publish::publications(&f.registry.db, &f.project).unwrap();
+    assert!(pending.iter().any(|d| d.pending_hash.is_some()));
+    f.registry = Registry::open(&f.db).unwrap();
+    for doc in publish::eligible_documents(&f.registry.db, &f.project).unwrap() {
+        publish::publish(&f.registry, &f.project, "account-A", &doc, &parent, &f.api).unwrap();
+    }
+    let after = publish::publications(&f.registry.db, &f.project).unwrap();
+    assert_eq!(after.len(), 2);
+    assert_eq!(f.cloud_documents(), 2);
+    for old in before {
+        let new = after
+            .iter()
+            .find(|d| d.document_id == old.document_id)
+            .unwrap();
+        assert_eq!(old.file_id, new.file_id);
+        assert_eq!(new.state, "synced");
+        assert_eq!(
+            f.api
+                .download_hash(&new.file_id, new.verified_size.unwrap())
+                .unwrap(),
+            new.verified_hash.as_deref().unwrap()
+        );
+    }
+    assert!(f.root.join("ContextDock_Notes_v1.docx").exists());
+    assert!(f.root.join("ContextDock_Technical_Notes_v3.docx").exists());
+    assert!(!f.registry.store.join("snapshots").exists());
+}
+
 #[derive(Default)]
 struct FakeDrive {
     next: Cell<usize>,

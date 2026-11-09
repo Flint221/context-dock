@@ -12,7 +12,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 pub type Result<T> = std::result::Result<T, String>;
 pub const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
+#[cfg(not(feature = "pilot"))]
 const VAULT: &str = "ContextDock.GoogleDrive";
+#[cfg(feature = "pilot")]
+const VAULT: &str = "ContextDock.Pilot.GoogleDrive";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const DECLINED: &str = "Google sign-in was declined. No connection was saved.";
 

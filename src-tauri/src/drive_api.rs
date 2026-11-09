@@ -111,6 +111,8 @@ pub struct GoogleDrive {
     http: Client,
     access: Zeroizing<String>,
     guard: Box<dyn Fn(bool) -> Result<()>>,
+    #[cfg(test)]
+    test_origin: Option<String>,
 }
 impl GoogleDrive {
     pub fn new(
@@ -127,7 +129,28 @@ impl GoogleDrive {
             http,
             access,
             guard: Box::new(guard),
+            #[cfg(test)]
+            test_origin: None,
         })
+    }
+    fn url(&self, path: &str) -> String {
+        #[cfg(test)]
+        if let Some(origin) = &self.test_origin {
+            return format!("{origin}{path}");
+        }
+        format!("https://www.googleapis.com{path}")
+    }
+    #[cfg(test)]
+    pub(crate) fn loopback_test(
+        origin: &str,
+        guard: impl Fn(bool) -> Result<()> + 'static,
+    ) -> Self {
+        let url = reqwest::Url::parse(origin).unwrap();
+        assert_eq!(url.scheme(), "http");
+        assert_eq!(url.host_str(), Some("127.0.0.1"));
+        let mut api = Self::new(Zeroizing::new("disposable-test-token".into()), guard).unwrap();
+        api.test_origin = Some(origin.to_owned());
+        api
     }
     fn send(&self, request: reqwest::blocking::RequestBuilder, write: bool) -> Result<Response> {
         (self.guard)(write)?;
@@ -197,7 +220,7 @@ impl DriveApi for GoogleDrive {
         let data: Value = self
             .send(
                 self.http
-                    .get("https://www.googleapis.com/drive/v3/files/generateIds")
+                    .get(self.url("/drive/v3/files/generateIds"))
                     .query(&[("count", "1"), ("space", "drive"), ("type", "files")]),
                 false,
             )?
@@ -218,7 +241,7 @@ impl DriveApi for GoogleDrive {
         Self::remote(
             self.send(
                 self.http
-                    .get(format!("https://www.googleapis.com/drive/v3/files/{id}"))
+                    .get(self.url(&format!("/drive/v3/files/{id}")))
                     .query(&[("fields", FIELDS)]),
                 false,
             )?,
@@ -248,18 +271,16 @@ impl DriveApi for GoogleDrive {
             }
             let listing: Listing = self
                 .send(
-                    self.http
-                        .get("https://www.googleapis.com/drive/v3/files")
-                        .query(&[
-                            ("q", query.as_str()),
-                            ("spaces", "drive"),
-                            ("pageSize", "100"),
-                            (
-                                "fields",
-                                &format!("nextPageToken,incompleteSearch,files({FIELDS})"),
-                            ),
-                            ("pageToken", page.as_str()),
-                        ]),
+                    self.http.get(self.url("/drive/v3/files")).query(&[
+                        ("q", query.as_str()),
+                        ("spaces", "drive"),
+                        ("pageSize", "100"),
+                        (
+                            "fields",
+                            &format!("nextPageToken,incompleteSearch,files({FIELDS})"),
+                        ),
+                        ("pageToken", page.as_str()),
+                    ]),
                     false,
                 )?
                 .json()
@@ -287,7 +308,7 @@ impl DriveApi for GoogleDrive {
     ) -> Result<Remote> {
         valid_id(id)?;
         valid_id(parent)?;
-        Self::remote(self.send(self.http.post("https://www.googleapis.com/drive/v3/files").query(&[("fields",FIELDS)])
+        Self::remote(self.send(self.http.post(self.url("/drive/v3/files")).query(&[("fields",FIELDS)])
             .json(&json!({"id":id,"name":name,"mimeType":FOLDER,"parents":[parent],"appProperties":properties})), true)?)
     }
     fn upload(
@@ -306,14 +327,11 @@ impl DriveApi for GoogleDrive {
             .len();
         let (method, url) = if create {
             metadata["id"] = json!(id);
-            (
-                reqwest::Method::POST,
-                "https://www.googleapis.com/upload/drive/v3/files".to_owned(),
-            )
+            (reqwest::Method::POST, self.url("/upload/drive/v3/files"))
         } else {
             (
                 reqwest::Method::PATCH,
-                format!("https://www.googleapis.com/upload/drive/v3/files/{id}"),
+                self.url(&format!("/upload/drive/v3/files/{id}")),
             )
         };
         let mut request = self
@@ -339,9 +357,16 @@ impl DriveApi for GoogleDrive {
             .ok_or_else(|| ApiError::local("Google Drive did not return an upload session."))?;
         let location = reqwest::Url::parse(location)
             .map_err(|_| ApiError::local("Google Drive returned an invalid upload session."))?;
-        if location.scheme() != "https"
-            || location.host_str() != Some("www.googleapis.com")
-            || location.port_or_known_default() != Some(443)
+        let allowed = location.scheme() == "https"
+            && location.host_str() == Some("www.googleapis.com")
+            && location.port_or_known_default() == Some(443);
+        #[cfg(test)]
+        let allowed = allowed
+            || self
+                .test_origin
+                .as_ref()
+                .is_some_and(|origin| location.origin().ascii_serialization() == *origin);
+        if !allowed
             || !location.username().is_empty()
             || location.password().is_some()
             || !location.path().starts_with("/upload/drive/v3/files")
@@ -376,7 +401,7 @@ impl DriveApi for GoogleDrive {
         }
         let mut response = self.send(
             self.http
-                .get(format!("https://www.googleapis.com/drive/v3/files/{id}"))
+                .get(self.url(&format!("/drive/v3/files/{id}")))
                 .query(&[("alt", "media")]),
             false,
         )?;

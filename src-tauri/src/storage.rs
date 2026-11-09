@@ -151,6 +151,19 @@ pub struct Staged {
     pub size: i64,
     pub modified: Option<String>,
 }
+struct UncommittedStage {
+    path: PathBuf,
+    retained: bool,
+}
+impl Drop for UncommittedStage {
+    fn drop(&mut self) {
+        if !self.retained {
+            // This is only the newly generated private temporary copy. It has
+            // not been returned or referenced by any operation journal yet.
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
 pub fn stage_metadata(root: &Path, relative: &str) -> Result<Staged> {
     let source = checked(root, relative, false)?;
     let first = fs::metadata(&source.path).map_err(io)?;
@@ -199,6 +212,10 @@ pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     }
     let temporary = format!("staging/{}.tmp", uuid::Uuid::new_v4());
     let target = checked(store, &temporary, true)?;
+    let mut cleanup = UncommittedStage {
+        path: target.path.clone(),
+        retained: false,
+    };
     let mut output = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -224,12 +241,14 @@ pub fn stage(root: &Path, relative: &str, store: &Path) -> Result<Staged> {
     }
     let hash = format!("{:x}", hasher.finalize());
     verify(&target.path, &hash)?;
-    Ok(Staged {
+    let staged = Staged {
         temporary,
         hash,
         size: i64::try_from(size).map_err(|_| "Document is too large.")?,
         modified: stamp(&after),
-    })
+    };
+    cleanup.retained = true;
+    Ok(staged)
 }
 pub fn snapshot_finalize(
     store: &Path,
