@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { TrackingPanel } from "./TrackingPanel";
 import { ProjectCloud } from "./ProjectCloud";
+import { DrivePanel } from "./DrivePanel";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -156,6 +157,9 @@ export function ProjectDetails({
         )}
         <Documents key={`documents:${project.id}`} documents={documents} />
       </div>
+      {!folderLost && tab === "cloud" && (
+        <DrivePanel key={`drive:${project.id}`} project={project.id} />
+      )}
       {!folderLost && (
         <ProjectCloud
           key={`cloud:${project.id}:${project.path}`}

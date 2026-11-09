@@ -7,6 +7,7 @@ use std::{
     },
     time::Duration,
 };
+use tauri::Emitter;
 
 #[derive(Default)]
 pub struct DriveRuntime {
@@ -85,32 +86,38 @@ pub fn drive_cancel(state: tauri::State<'_, DriveRuntime>) -> Result<(), String>
 #[tauri::command]
 pub async fn drive_action(
     state: tauri::State<'_, DriveRuntime>,
+    publisher: tauri::State<'_, crate::drive_publication_commands::Publisher>,
+    app: tauri::AppHandle,
     action: String,
     path: Option<String>,
 ) -> Result<(), String> {
     let gate = state.gate.clone();
     let pending = state.pending.clone();
     let error = state.error.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    let database = publisher.path.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate
             .try_lock()
             .map_err(|_| "A Google Drive operation is already running.")?;
         if let Ok(mut slot) = error.lock() {
             *slot = None;
         }
-        let result = action_inner(&action, path.as_deref(), pending);
+        let result = action_inner(&action, path.as_deref(), pending, &database);
         if let Ok(mut slot) = error.lock() {
             *slot = result.as_ref().err().cloned();
         }
         result
     })
     .await
-    .map_err(|_| "The Google Drive operation could not finish.".to_string())?
+    .map_err(|_| "The Google Drive operation could not finish.".to_string())?;
+    let _ = app.emit("drive-changed", ());
+    result
 }
 fn action_inner(
     action: &str,
     path: Option<&str>,
     pending: Arc<Mutex<Option<Arc<AtomicBool>>>>,
+    database: &std::path::Path,
 ) -> Result<(), String> {
     match action {
         "import" => {
@@ -126,10 +133,13 @@ fn action_inner(
                 .map_err(|_| "The OAuth client JSON could not be read.")?;
             drive_auth::configure(&NativeVault, &bytes)
         }
-        "connect" => {
+        "connect" | "pick_root" => {
             let mut saved = NativeVault
                 .load()?
                 .ok_or("Import the ContextDock Desktop OAuth client first.")?;
+            if action == "pick_root" && saved.session.is_none() {
+                return Err("Connect Google Drive before choosing its existing folder.".into());
+            }
             let cancel = Arc::new(AtomicBool::new(false));
             *pending
                 .lock()
@@ -137,13 +147,15 @@ fn action_inner(
             let _pending = Pending(pending);
             let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
                 .map_err(|_| "Could not open the local Google sign-in callback.")?;
-            let flow = drive_auth::Flow::new(
-                &saved.config,
-                listener
-                    .local_addr()
-                    .map_err(|_| "Google sign-in callback unavailable.")?
-                    .port(),
-            );
+            let port = listener
+                .local_addr()
+                .map_err(|_| "Google sign-in callback unavailable.")?
+                .port();
+            let flow = if action == "pick_root" {
+                drive_auth::Flow::pick_folder(&saved.config, port)
+            } else {
+                drive_auth::Flow::new(&saved.config, port)
+            };
             open_browser(&flow.url)?;
             let code = flow.wait(listener, &cancel, Duration::from_secs(180))?;
             let session = drive_auth::finish(
@@ -155,6 +167,24 @@ fn action_inner(
             )?;
             if cancel.load(Ordering::SeqCst) {
                 return Err("Google sign-in cancelled. No new connection was saved.".into());
+            }
+            if action == "pick_root" {
+                if saved
+                    .session
+                    .as_ref()
+                    .is_none_or(|s| s.account.id != session.account.id)
+                {
+                    return Err("Choose the same Google account that is currently connected to ContextDock.".into());
+                }
+                let id = code.picked.first().ok_or("No Drive folder was selected.")?;
+                let registry = crate::drive_publication_commands::open(database)?;
+                let api = crate::drive_api::GoogleDrive::new(
+                    zeroize::Zeroizing::new(session.access_token.clone()),
+                    |_| Ok(()),
+                )
+                .map_err(|e| e.message)?;
+                crate::drive_publish::adopt_root(&registry.db, &session.account.id, id, &api)
+                    .map_err(|e| e.message)?;
             }
             saved.session = Some(session);
             NativeVault.save(&saved)

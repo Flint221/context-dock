@@ -135,6 +135,22 @@ pub struct Flow {
     state: String,
     pub redirect: String,
     pub url: String,
+    folder_picker: bool,
+}
+pub struct Callback {
+    code: Zeroizing<String>,
+    pub picked: Vec<String>,
+}
+impl std::ops::Deref for Callback {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.code
+    }
+}
+impl std::fmt::Debug for Callback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("GoogleCallback([redacted])")
+    }
 }
 impl Flow {
     pub fn new(config: &ClientConfig, port: u16) -> Self {
@@ -167,9 +183,23 @@ impl Flow {
             state,
             redirect,
             url: url.into(),
+            folder_picker: false,
         }
     }
-    pub fn callback(&self, request: &str) -> Result<Zeroizing<String>> {
+    pub fn pick_folder(config: &ClientConfig, port: u16) -> Self {
+        let mut flow = Self::new(config, port);
+        let mut url = reqwest::Url::parse(&flow.url).expect("generated OAuth URL");
+        url.query_pairs_mut().extend_pairs([
+            ("trigger_onepick", "true"),
+            ("allow_folder_selection", "true"),
+            ("allow_multiple", "false"),
+            ("mimetypes", "application/vnd.google-apps.folder"),
+        ]);
+        flow.url = url.into();
+        flow.folder_picker = true;
+        flow
+    }
+    pub fn callback(&self, request: &str) -> Result<Callback> {
         let mut parts = request
             .lines()
             .next()
@@ -202,14 +232,47 @@ impl Flow {
         if codes.len() != 1 || codes[0].1.is_empty() || codes[0].1.len() > 4096 {
             return Err("Google did not return a valid authorization code.".into());
         }
-        Ok(Zeroizing::new(codes[0].1.to_string()))
+        let picked = pairs
+            .iter()
+            .filter(|(k, _)| k == "picked_file_ids")
+            .collect::<Vec<_>>();
+        let picked = if self.folder_picker {
+            if picked.len() != 1 {
+                return Err("Select exactly one ContextDock folder in the Google picker.".into());
+            }
+            let ids = picked[0]
+                .1
+                .split(',')
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if ids.len() != 1
+                || ids.iter().any(|id| {
+                    id.is_empty()
+                        || id.len() > 256
+                        || !id
+                            .bytes()
+                            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+                })
+            {
+                return Err(
+                    "The Google picker did not return exactly one valid folder identity.".into(),
+                );
+            }
+            ids
+        } else {
+            vec![]
+        };
+        Ok(Callback {
+            code: Zeroizing::new(codes[0].1.to_string()),
+            picked,
+        })
     }
     pub fn wait(
         &self,
         listener: TcpListener,
         cancel: &AtomicBool,
         timeout: Duration,
-    ) -> Result<Zeroizing<String>> {
+    ) -> Result<Callback> {
         listener
             .set_nonblocking(true)
             .map_err(|_| "Could not listen for Google sign-in.")?;
@@ -234,7 +297,8 @@ impl Flow {
                             break;
                         }
                     }
-                    let result = self.callback(&String::from_utf8_lossy(&bytes));
+                    let request = String::from_utf8_lossy(&bytes);
+                    let result = self.callback(&request);
                     let (status, body) = if result.is_ok() {
                         ("200 OK", "Authorization received. Return to ContextDock to confirm the connection.")
                     } else {
@@ -245,7 +309,7 @@ impl Flow {
                     };
                     let _ = write!(stream, "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{body}", body.len());
                     // Ignore unrelated/stale callbacks without consuming the active flow.
-                    if result.is_ok() || result.as_ref().err().is_some_and(|e| e == DECLINED) {
+                    if result.is_ok() || self.matches_callback_state(&request) {
                         return result;
                     }
                 }
@@ -261,6 +325,28 @@ impl Flow {
             "Google sign-in timed out. Try connecting again."
         }
         .into())
+    }
+    fn matches_callback_state(&self, request: &str) -> bool {
+        let mut parts = request
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .split_whitespace();
+        if parts.next() != Some("GET") {
+            return false;
+        }
+        let path = parts.next().unwrap_or_default();
+        if !path.starts_with("/callback?") {
+            return false;
+        }
+        reqwest::Url::parse(&format!("http://127.0.0.1{path}")).is_ok_and(|url| {
+            let states = url
+                .query_pairs()
+                .filter(|(key, _)| key == "state")
+                .map(|(_, value)| value.into_owned())
+                .collect::<Vec<_>>();
+            states == [self.state.as_str()]
+        })
     }
 }
 pub fn challenge(verifier: &str) -> String {

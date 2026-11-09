@@ -64,7 +64,8 @@ export function GoogleDriveConnection() {
       if (alive.current) setAction("");
     }
   }
-  const connecting = action === "connect" || !!connection?.connecting;
+  const connecting =
+    action === "connect" || action === "pick_root" || !!connection?.connecting;
   const busy = !!action || !!connection?.connecting;
   return (
     <section
@@ -161,6 +162,19 @@ export function GoogleDriveConnection() {
           }
         >
           Test Drive connection
+        </button>
+        <button
+          disabled={busy || !connection?.connected}
+          onClick={() =>
+            void run(
+              "pick_root",
+              () => drive.action("pick_root"),
+              "Existing ContextDock folder authorized and saved.",
+              (c) => c.connected,
+            )
+          }
+        >
+          Choose existing ContextDock folder
         </button>
         <button
           disabled={busy || !connection?.connected}

@@ -338,3 +338,31 @@ fn drive_configure_does_not_replace_a_connected_account_or_accept_invalid_json()
     configure(&vault, encoded.as_bytes()).unwrap();
     assert!(vault.load().unwrap().unwrap().session.is_none());
 }
+
+#[test]
+fn drive_native_picker_requests_one_folder_and_validates_returned_identity() {
+    let flow = Flow::pick_folder(&config(), 12345);
+    let parsed = reqwest::Url::parse(&flow.url).unwrap();
+    let pairs = parsed
+        .query_pairs()
+        .collect::<std::collections::HashMap<_, _>>();
+    assert_eq!(pairs["trigger_onepick"], "true");
+    assert_eq!(pairs["scope"], SCOPE);
+    assert_eq!(pairs["allow_folder_selection"], "true");
+    assert_eq!(pairs["mimetypes"], "application/vnd.google-apps.folder");
+    let state = state(&flow);
+    let callback = flow
+        .callback(&format!(
+            "GET /callback?state={state}&code=secret-code&picked_file_ids=folder-one HTTP/1.1"
+        ))
+        .unwrap();
+    assert_eq!(callback.picked, ["folder-one"]);
+    assert!(!format!("{callback:?}").contains("secret-code"));
+    for ids in ["", "one,two", "../escape"] {
+        assert!(flow
+            .callback(&format!(
+                "GET /callback?state={state}&code=secret-code&picked_file_ids={ids} HTTP/1.1"
+            ))
+            .is_err());
+    }
+}

@@ -28,8 +28,13 @@ mod comparison_tests;
 mod desktop;
 #[cfg(test)]
 mod desktop_tests;
+mod drive_api;
 mod drive_auth;
 mod drive_commands;
+mod drive_publication_commands;
+mod drive_publish;
+#[cfg(test)]
+mod drive_publish_tests;
 #[cfg(test)]
 mod drive_tests;
 mod extraction;
@@ -471,6 +476,9 @@ pub fn run() {
             ));
             app.manage(Store(registry.clone()));
             app.manage(drive_commands::DriveRuntime::default());
+            app.manage(drive_publication_commands::Publisher::new(
+                dir.join("contextdock.db"),
+            ));
             app.manage(
                 ai_commands::Runtime::new(dir.join("contextdock.db"))
                     .map_err(std::io::Error::other)?,
@@ -501,6 +509,8 @@ pub fn run() {
             drive_commands::drive_status,
             drive_commands::drive_action,
             drive_commands::drive_cancel,
+            drive_publication_commands::drive_project_read,
+            drive_publication_commands::drive_project_action,
             desktop::desktop_read,
             desktop::desktop_setting,
             desktop::desktop_test_notification,
