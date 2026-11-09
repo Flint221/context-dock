@@ -30,8 +30,9 @@ same-file = "1"
 similar = "3.2.0"
 quick-xml = "0.42.0"
 zip = { version = "9.0.5", default-features = false, features = ["deflate"] }
-reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "multipart", "native-tls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "multipart", "native-tls", "form", "query"] }
 zeroize = "1.9.1"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"

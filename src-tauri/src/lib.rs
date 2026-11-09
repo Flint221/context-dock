@@ -28,6 +28,10 @@ mod comparison_tests;
 mod desktop;
 #[cfg(test)]
 mod desktop_tests;
+mod drive_auth;
+mod drive_commands;
+#[cfg(test)]
+mod drive_tests;
 mod extraction;
 mod folder_recovery;
 #[cfg(test)]
@@ -466,6 +470,7 @@ pub fn run() {
                 Registry::open(&dir.join("contextdock.db")).map_err(std::io::Error::other)?,
             ));
             app.manage(Store(registry.clone()));
+            app.manage(drive_commands::DriveRuntime::default());
             app.manage(
                 ai_commands::Runtime::new(dir.join("contextdock.db"))
                     .map_err(std::io::Error::other)?,
@@ -493,6 +498,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            drive_commands::drive_status,
+            drive_commands::drive_action,
+            drive_commands::drive_cancel,
             desktop::desktop_read,
             desktop::desktop_setting,
             desktop::desktop_test_notification,

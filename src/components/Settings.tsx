@@ -3,6 +3,7 @@ import type { Theme } from "../types";
 import { version } from "../../package.json";
 import { OpenAIConnection } from "./OpenAIConnection";
 import { DesktopSettings } from "./DesktopSettings";
+import { GoogleDriveConnection } from "./GoogleDriveConnection";
 export function SettingsView({
   theme,
   busy,
@@ -15,6 +16,7 @@ export function SettingsView({
   return (
     <>
       <DesktopSettings />
+      <GoogleDriveConnection />
       <OpenAIConnection />
       <section className="panel settings">
         <Moon size={23} />
