@@ -309,7 +309,7 @@ export function DrivePanel({ project }: { project: string }) {
               older versions of the same family can go to the Windows Recycle
               Bin. The newest local working file stays in place. Changed or
               ambiguous files are kept. Automatic recycling supports local fixed
-              NTFS drives.
+              NTFS and exFAT drives.
             </p>
             <p>
               Cleanup uses a guarded safety folder inside .contextdock/recycle.

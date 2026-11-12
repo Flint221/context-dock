@@ -3,7 +3,7 @@ use crate::{
     cloud,
     drive_api::DriveApi,
     drive_publish as publication, models,
-    recycle_bin::Bin,
+    recycle_bin::{Bin, Volume},
     registry::{error, Registry},
     storage,
 };
@@ -83,11 +83,19 @@ pub fn after_publication(
         return;
     }
     let result = run(r, p, a, doc, parent, api, &crate::recycle_bin::NativeBin);
-    if let Err(failure) = result {
-        let _ = r.db.execute(
-        "INSERT INTO drive_cleanup(project_id,error) VALUES(?1,?2) ON CONFLICT(project_id) DO UPDATE SET error=excluded.error",
-        params![p, failure],
-    );
+    match result {
+        Err(failure) => {
+            let _ = r.db.execute(
+                "INSERT INTO drive_cleanup(project_id,error) VALUES(?1,?2) ON CONFLICT(project_id) DO UPDATE SET error=excluded.error",
+                params![p, failure],
+            );
+        }
+        Ok(_) => {
+            let _ = r.db.execute(
+                "UPDATE drive_cleanup SET error=NULL WHERE project_id=?1 AND error='Automatic recycling requires NTFS. Older files stay in place.'",
+                [p],
+            );
+        }
     }
 }
 pub(crate) fn run(
@@ -147,7 +155,7 @@ pub(crate) fn run(
         }
         check(r, p, a, &c, api)?;
         let original = storage::checked(Path::new(&c.root), &old.relative, false)?;
-        bin.supported(&original.path)?;
+        let exfat = matches!(bin.volume(&original.path)?, Volume::Exfat);
         let mut file = storage::locked_read(&original.path, true)?;
         if storage::hash(&mut file)? != hash
             || file.metadata().map_err(|e| e.to_string())?.len() != old.size as u64
@@ -157,14 +165,14 @@ pub(crate) fn run(
                 old.name
             ));
         }
-        let identity = storage::file_identity(&file)?;
+        let recovery_identity = storage::recycle_identity(&file, exfat)?;
         let id = uuid::Uuid::new_v4().to_string();
         let safety_relative = format!(".contextdock/recycle/{id}/{}", old.name);
         let safety = storage::checked(Path::new(&c.root), &safety_relative, true)?;
         // The intent is durable before any rename. A crash after the rename
         // can restore the exact same identity without guessing or overwriting.
-        r.db.execute("INSERT INTO drive_recycle(id,project_id,document_id,source_id,root,relative,safety_relative,sha256,file_identity,generation,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,p,doc,old.id,c.root,old.relative,safety_relative,hash,identity,publication::generation(&c),models::now()]).map_err(error)?;
-        {
+        r.db.execute("INSERT INTO drive_recycle(id,project_id,document_id,source_id,root,relative,safety_relative,sha256,file_identity,generation,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,p,doc,old.id,c.root,old.relative,safety_relative,hash,recovery_identity,publication::generation(&c),models::now()]).map_err(error)?;
+        let moved_identity = {
             let tx = r.db.unchecked_transaction().map_err(error)?;
             // Acquire the write lock before checking the latest settings, so
             // an opt-out cannot be acknowledged before this guarded rename.
@@ -175,18 +183,22 @@ pub(crate) fn run(
             .map_err(error)?;
             check(r, p, a, &c, api)?;
             storage::rename_verified(&file, &safety.path)?;
+            let identity = storage::file_identity(&file)?;
             tx.execute(
                 "UPDATE drive_recycle SET state='quarantined' WHERE id=?1",
                 [&id],
             )
             .map_err(error)?;
             tx.commit().map_err(error)?;
-        }
+            identity
+        };
         drop(file);
         let operation = (|| {
             check(r, p, a, &c, api)?;
             let mut pinned = storage::locked_read(&safety.path, false)?;
-            if storage::file_identity(&pinned)? != identity || storage::hash(&mut pinned)? != hash {
+            if storage::file_identity(&pinned)? != moved_identity
+                || storage::hash(&mut pinned)? != hash
+            {
                 return Err("The safety copy changed. It was retained for review.".into());
             }
             drop(pinned);
@@ -240,10 +252,12 @@ fn restore(r: &Registry, id: &str) -> Result<()> {
     let original = storage::checked(Path::new(root), cloud::s(&row, "relative"), false)?;
     let safety = storage::checked(Path::new(root), cloud::s(&row, "safety_relative"), false)?;
     let identity = cloud::s(&row, "file_identity");
+    let exfat = identity.starts_with("exfat:");
     let hash = cloud::s(&row, "sha256");
     if safety.path.exists() {
         let mut file = storage::locked_read(&safety.path, true)?;
-        if storage::file_identity(&file)? != identity || storage::hash(&mut file)? != hash {
+        if storage::recycle_identity(&file, exfat)? != identity || storage::hash(&mut file)? != hash
+        {
             return Err("The safety file no longer matches. It was not moved or deleted.".into());
         }
         if original.path.exists() {
@@ -252,7 +266,8 @@ fn restore(r: &Registry, id: &str) -> Result<()> {
         storage::rename_verified(&file, &original.path)?;
     } else {
         let mut file=storage::locked_read(&original.path,false).map_err(|_|"The operation's final location is uncertain. Inspect the Windows Recycle Bin; no deletion was retried.".to_string())?;
-        if storage::file_identity(&file)? != identity || storage::hash(&mut file)? != hash {
+        if storage::recycle_identity(&file, exfat)? != identity || storage::hash(&mut file)? != hash
+        {
             return Err(
                 "The original path contains a different file. Nothing was overwritten.".into(),
             );

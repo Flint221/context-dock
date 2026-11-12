@@ -50,12 +50,11 @@ impl FakeBin {
     }
 }
 impl crate::recycle_bin::Bin for FakeBin {
-    fn supported(&self, _: &Path) -> Result<(), String> {
+    fn volume(&self, path: &Path) -> Result<crate::recycle_bin::Volume, String> {
         if self.unsupported {
-            Err("This test volume cannot recycle.".into())
-        } else {
-            Ok(())
+            return Err("This test volume cannot recycle.".into());
         }
+        crate::recycle_bin::NativeBin.volume(path)
     }
     fn recycle(&self, path: &Path, hash: &str) -> Result<String, String> {
         self.calls.set(self.calls.get() + 1);
@@ -215,13 +214,21 @@ fn drive_recycling_restart_restores_a_journaled_safety_file() {
     enable_recycling(&f);
     let mut bin = FakeBin::new(&f);
     bin.crash = true;
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleanup(&f, &bin))).is_err());
-    assert!(!f.root.join("ContextDock_Context_v1.md").exists());
-    f.registry = Registry::open(&f.db).unwrap();
-    assert_eq!(
-        fs::read(f.root.join("ContextDock_Context_v1.md")).unwrap(),
-        b"one"
+    let older = f.root.join("ContextDock_Context_v1.md");
+    let exfat = matches!(
+        crate::recycle_bin::Bin::volume(&bin, &older).unwrap(),
+        crate::recycle_bin::Volume::Exfat
     );
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| cleanup(&f, &bin))).is_err());
+    assert!(!older.exists());
+    let recovery_identity: String = f
+        .registry
+        .db
+        .query_row("SELECT file_identity FROM drive_recycle", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(recovery_identity.starts_with("exfat:"), exfat);
+    f.registry = Registry::open(&f.db).unwrap();
+    assert_eq!(fs::read(older).unwrap(), b"one");
     assert!(f.root.join("ContextDock_Context_v2.md").exists());
     assert_eq!(
         f.registry

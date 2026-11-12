@@ -1,12 +1,18 @@
 //! Recycling is an explicit Shell transfer, never DeleteFile/RemoveItem.
 use std::path::Path;
+
+pub enum Volume {
+    Ntfs,
+    Exfat,
+}
+
 pub trait Bin {
-    fn supported(&self, path: &Path) -> Result<(), String>;
+    fn volume(&self, path: &Path) -> Result<Volume, String>;
     fn recycle(&self, path: &Path, hash: &str) -> Result<String, String>;
 }
 pub struct NativeBin;
 impl Bin for NativeBin {
-    fn supported(&self, path: &Path) -> Result<(), String> {
+    fn volume(&self, path: &Path) -> Result<Volume, String> {
         #[cfg(windows)]
         {
             use std::os::windows::ffi::OsStrExt;
@@ -35,19 +41,20 @@ impl Bin for NativeBin {
                         filesystem.len() as u32,
                     ) == 0
                 {
-                    return Err("Automatic recycling requires a local fixed NTFS volume. Older files stay in place on this drive.".into());
+                    return Err("Automatic recycling requires a local fixed NTFS or exFAT drive. Older files stay in place on this drive.".into());
                 }
             }
-            if String::from_utf16_lossy(
+            let filesystem = String::from_utf16_lossy(
                 &filesystem[..filesystem
                     .iter()
                     .position(|c| *c == 0)
                     .unwrap_or(filesystem.len())],
-            ) != "NTFS"
-            {
-                return Err("Automatic recycling requires NTFS. Older files stay in place.".into());
+            );
+            match filesystem.as_str() {
+                "NTFS" => Ok(Volume::Ntfs),
+                "exFAT" => Ok(Volume::Exfat),
+                _ => Err("Automatic recycling supports NTFS and exFAT. Older files stay in place on this drive.".into()),
             }
-            Ok(())
         }
         #[cfg(not(windows))]
         {
@@ -56,7 +63,7 @@ impl Bin for NativeBin {
         }
     }
     fn recycle(&self, path: &Path, hash: &str) -> Result<String, String> {
-        self.supported(path)?;
+        self.volume(path)?;
         #[cfg(windows)]
         {
             let path = path.to_path_buf();
@@ -120,7 +127,6 @@ fn shell_recycle(path: &Path, hash: &str) -> Result<String, String> {
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
             .open(path)
             .map_err(|e| e.to_string())?;
-        let identity = crate::storage::file_identity(&pinned)?;
         if crate::scanner::is_link(path) || crate::storage::hash(&mut pinned)? != hash {
             return Err("The file changed before recycling. It was retained.".into());
         }
@@ -151,7 +157,7 @@ fn shell_recycle(path: &Path, hash: &str) -> Result<String, String> {
         let physical_path = physical_path?;
         let mut actual = crate::storage::locked_read(Path::new(&physical_path), false)?;
         if crate::storage::hash(&mut actual)? != hash
-            || crate::storage::file_identity(&actual)? != identity
+            || crate::storage::file_identity(&actual)? != crate::storage::file_identity(&pinned)?
         {
             return Err("The Recycle Bin receipt did not match the guarded file. Inspect it before further cleanup.".into());
         }
@@ -171,7 +177,7 @@ fn windows_recycles_one_disposable_file_without_permanent_delete_fallback() {
     std::fs::write(&path, "Disposable ContextDock recycle acceptance marker.").unwrap();
     let hash =
         crate::storage::hash(&mut crate::storage::locked_read(&path, false).unwrap()).unwrap();
-    NativeBin.supported(&path).unwrap();
+    NativeBin.volume(&path).unwrap();
     let receipt = NativeBin.recycle(&path, &hash).unwrap();
     assert!(!path.exists());
     assert!(!receipt.is_empty());

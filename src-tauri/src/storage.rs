@@ -507,7 +507,9 @@ pub fn cleanup_archive_temp(root: &Path, temp_relative: &str, dest_relative: &st
     }
 }
 #[cfg(windows)]
-pub fn file_identity(file: &File) -> Result<String> {
+fn windows_file_information(
+    file: &File,
+) -> Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
         GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
@@ -517,12 +519,39 @@ pub fn file_identity(file: &File) -> Result<String> {
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), info.as_mut_ptr()) } == 0 {
         return Err(io(std::io::Error::last_os_error()));
     }
-    let info = unsafe { info.assume_init() };
+    Ok(unsafe { info.assume_init() })
+}
+
+#[cfg(windows)]
+pub fn file_identity(file: &File) -> Result<String> {
+    let info = windows_file_information(file)?;
     Ok(format!(
         "{}:{}:{}",
         info.dwVolumeSerialNumber, info.nFileIndexHigh, info.nFileIndexLow
     ))
 }
+
+/// exFAT file IDs change across directory moves. The cleanup journal combines
+/// this volume and timestamp fingerprint with a SHA-256 check during recovery.
+pub fn recycle_identity(file: &File, exfat: bool) -> Result<String> {
+    #[cfg(windows)]
+    if exfat {
+        let info = windows_file_information(file)?;
+        let filetime = |time: windows_sys::Win32::Foundation::FILETIME| {
+            (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime)
+        };
+        return Ok(format!(
+            "exfat:{}:{}:{}",
+            info.dwVolumeSerialNumber,
+            filetime(info.ftCreationTime),
+            filetime(info.ftLastWriteTime)
+        ));
+    }
+    #[cfg(not(windows))]
+    let _ = exfat;
+    file_identity(file)
+}
+
 #[cfg(unix)]
 pub fn file_identity(file: &File) -> Result<String> {
     use std::os::unix::fs::MetadataExt;
