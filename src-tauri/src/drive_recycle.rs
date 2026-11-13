@@ -169,6 +169,10 @@ pub(crate) fn run(
         let id = uuid::Uuid::new_v4().to_string();
         let safety_relative = format!(".contextdock/recycle/{id}/{}", old.name);
         let safety = storage::checked(Path::new(&c.root), &safety_relative, true)?;
+        #[cfg(windows)]
+        // The checked path pins the staging directory while its attributes
+        // are updated. Appearance in Explorer is independent of recycling.
+        hide_staging_folder(&Path::new(&c.root).join(".contextdock"));
         // The intent is durable before any rename. A crash after the rename
         // can restore the exact same identity without guessing or overwriting.
         r.db.execute("INSERT INTO drive_recycle(id,project_id,document_id,source_id,root,relative,safety_relative,sha256,file_identity,generation,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![id,p,doc,old.id,c.root,old.relative,safety_relative,hash,recovery_identity,publication::generation(&c),models::now()]).map_err(error)?;
@@ -237,6 +241,24 @@ pub(crate) fn run(
     }
     Ok(count)
 }
+
+#[cfg(windows)]
+fn hide_staging_folder(path: &Path) {
+    use std::os::windows::{ffi::OsStrExt, fs::MetadataExt};
+    use windows_sys::Win32::Storage::FileSystem::{SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN};
+
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    let attributes = metadata.file_attributes();
+    if attributes & FILE_ATTRIBUTE_HIDDEN != 0 {
+        return;
+    }
+    let name: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // The checked path keeps this directory open and rejects reparse points.
+    unsafe { SetFileAttributesW(name.as_ptr(), attributes | FILE_ATTRIBUTE_HIDDEN) };
+}
+
 fn restore(r: &Registry, id: &str) -> Result<()> {
     let row = cloud::rows(&r.db, "SELECT * FROM drive_recycle WHERE id=?1", &[&id])?
         .into_iter()

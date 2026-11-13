@@ -115,6 +115,16 @@ fn drive_recycling_is_opt_in_and_keeps_the_newest_local_file() {
     enable_recycling(&f);
     assert_eq!(cleanup(&f, &bin).unwrap(), 1);
     assert!(!f.root.join("ContextDock_Context_v1.md").exists());
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_HIDDEN;
+
+        let staging = fs::metadata(f.root.join(".contextdock")).unwrap();
+        assert_ne!(staging.file_attributes() & FILE_ATTRIBUTE_HIDDEN, 0);
+        let project = fs::metadata(&f.root).unwrap();
+        assert_eq!(project.file_attributes() & FILE_ATTRIBUTE_HIDDEN, 0);
+    }
     assert_eq!(
         fs::read_to_string(f.root.join("ContextDock_Context_v2.md")).unwrap(),
         "two"
