@@ -142,6 +142,30 @@ fn drive_recycling_is_opt_in_and_keeps_the_newest_local_file() {
     assert_eq!(bin.calls.get(), 1);
 }
 #[test]
+fn same_name_edit_replaces_drive_file_and_skips_cleanup_without_older_versions() {
+    let name = "ContextDock_Context_v10.md";
+    let mut f = Fixture::new(&[(name, b"first link")]);
+    enable_recycling(&f);
+    let original = f.saved();
+    fs::write(f.root.join(name), b"updated link").unwrap();
+    f.reconcile();
+    f.run().unwrap();
+    let updated = f.saved();
+    assert_eq!(updated.file_id, original.file_id);
+    assert_eq!(updated.verified_name.as_deref(), Some(name));
+    assert_ne!(updated.verified_hash, original.verified_hash);
+
+    // An extra cleanup verification would fail against this changed remote.
+    f.api
+        .files
+        .borrow_mut()
+        .get_mut(&updated.file_id)
+        .unwrap()
+        .1 = b"unexpected".to_vec();
+    assert_eq!(cleanup(&f, &FakeBin::new(&f)).unwrap(), 0);
+    assert_eq!(f.saved().state, "synced");
+}
+#[test]
 fn drive_recycling_requires_a_fresh_matching_cloud_readback() {
     let f = Fixture::new(&[
         ("ContextDock_Context_v1.md", b"one"),

@@ -255,16 +255,22 @@ pub async fn drive_project_action(
         };
         if action=="create_root" {return Ok(());}
         let mut problems=vec![];
+        let mut cleanup_succeeded = true;
         for document in documents {
             let current=match drive_publish::current(&registry.db,&id,&document) {Ok(c)=>c,Err(e)=>{problems.push(e.message);continue;}};
             let client=api(path.clone(),id.clone(),account.clone(),Some((document.clone(),drive_publish::generation(&current))),zeroize::Zeroizing::new(access.to_string()),stop.clone()).map_err(|e|e.message)?;
             if let Err(e)=drive_publish::publish(&registry,&id,&account,&document,&destination,&client) {
                 record_error(&registry,&id,Some(&document),&e)?;problems.push(e.message);
             } else {
-                crate::drive_recycle::after_publication(&registry,&id,&account,&document,&destination,&client);
+                cleanup_succeeded &= crate::drive_recycle::after_publication(&registry,&id,&account,&document,&destination,&client);
             }
         }
         if !problems.is_empty() {return Err(problems.join(" "));}
+        if cleanup_succeeded {
+            // A full successful pass supersedes stale cleanup warnings. Any
+            // interrupted file move is still reported from its own journal.
+            registry.db.execute("UPDATE drive_cleanup SET error=NULL WHERE project_id=?1 AND error IS NOT NULL",[&id]).map_err(error)?;
+        }
         let publications=drive_publish::publications(&registry.db,&id).map_err(|e|e.message)?;
         let pending=drive_publish::eligible_documents(&registry.db,&id).map_err(|e|e.message)?.iter().any(|document|publications.iter().all(|row|&row.document_id!=document||row.state!="synced"));
         registry.db.execute("UPDATE drive_projects SET requested=?2,attempts=0,next_at=0,error=NULL WHERE project_id=?1",params![id,pending]).map_err(error)?;

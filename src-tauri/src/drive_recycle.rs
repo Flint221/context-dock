@@ -78,10 +78,7 @@ pub fn after_publication(
     doc: &str,
     parent: &str,
     api: &dyn DriveApi,
-) {
-    if !opted_in(&r.db, p).unwrap_or(false) {
-        return;
-    }
+) -> bool {
     let result = run(r, p, a, doc, parent, api, &crate::recycle_bin::NativeBin);
     match result {
         Err(failure) => {
@@ -89,12 +86,14 @@ pub fn after_publication(
                 "INSERT INTO drive_cleanup(project_id,error) VALUES(?1,?2) ON CONFLICT(project_id) DO UPDATE SET error=excluded.error",
                 params![p, failure],
             );
+            false
         }
         Ok(_) => {
             let _ = r.db.execute(
                 "UPDATE drive_cleanup SET error=NULL WHERE project_id=?1 AND error='Automatic recycling requires NTFS. Older files stay in place.'",
                 [p],
             );
+            true
         }
     }
 }
@@ -110,18 +109,11 @@ pub(crate) fn run(
     if !opted_in(&r.db, p)? {
         return Ok(0);
     }
-    let c = publication::verify_for_cleanup(r, p, a, doc, parent, api).map_err(|e| e.message)?;
+    let c = publication::current(&r.db, p, doc).map_err(|e| e.message)?;
     let Some(latest_order) = crate::matching::version_order(&c.name) else {
         return Ok(0);
     };
-    check(r, p, a, &c, api)?;
-    let latest_path = storage::checked(Path::new(&c.root), &c.relative, false)?;
-    // Pin the newest file without write/delete sharing throughout cleanup.
-    let mut latest = storage::locked_read(&latest_path.path, false)?;
-    if storage::hash(&mut latest)? != c.hash {
-        return Err("The newest local file changed. Older files stay in place.".into());
-    }
-    let mut count = 0;
+    let mut candidates = Vec::new();
     for source in r.source_ids(p)? {
         let old = r.source(&source)?;
         if old.document_id != doc
@@ -153,6 +145,23 @@ pub(crate) fn run(
         if attempted {
             continue;
         }
+        candidates.push(old);
+    }
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    publication::verify_for_cleanup(r, p, a, &c, parent, api).map_err(|e| e.message)?;
+    check(r, p, a, &c, api)?;
+    let latest_path = storage::checked(Path::new(&c.root), &c.relative, false)?;
+    // Pin the newest file without write/delete sharing throughout cleanup.
+    let mut latest = storage::locked_read(&latest_path.path, false)?;
+    if storage::hash(&mut latest)? != c.hash {
+        return Err("The newest local file changed. Older files stay in place.".into());
+    }
+    let mut count = 0;
+    for old in candidates {
+        let hash = old.last_hash.as_deref().unwrap();
         check(r, p, a, &c, api)?;
         let original = storage::checked(Path::new(&c.root), &old.relative, false)?;
         let exfat = matches!(bin.volume(&original.path)?, Volume::Exfat);
