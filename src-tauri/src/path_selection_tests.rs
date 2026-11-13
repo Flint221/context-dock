@@ -146,6 +146,52 @@ fn exclusions_cover_nested_future_files_persist_and_reinclude_without_losing_his
     );
 }
 #[test]
+fn deleted_empty_folder_leaves_the_tree_but_keeps_its_saved_exclusion() {
+    let t = tempdir().unwrap();
+    let root = t.path().join("project");
+    fs::create_dir_all(root.join("Empty")).unwrap();
+    fs::create_dir_all(root.join("Documents")).unwrap();
+    let doc = root.join("Documents/Report_v1.md");
+    fs::write(&doc, "tracked report").unwrap();
+    let app = t.path().join("app");
+    fs::create_dir(&app).unwrap();
+    let mut r = Registry::open(&app.join("registry.db")).unwrap();
+    let id = r.add("Project", root.to_str().unwrap()).unwrap();
+    r.configure_tracking(&id, true, false, vec![]).unwrap();
+    let view = r.path_selection(&id).unwrap();
+    assert!(view
+        .entries
+        .iter()
+        .any(|e| e.path == "Empty" && e.kind == "folder"));
+    r.save_path_selection(&id, view.revision, vec![folder("Empty")])
+        .unwrap();
+
+    fs::remove_dir(root.join("Empty")).unwrap();
+    fs::remove_file(doc).unwrap();
+    fs::remove_dir(root.join("Documents")).unwrap();
+    let view = r.path_selection(&id).unwrap();
+    assert!(!view
+        .entries
+        .iter()
+        .any(|e| e.path.eq_ignore_ascii_case("Empty")));
+    assert!(view
+        .entries
+        .iter()
+        .any(|e| e.path == "Documents/Report_v1.md" && e.kind == "file" && e.status == "missing"));
+    assert_eq!(view.exclusions, vec![folder("empty")]);
+
+    fs::create_dir(root.join("Empty")).unwrap();
+    let view = r.path_selection(&id).unwrap();
+    assert!(view
+        .entries
+        .iter()
+        .any(|e| e.path == "Empty" && e.status == "available"));
+    assert!(!path_selection::permits(
+        &view.exclusions,
+        "Empty/future.md"
+    ));
+}
+#[test]
 fn invalid_stale_and_unverified_rule_writes_roll_back() {
     let t = tempdir().unwrap();
     fs::create_dir(t.path().join("p")).unwrap();

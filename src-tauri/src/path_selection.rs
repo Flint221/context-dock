@@ -182,9 +182,10 @@ impl Registry {
             );
         }
         for rule in &exclusions {
-            // File rows above are authoritative. Retained exclusions can outlive
-            // a forgotten or relocated path without making it a missing file.
-            if latest && rule.kind == "file" {
+            // Keep folder exclusions for future files. Only the scanner adds
+            // directory entries, since an exclusion is not a tracked folder.
+            // In latest mode, the source rows also own file visibility.
+            if rule.kind == "folder" || latest {
                 continue;
             }
             entries.entry(rule.path.clone()).or_insert_with(|| Entry {
