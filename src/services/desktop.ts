@@ -91,8 +91,10 @@ export const desktop = {
   exit: async (action = "close") => {
     if (isTauri()) await invoke("desktop_complete", { action });
   },
-  pending: () =>
-    isTauri() ? invoke<PendingFile[]>("pending_read") : Promise.resolve([]),
+  pending: (refresh = false) =>
+    isTauri()
+      ? invoke<PendingFile[]>("pending_read", { refresh })
+      : Promise.resolve([]),
   preview: (request: ReviewRequest) =>
     invoke<ReviewPlan>("pending_preview", { request }),
   apply: (request: ReviewRequest, token: string) =>

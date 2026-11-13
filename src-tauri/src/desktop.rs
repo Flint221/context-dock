@@ -676,8 +676,23 @@ pub async fn desktop_complete(
     Ok(())
 }
 #[tauri::command]
-pub async fn pending_read(state: tauri::State<'_, Store>) -> Result<Vec<review::PendingFile>> {
-    crate::work(state.inner().clone(), |r| review::pending(&r.db)).await
+pub async fn pending_read(
+    state: tauri::State<'_, Store>,
+    app: tauri::AppHandle,
+    refresh: Option<bool>,
+) -> Result<Vec<review::PendingFile>> {
+    let refresh = refresh.unwrap_or(false);
+    let files = crate::work(state.inner().clone(), move |r| {
+        if refresh {
+            r.refresh_folders()?;
+        }
+        review::pending(&r.db)
+    })
+    .await?;
+    if refresh {
+        let _ = app.emit("desktop-changed", ());
+    }
+    Ok(files)
 }
 #[tauri::command]
 pub async fn pending_preview(

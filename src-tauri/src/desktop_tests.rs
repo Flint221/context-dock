@@ -262,7 +262,7 @@ fn review_refuses_changed_files_stale_rules_excluded_folders_and_removed_project
     assert!(review::preview(&f.r, &req).is_err());
 }
 #[test]
-fn untracked_approval_does_not_enable_tracking_and_missing_sources_are_not_approved() {
+fn untracked_approval_does_not_enable_tracking() {
     let mut f = Fixture::new();
     f.add("New.md");
     f.r.configure_tracking(&f.id, false, false, vec![]).unwrap();
@@ -270,12 +270,52 @@ fn untracked_approval_does_not_enable_tracking_and_missing_sources_are_not_appro
     let p = review::preview(&f.r, &req).unwrap();
     review::apply(&mut f.r, &req, p["token"].as_str().unwrap()).unwrap();
     assert!(!f.r.snapshot().unwrap().projects[0].tracking_enabled);
-    f.add("Missing.md");
-    fs::remove_file(f.root.join("Missing.md")).unwrap();
-    f.r.refresh(&f.id).unwrap();
-    assert!(review::preview(&f.r, &f.request("Missing.md", "approve"))
-        .unwrap_err()
-        .contains("Restore"));
+}
+#[test]
+fn removed_pending_files_return_for_approval_and_only_tracked_files_show_missing() {
+    let mut f = Fixture::new();
+    review::set_preference(&f.r.db, "workflow.latest_only", true).unwrap();
+    let draft = "Meeting Materials/ContextDock_Draft_v1.docx";
+    let tracked = "Existing_v1.md";
+    f.add(draft);
+    let approve = f.request(draft, "approve");
+    let ignore = f.request(draft, "ignore");
+    let approval = review::preview(&f.r, &approve).unwrap();
+    let ignoring = review::preview(&f.r, &ignore).unwrap();
+
+    fs::remove_file(f.root.join(draft)).unwrap();
+    // A stale selection must be rejected even before the watcher sees the move.
+    assert!(review::apply(&mut f.r, &ignore, cloud::s(&ignoring, "token")).is_err());
+    assert!(review::apply(&mut f.r, &approve, cloud::s(&approval, "token")).is_err());
+    fs::remove_file(f.root.join(tracked)).unwrap();
+    f.r.refresh_folders().unwrap();
+
+    assert!(review::pending(&f.r.db).unwrap().is_empty());
+    assert!(review::preview(&f.r, &ignore).is_err());
+    assert!(f.r.preview_forget(&f.id, draft).is_err());
+    let snapshot = f.r.snapshot().unwrap();
+    assert_eq!(snapshot.projects[0].document_count, 1);
+    assert_eq!(snapshot.documents[0].name, tracked);
+    assert_eq!(snapshot.documents[0].status, "missing");
+    let paths = f.r.path_selection(&f.id).unwrap();
+    assert!(paths.entries.iter().all(|entry| entry.path != draft));
+    assert!(paths
+        .entries
+        .iter()
+        .any(|entry| entry.path == tracked && entry.status == "missing"));
+    let target = f.root.parent().unwrap().join("Replacement");
+    fs::create_dir(&target).unwrap();
+    let plan = f.r.folder_plan(&f.id, target.to_str().unwrap()).unwrap();
+    assert_eq!(plan.missing, vec![tracked]);
+
+    fs::write(f.root.join(draft), "returned document").unwrap();
+    f.r.refresh_folders().unwrap();
+    let pending = review::pending(&f.r.db).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].path, draft);
+    assert!(!path_selection::allowed(&f.r.db, &f.id, draft).unwrap());
+    assert!(review::apply(&mut f.r, &ignore, cloud::s(&ignoring, "token")).is_err());
+    assert!(review::preview(&f.r, &approve).is_ok());
 }
 #[test]
 fn new_approved_family_versions_are_not_pending_but_unrelated_documents_are() {

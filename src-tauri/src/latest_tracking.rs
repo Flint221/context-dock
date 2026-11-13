@@ -193,7 +193,7 @@ impl Registry {
         Ok(())
     }
     fn latest_source(&self, project: &str, path: &str) -> Result<serde_json::Value> {
-        let sources=crate::cloud::rows(&self.db,"SELECT id,document_id,relative_path,status,last_hash FROM source_files WHERE project_id=?1",&[&project])?;
+        let sources=crate::cloud::rows(&self.db,"SELECT id,document_id,relative_path,status,disposition,last_hash FROM source_files WHERE project_id=?1",&[&project])?;
         let sources = sources
             .into_iter()
             .filter(|s| {
@@ -216,6 +216,9 @@ impl Registry {
         let source = self.latest_source(project, &path)?;
         if crate::cloud::s(&source, "status") != "missing" {
             return Err("Only a confirmed missing file can stop being tracked here. Present or inaccessible files are kept.".into());
+        }
+        if !["tracked", "superseded"].contains(&crate::cloud::s(&source, "disposition")) {
+            return Err("Only a tracked file can be forgotten here.".into());
         }
         let revision = crate::path_selection::revision(&self.db, project)?;
         let folder_revision: i64 = self

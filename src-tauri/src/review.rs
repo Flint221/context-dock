@@ -21,7 +21,9 @@ pub struct PendingFile {
     pub modified: Option<String>,
 }
 pub fn pending(db: &Connection) -> Result<Vec<PendingFile>> {
-    let rows=cloud::rows(db,"SELECT p.id project_id,p.name project_name,s.relative_path path,s.kind,s.size,s.status,s.modified_at modified FROM new_paths n JOIN projects p ON p.id=n.project_id JOIN source_files s ON s.project_id=n.project_id AND lower(replace(s.relative_path,char(92),'/'))=n.path WHERE p.removed_at IS NULL AND s.status!='archived' ORDER BY p.name,s.relative_path",&[])?;
+    // Keep the discovery marker and its default exclusion so a returning file
+    // still needs review. Only available files belong in the inbox.
+    let rows=cloud::rows(db,"SELECT p.id project_id,p.name project_name,s.relative_path path,s.kind,s.size,s.status,s.modified_at modified FROM new_paths n JOIN projects p ON p.id=n.project_id JOIN source_files s ON s.project_id=n.project_id AND lower(replace(s.relative_path,char(92),'/'))=n.path WHERE p.removed_at IS NULL AND s.status='available' ORDER BY p.name,s.relative_path",&[])?;
     let mut entries = vec![];
     let mut folder_rules = std::collections::HashMap::<String, Vec<Rule>>::new();
     for row in rows {
@@ -74,17 +76,21 @@ pub fn preview(r: &Registry, request: &ReviewRequest) -> Result<Value> {
         .collect::<Vec<_>>();
     paths.sort();
     paths.dedup();
+    let root = r.path(&request.project)?;
+    crate::folder_recovery::require_ready(&r.db, &request.project)?;
     for path in &paths {
         let row = rows
             .iter()
             .find(|e| path_selection::normalized(&e.path) == *path)
             .ok_or("The pending files changed. Reload the inbox and review again.")?;
-        if request.action == "approve" && row.status != "available" {
-            return Err("Restore missing or inaccessible files before approving them.".into());
+        let present = crate::storage::checked(std::path::Path::new(&root), &row.path, false)
+            .and_then(|checked| std::fs::metadata(checked.path).map_err(|e| e.to_string()))
+            .is_ok_and(|metadata| metadata.is_file());
+        if !present {
+            return Err("The pending files changed. Refresh the inbox and review again.".into());
         }
     }
     let project=cloud::rows(&r.db,"SELECT name,folder_revision,folder_state,tracking_enabled FROM projects WHERE id=?1 AND removed_at IS NULL",&[&request.project])?.pop().ok_or("Project is no longer registered.")?;
-    crate::folder_recovery::require_ready(&r.db, &request.project)?;
     let revision = path_selection::revision(&r.db, &request.project)?;
     let latest = crate::latest_tracking::enabled(&r.db);
     let policy = if latest {

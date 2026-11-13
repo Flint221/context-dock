@@ -215,7 +215,8 @@ impl Registry {
         let mut changed = 0;
         let mut missing = vec![];
         let mut observed = vec![];
-        for (_, relative, hash, _, _) in &known {
+        let latest = crate::latest_tracking::enabled(&self.db);
+        for (_, relative, hash, disposition, _) in &known {
             if let Some(f) = files.get(&models::key(relative)) {
                 let checked = storage::checked(root, &f.relative, false)?;
                 let mut file = storage::locked_read(&checked.path, false)?;
@@ -229,7 +230,7 @@ impl Registry {
                 }
                 found += 1;
                 observed.push(serde_json::json!([f.relative, f.size, f.modified, actual]));
-            } else {
+            } else if !latest || disposition == "tracked" {
                 missing.push(relative.clone());
             }
         }

@@ -111,7 +111,7 @@ impl Registry {
         for family in &mut families {
             family.version_count = crate::versioning::heads(&self.db, &family.id)?.len() as i64;
         }
-        let mut q=self.db.prepare("SELECT id,document_id,name,relative_path,status,disposition FROM source_files WHERE project_id=?1 AND status!='archived' AND NOT(?2 AND status='missing' AND disposition='renamed') ORDER BY relative_path COLLATE NOCASE").map_err(error)?;
+        let mut q=self.db.prepare("SELECT id,document_id,name,relative_path,status,disposition FROM source_files WHERE project_id=?1 AND status!='archived' AND NOT(?2 AND status='missing' AND disposition NOT IN ('tracked','superseded')) ORDER BY relative_path COLLATE NOCASE").map_err(error)?;
         let sources = q
             .query_map(
                 rusqlite::params![project, crate::latest_tracking::enabled(&self.db)],

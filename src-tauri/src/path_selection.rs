@@ -168,7 +168,7 @@ impl Registry {
             );
         }
         let latest = crate::latest_tracking::enabled(&self.db);
-        let sources=cloud::rows(&self.db,"SELECT s.relative_path,s.status,EXISTS(SELECT 1 FROM new_paths n WHERE n.project_id=s.project_id AND n.path=lower(replace(s.relative_path,char(92),'/'))) is_new FROM source_files s WHERE s.project_id=?1 AND s.status!='archived' AND NOT(?2 AND s.status='missing' AND s.disposition IN ('ignored','renamed'))",&[&project,&latest])?;
+        let sources=cloud::rows(&self.db,"SELECT s.relative_path,s.status,EXISTS(SELECT 1 FROM new_paths n WHERE n.project_id=s.project_id AND n.path=lower(replace(s.relative_path,char(92),'/'))) is_new FROM source_files s WHERE s.project_id=?1 AND s.status!='archived' AND NOT(?2 AND s.status='missing' AND s.disposition NOT IN ('tracked','superseded'))",&[&project,&latest])?;
         for s in sources {
             let path = cloud::s(&s, "relative_path").replace('\\', "/");
             entries.insert(

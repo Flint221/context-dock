@@ -68,8 +68,8 @@ export function PendingApprovals({
   const groups = Array.from(new Set(files.map((f) => f.projectId))).sort(
     (a, b) => (a === project ? -1 : b === project ? 1 : 0),
   );
-  async function reload() {
-    const next = await desktop.pending();
+  async function reload(refresh = false) {
+    const next = await desktop.pending(refresh);
     setFiles(next);
     setSelected((prev) =>
       prev.filter((key) =>
@@ -144,7 +144,10 @@ export function PendingApprovals({
         </span>
         <button
           disabled={busy}
-          onClick={() => void reload().catch((e) => setError(String(e)))}
+          onClick={() => {
+            setError("");
+            void reload(true).catch((e) => setError(String(e)));
+          }}
         >
           <RefreshCw size={16} />
           Refresh inbox
